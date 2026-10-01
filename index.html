@@ -16,14 +16,28 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Sabedoria <span>Meditativa</span></h1>
-    <button id="installBtn" class="chip" hidden>Instalar app</button>
+    <h1 id="appName">Sabedoria <span>Meditativa</span></h1>
+    <div class="top-actions">
+      <button id="installBtn" class="chip" hidden>Instalar app</button>
+      <button id="premiumBtn" class="chip premium-chip">✨ Premium</button>
+    </div>
   </header>
 
   <main>
     <!-- ============ MEDITAR ============ -->
     <section id="tab-meditar" class="tab active" aria-labelledby="nav-meditar">
       <div id="meditarSetup">
+        <div class="program">
+          <div class="program-head">
+            <div>
+              <small class="muted">Jornada</small>
+              <h2 id="programTitle"></h2>
+            </div>
+            <span id="programProgress" class="program-progress"></span>
+          </div>
+          <div id="programDays" class="program-days"></div>
+        </div>
+
         <h2>Meditações guiadas</h2>
         <div id="guidedList" class="cards"></div>
 
@@ -118,6 +132,14 @@
     </section>
   </main>
 
+  <!-- Janela (assinatura / introdução do dia da jornada) -->
+  <div id="sheet" class="sheet-backdrop" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <button id="sheetClose" class="sheet-close" aria-label="Fechar">✕</button>
+      <div id="sheetBody"></div>
+    </div>
+  </div>
+
   <nav class="tabbar">
     <button id="nav-meditar" data-tab="meditar" class="active"><span>🧘</span>Meditar</button>
     <button id="nav-respirar" data-tab="respirar"><span>🌬️</span>Respirar</button>
@@ -125,6 +147,8 @@
     <button id="nav-progresso" data-tab="progresso"><span>📈</span>Progresso</button>
   </nav>
 
+  <script src="config.js"></script>
+  <script src="conteudo.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

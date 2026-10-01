@@ -1,10 +1,13 @@
-// Service worker: guarda os arquivos do app para funcionar sem internet.
-// Ao mudar qualquer arquivo, aumente a versão para os usuários receberem a atualização.
-const CACHE = 'sabedoria-v1';
+// Service worker: permite usar o app sem internet.
+// Estratégia "rede primeiro": com internet, sempre busca a versão mais nova
+// (importante para novos códigos premium no config.js); sem internet, usa a cópia salva.
+const CACHE = 'sabedoria-v2';
 const FILES = [
   './',
   'index.html',
   'styles.css',
+  'config.js',
+  'conteudo.js',
   'app.js',
   'manifest.webmanifest',
   'icons/icon.svg',
@@ -25,8 +28,19 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
+  const { request } = event;
+  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(request)
+      .then((response) => {
+        // Guarda uma cópia (inclusive dos áudios gravados, depois de tocados uma vez)
+        if (response.status === 200) {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(request, { ignoreSearch: true })
+        .then((cached) => cached || (request.mode === 'navigate' ? caches.match('./') : Response.error())))
   );
 });

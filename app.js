@@ -1,114 +1,5 @@
 'use strict';
 
-/* =========================================================
- * Conteúdo: meditações guiadas
- * Cada passo: [segundo em que aparece, texto]
- * ========================================================= */
-const GUIDED = [
-  {
-    id: 'respiracao',
-    emoji: '🌿',
-    title: 'Respiração consciente',
-    minutes: 5,
-    ambient: 'riacho',
-    steps: [
-      [0, 'Sente-se confortavelmente e feche os olhos com suavidade.'],
-      [15, 'Leve a atenção para a respiração. Não tente mudá-la, apenas observe.'],
-      [45, 'Perceba o ar entrando pelas narinas... e saindo.'],
-      [90, 'Se a mente se distrair, tudo bem. Gentilmente, volte para a respiração.'],
-      [150, 'Sinta o abdômen subir na inspiração e descer na expiração.'],
-      [210, 'Cada respiração é um novo começo. Permaneça aqui, presente.'],
-      [270, 'Comece a perceber os sons ao redor e o corpo apoiado.'],
-      [290, 'Quando estiver pronto, abra os olhos devagar.'],
-    ],
-  },
-  {
-    id: 'corpo',
-    emoji: '🌊',
-    title: 'Escaneamento corporal',
-    minutes: 10,
-    ambient: 'oceano',
-    steps: [
-      [0, 'Deite-se ou sente-se de forma confortável. Feche os olhos.'],
-      [20, 'Respire fundo três vezes, soltando o ar devagar.'],
-      [50, 'Leve a atenção aos pés. Note qualquer sensação: calor, frio, formigamento.'],
-      [110, 'Suba para as pernas e joelhos. Deixe que relaxem.'],
-      [170, 'Agora o quadril e a região lombar. Solte qualquer tensão.'],
-      [230, 'Perceba o abdômen e o peito se movendo com a respiração.'],
-      [290, 'Leve a atenção para as mãos, os braços e os ombros. Deixe os ombros caírem.'],
-      [360, 'Relaxe o pescoço, a mandíbula, a testa e os olhos.'],
-      [430, 'Sinta o corpo inteiro, como um todo, respirando.'],
-      [520, 'Descanse nessa sensação de calma.'],
-      [575, 'Mexa suavemente os dedos e, quando quiser, abra os olhos.'],
-    ],
-  },
-  {
-    id: 'gratidao',
-    emoji: '🌻',
-    title: 'Gratidão',
-    minutes: 5,
-    ambient: 'tigela',
-    steps: [
-      [0, 'Feche os olhos e faça uma respiração profunda.'],
-      [20, 'Pense em algo simples pelo qual você é grato hoje.'],
-      [70, 'Sinta essa gratidão no peito, como um calor suave.'],
-      [120, 'Agora pense em uma pessoa que faz bem para você.'],
-      [170, 'Envie mentalmente um agradecimento a ela.'],
-      [220, 'Agradeça também a si mesmo, por reservar este momento.'],
-      [280, 'Respire fundo e abra os olhos, levando essa sensação para o seu dia.'],
-    ],
-  },
-  {
-    id: 'ansiedade',
-    emoji: '🍃',
-    title: 'Alívio da ansiedade',
-    minutes: 7,
-    ambient: 'chuva',
-    steps: [
-      [0, 'Encontre uma posição confortável. Você está seguro aqui.'],
-      [15, 'Inspire contando até quatro... e expire contando até seis.'],
-      [60, 'Continue nesse ritmo. Expirar mais longo acalma o corpo.'],
-      [110, 'Perceba cinco coisas que você sente: os pés no chão, as mãos, a roupa na pele...'],
-      [180, 'Os pensamentos são como nuvens. Deixe-os passar, sem se prender.'],
-      [250, 'Diga a si mesmo, em silêncio: “Eu estou aqui. Eu estou bem.”'],
-      [320, 'Continue respirando devagar, sentindo o corpo mais leve.'],
-      [400, 'Quando estiver pronto, volte devagar e abra os olhos.'],
-    ],
-  },
-  {
-    id: 'dormir',
-    emoji: '🌙',
-    title: 'Para dormir',
-    minutes: 10,
-    ambient: 'marrom',
-    steps: [
-      [0, 'Deite-se e deixe o corpo pesar sobre a cama.'],
-      [20, 'Solte o ar devagar, como um longo suspiro.'],
-      [60, 'Imagine cada parte do corpo ficando pesada e quente.'],
-      [140, 'Os pés... as pernas... o quadril... tudo afundando no colchão.'],
-      [220, 'Os braços pesados... os ombros soltos... o rosto relaxado.'],
-      [320, 'Não há nada para fazer agora. Só descansar.'],
-      [420, 'Deixe a respiração ficar lenta e natural.'],
-      [500, 'Você pode adormecer quando quiser...'],
-    ],
-  },
-  {
-    id: 'foco',
-    emoji: '🎯',
-    title: 'Foco e clareza',
-    minutes: 3,
-    ambient: 'none',
-    steps: [
-      [0, 'Sente-se com a coluna ereta e os olhos fechados.'],
-      [10, 'Faça três respirações profundas.'],
-      [40, 'Escolha um ponto de atenção: a sensação do ar nas narinas.'],
-      [90, 'Cada vez que a mente sair, volte. Isso é treinar o foco.'],
-      [150, 'Defina uma intenção clara para a próxima hora.'],
-      [170, 'Abra os olhos, pronto para começar.'],
-    ],
-  },
-];
-
 const DURATIONS = [3, 5, 10, 15, 20, 30];
 
 const BREATH_PATTERNS = [
@@ -403,6 +294,183 @@ function showTab(name) {
 document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
 /* =========================================================
+ * Premium
+ * O código digitado é convertido em hash SHA-256 e comparado com
+ * CONFIG.premium.codeHashes. Se você remover um hash do config.js,
+ * quem usou aquele código perde o acesso na próxima abertura do app.
+ * ========================================================= */
+const Premium = {
+  key: 'sm.premium.v1',
+  isActive() {
+    try {
+      const saved = localStorage.getItem(this.key);
+      return !!saved && CONFIG.premium.codeHashes.includes(saved);
+    } catch (e) { return false; }
+  },
+  async redeem(code) {
+    const normalized = code.trim().toUpperCase();
+    if (!normalized || !window.crypto || !crypto.subtle) return false;
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(normalized));
+    const hex = Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+    if (!CONFIG.premium.codeHashes.includes(hex)) return false;
+    try { localStorage.setItem(this.key, hex); } catch (e) { /* armazenamento indisponível */ }
+    return true;
+  },
+  deactivate() {
+    try { localStorage.removeItem(this.key); } catch (e) { /* armazenamento indisponível */ }
+  },
+};
+
+function isLocked(meditation) {
+  return !!meditation.premium && !Premium.isActive();
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/* ---------- Janela inferior ---------- */
+function openSheet(html) {
+  $('#sheetBody').innerHTML = html;
+  $('#sheet').hidden = false;
+}
+function closeSheet() {
+  $('#sheet').hidden = true;
+  $('#sheetBody').innerHTML = '';
+}
+$('#sheetClose').addEventListener('click', closeSheet);
+$('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSheet(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#sheet').hidden) closeSheet(); });
+
+function supportHtml() {
+  const contact = CONFIG.premium.support;
+  if (!contact) return '';
+  const href = contact.includes('@') && !contact.startsWith('http') ? `mailto:${contact}` : contact;
+  return `<p class="small muted center">Dúvidas? <a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="color:var(--accent)">Fale conosco</a></p>`;
+}
+
+function openPaywall(reason) {
+  if (Premium.isActive()) { openPremiumStatus(); return; }
+  const { price, checkoutUrl } = CONFIG.premium;
+  const premiumCount = GUIDED.filter((g) => g.premium).length;
+  openSheet(`
+    <h2>✨ Seja Premium</h2>
+    <p class="muted">${escapeHtml(reason || 'Aprofunde sua prática com todo o conteúdo do app.')}</p>
+    <div class="price">${escapeHtml(price)}</div>
+    <ul class="benefits">
+      <li>🧘 Mais ${premiumCount} meditações guiadas (${GUIDED.length} no total)</li>
+      <li>🗓️ Jornada completa: ${escapeHtml(PROGRAM.title)}</li>
+      <li>📴 Tudo funciona sem internet</li>
+      <li>💜 Você apoia a criação de novos conteúdos</li>
+    </ul>
+    <button id="buyBtn" class="btn primary wide" ${checkoutUrl ? '' : 'disabled'}>Assinar agora</button>
+    ${checkoutUrl ? '' : '<p class="msg muted center">Pagamento ainda não configurado (veja config.js).</p>'}
+    <hr class="divider">
+    <label class="field-label" for="codeInput">Já assinou? Digite seu código de acesso</label>
+    <div class="code-row">
+      <input id="codeInput" placeholder="PAZ-XXXX-XXXX" autocomplete="off" autocapitalize="characters">
+      <button id="redeemBtn" class="btn">Liberar</button>
+    </div>
+    <p id="codeMsg" class="msg" aria-live="polite"></p>
+    ${supportHtml()}`);
+
+  if (checkoutUrl) $('#buyBtn').addEventListener('click', () => window.open(checkoutUrl, '_blank', 'noopener'));
+  const redeem = async () => {
+    const msg = $('#codeMsg');
+    if (await Premium.redeem($('#codeInput').value)) {
+      msg.className = 'msg ok';
+      msg.textContent = 'Acesso premium liberado! Aproveite. 💜';
+      refreshPremiumUI();
+      setTimeout(closeSheet, 1400);
+    } else {
+      msg.className = 'msg err';
+      msg.textContent = 'Código inválido. Confira e tente de novo.';
+    }
+  };
+  $('#redeemBtn').addEventListener('click', redeem);
+  $('#codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') redeem(); });
+}
+
+function openPremiumStatus() {
+  openSheet(`
+    <h2>✨ Você é Premium</h2>
+    <p class="muted">Todo o conteúdo está liberado neste aparelho. Obrigado pelo apoio! 💜</p>
+    ${supportHtml()}
+    <button id="logoutPremium" class="btn ghost small-btn">Remover acesso deste aparelho</button>`);
+  $('#logoutPremium').addEventListener('click', () => {
+    if (!confirm('Remover o acesso premium deste aparelho? Você precisará digitar o código de novo.')) return;
+    Premium.deactivate();
+    refreshPremiumUI();
+    closeSheet();
+  });
+}
+
+function refreshPremiumUI() {
+  $('#premiumBtn').classList.toggle('active', Premium.isActive());
+  $('#premiumBtn').textContent = Premium.isActive() ? '✨ Premium ✓' : '✨ Premium';
+  renderGuidedList();
+  renderProgram();
+}
+
+$('#premiumBtn').addEventListener('click', () => openPaywall());
+
+/* =========================================================
+ * Jornada (programa de vários dias)
+ * ========================================================= */
+const ProgramStore = {
+  key: `sm.program.${PROGRAM.id}`,
+  done() {
+    try { return JSON.parse(localStorage.getItem(this.key)) || []; } catch (e) { return []; }
+  },
+  markDone(index) {
+    const list = this.done();
+    if (list.includes(index)) return;
+    list.push(index);
+    try { localStorage.setItem(this.key, JSON.stringify(list)); } catch (e) { /* armazenamento indisponível */ }
+  },
+};
+
+function dayLocked(index) {
+  return index > 0 && !Premium.isActive();
+}
+
+function renderProgram() {
+  const done = ProgramStore.done();
+  const next = PROGRAM.days.findIndex((_, i) => !done.includes(i));
+  $('#programTitle').textContent = PROGRAM.title;
+  $('#programProgress').textContent = next === -1 ? 'Concluída 🎉' : `${done.length}/${PROGRAM.days.length}`;
+  $('#programDays').innerHTML = PROGRAM.days.map((d, i) => `
+    <button class="day-btn${done.includes(i) ? ' done' : ''}${i === next ? ' next' : ''}" data-day="${i}"
+      aria-label="Dia ${i + 1}: ${escapeHtml(d.title)}${dayLocked(i) ? ' (premium)' : ''}">
+      ${done.includes(i) ? '✓' : i + 1}${dayLocked(i) ? '<span class="lock">🔒</span>' : ''}
+    </button>`).join('');
+}
+
+$('#programDays').addEventListener('click', (e) => {
+  const btn = e.target.closest('.day-btn');
+  if (!btn) return;
+  const index = Number(btn.dataset.day);
+  if (dayLocked(index)) {
+    openPaywall(`O dia 1 é grátis. Assine para continuar a jornada "${PROGRAM.title}".`);
+    return;
+  }
+  const day = PROGRAM.days[index];
+  const g = GUIDED.find((x) => x.id === day.meditation);
+  openSheet(`
+    <small class="muted">Dia ${index + 1} de ${PROGRAM.days.length}</small>
+    <h2>${escapeHtml(day.title)}</h2>
+    <p>${escapeHtml(day.intro)}</p>
+    <p class="muted small">Prática de hoje: ${g.emoji} ${escapeHtml(g.title)} · ${g.minutes} min</p>
+    <button id="startDay" class="btn primary wide">Começar</button>`);
+  $('#startDay').addEventListener('click', () => {
+    closeSheet();
+    startSession({ ...meditationOptions(g), title: `Dia ${index + 1} · ${day.title}`, programDay: index });
+  });
+});
+
+/* =========================================================
  * Meditar
  * ========================================================= */
 let freeMinutes = 10;
@@ -410,18 +478,31 @@ let session = null;
 let wakeLock = null;
 const RING_LEN = 2 * Math.PI * 90;
 
-function renderMeditar() {
+function meditationOptions(g) {
+  return { title: g.title, minutes: g.minutes, steps: g.steps, ambient: g.ambient, audio: g.audio, intervalBell: false };
+}
+
+function renderGuidedList() {
   $('#guidedList').innerHTML = GUIDED.map((g) => `
-    <button class="card" data-id="${g.id}">
+    <button class="card${isLocked(g) ? ' locked' : ''}" data-id="${g.id}">
+      ${isLocked(g) ? '<span class="lock" aria-label="Premium">🔒</span>' : ''}
       <span class="emoji">${g.emoji}</span>
       <b>${g.title}</b>
-      <small>${g.minutes} min</small>
+      <small>${g.minutes} min${g.premium ? '<span class="badge">Premium</span>' : ''}</small>
     </button>`).join('');
+}
+
+function renderMeditar() {
+  renderGuidedList();
   $('#guidedList').addEventListener('click', (e) => {
     const card = e.target.closest('.card');
     if (!card) return;
     const g = GUIDED.find((x) => x.id === card.dataset.id);
-    startSession({ title: g.title, minutes: g.minutes, steps: g.steps, ambient: g.ambient, intervalBell: false });
+    if (isLocked(g)) {
+      openPaywall(`"${g.title}" faz parte do conteúdo Premium.`);
+      return;
+    }
+    startSession(meditationOptions(g));
   });
 
   $('#durationChips').innerHTML = DURATIONS.map((m) =>
@@ -451,6 +532,7 @@ function renderMeditar() {
   $('#doneBtn').addEventListener('click', () => {
     $('#done').hidden = true;
     $('#meditarSetup').hidden = false;
+    renderProgram();
   });
   $('#voiceToggle').addEventListener('change', (e) => { if (!e.target.checked) Voice.stop(); });
   if (!Voice.available) $('#voiceToggleWrap').hidden = true;
@@ -462,7 +544,7 @@ async function requestWakeLock() {
   } catch (e) { /* sem suporte ou negado */ }
 }
 
-function startSession({ title, minutes, steps, ambient, intervalBell }) {
+function startSession({ title, minutes, steps, ambient, audio, intervalBell, programDay = null }) {
   Sound.context();
   stopSoundsTab();
   const total = minutes * 60;
@@ -476,6 +558,8 @@ function startSession({ title, minutes, steps, ambient, intervalBell }) {
     stepIdx: 0,
     intervalBell,
     lastMinute: 0,
+    programDay,
+    narration: null,
     ambient: ambient && ambient !== 'none' ? Sound.ambient(ambient, 0.35) : null,
     timer: null,
   };
@@ -484,7 +568,8 @@ function startSession({ title, minutes, steps, ambient, intervalBell }) {
   $('#session').hidden = false;
   $('#sessionTitle').textContent = `${title} · ${minutes} min`;
   $('#guideText').textContent = steps.length ? '' : 'Respire naturalmente e observe o momento presente.';
-  $('#voiceToggleWrap').style.display = steps.length && Voice.available ? '' : 'none';
+  $('#voiceToggleWrap').style.display = steps.length && Voice.available && !audio ? '' : 'none';
+  if (audio) startNarration(audio);
   $('#pauseBtn').textContent = 'Pausar';
   $('#ringFg').style.strokeDasharray = RING_LEN;
   $('#ringFg').style.strokeDashoffset = 0;
@@ -505,7 +590,7 @@ function tick() {
   while (session.stepIdx < session.steps.length && session.steps[session.stepIdx][0] <= elapsed) {
     const text = session.steps[session.stepIdx][1];
     $('#guideText').textContent = text;
-    if ($('#voiceToggle').checked) Voice.speak(text);
+    if (!session.narration && $('#voiceToggle').checked) Voice.speak(text);
     session.stepIdx++;
   }
 
@@ -518,6 +603,20 @@ function tick() {
   if (session.remaining <= 0) finishSession(true);
 }
 
+/* Áudio gravado (sua voz). Se o arquivo não carregar, volta para a voz sintética. */
+function startNarration(src) {
+  const el = new window.Audio(src);
+  session.narration = el;
+  const current = session;
+  const fallback = () => {
+    if (session !== current || session.narration !== el) return;
+    session.narration = null;
+    $('#voiceToggleWrap').style.display = Voice.available ? '' : 'none';
+  };
+  el.addEventListener('error', fallback);
+  el.play().catch(fallback);
+}
+
 function togglePause() {
   if (!session) return;
   session.paused = !session.paused;
@@ -525,10 +624,12 @@ function togglePause() {
     session.remaining = (session.endAt - Date.now()) / 1000;
     if (session.ambient) session.ambient.setVolume(0.0001);
     Voice.stop();
+    if (session.narration) session.narration.pause();
     $('#pauseBtn').textContent = 'Continuar';
   } else {
     session.endAt = Date.now() + session.remaining * 1000;
     if (session.ambient) session.ambient.setVolume(0.35);
+    if (session.narration) session.narration.play().catch(() => {});
     $('#pauseBtn').textContent = 'Pausar';
   }
 }
@@ -537,6 +638,7 @@ function finishSession(completed) {
   if (!session) return;
   clearInterval(session.timer);
   if (session.ambient) session.ambient.stop();
+  if (session.narration) session.narration.pause();
   Voice.stop();
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
 
@@ -553,9 +655,15 @@ function finishSession(completed) {
 
   $('#session').hidden = true;
   $('#done').hidden = false;
-  $('#doneText').textContent = counted
+  let text = counted
     ? `${completed ? 'Parabéns!' : 'Bom trabalho.'} Você meditou ${minutes.toLocaleString('pt-BR')} min. Sequência atual: ${currentStreak()} dia(s).`
     : 'Sessões com menos de 1 minuto não entram no histórico.';
+  // Dia da jornada conta como feito se a pessoa praticou pelo menos 80% do tempo
+  if (session.programDay !== null && elapsedSec >= session.total * 0.8) {
+    ProgramStore.markDone(session.programDay);
+    text += ` Dia ${session.programDay + 1} da jornada concluído!`;
+  }
+  $('#doneText').textContent = text;
   session = null;
 }
 
@@ -761,6 +869,15 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
 
+function applyAppName() {
+  const words = CONFIG.appName.trim().split(/\s+/);
+  const last = words.pop();
+  $('#appName').innerHTML = words.length ? `${escapeHtml(words.join(' '))} <span>${escapeHtml(last)}</span>` : `<span>${escapeHtml(last)}</span>`;
+  document.title = CONFIG.appName;
+}
+
+applyAppName();
 renderMeditar();
+refreshPremiumUI();
 renderBreath();
 renderSounds();

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gerar código de acesso</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #14112b; color: #f1eefc; max-width: 560px; margin: 0 auto; padding: 24px 16px; line-height: 1.5; }
+    input, button { font: inherit; padding: 10px 14px; border-radius: 10px; border: 1px solid #555; width: 100%; box-sizing: border-box; }
+    input { background: #1e1940; color: inherit; }
+    button { background: #b69cff; color: #1a1438; border: none; font-weight: 600; margin-top: 10px; cursor: pointer; }
+    pre { background: #1e1940; padding: 12px; border-radius: 10px; white-space: pre-wrap; word-break: break-all; }
+    p, li { color: #c9c3e6; }
+  </style>
+</head>
+<body>
+  <h1>Gerar código de acesso</h1>
+  <p>Use esta página para criar os códigos que liberam a área premium. Ela funciona só no seu navegador; nada é enviado para a internet.</p>
+  <ol>
+    <li>Invente um código difícil de adivinhar (ou clique em "Sugerir").</li>
+    <li>Clique em "Gerar" e copie a linha que aparecer.</li>
+    <li>Cole a linha dentro de <code>codeHashes: [ ]</code> no arquivo <code>config.js</code>.</li>
+    <li>Envie o código (não a linha gerada) para quem pagou.</li>
+  </ol>
+  <input id="code" placeholder="Ex.: PAZ-7K2M-9QXA" autocomplete="off">
+  <button id="suggest" type="button" style="background:#3a3366;color:#f1eefc">Sugerir código</button>
+  <button id="gen" type="button">Gerar</button>
+  <pre id="out" hidden></pre>
+  <script>
+    const norm = (s) => s.trim().toUpperCase();
+    document.getElementById('suggest').onclick = () => {
+      const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const rnd = (n) => Array.from(crypto.getRandomValues(new Uint32Array(n)), (x) => abc[x % abc.length]).join('');
+      document.getElementById('code').value = `PAZ-${rnd(4)}-${rnd(4)}`;
+    };
+    document.getElementById('gen').onclick = async () => {
+      const code = norm(document.getElementById('code').value);
+      if (code.length < 8) { alert('Use um código com pelo menos 8 caracteres.'); return; }
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
+      const hex = Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+      const out = document.getElementById('out');
+      out.hidden = false;
+      out.textContent = `Código para enviar ao cliente: ${code}\n\nLinha para colar em config.js:\n'${hex}', // ${new Date().toLocaleDateString('pt-BR')}`;
+    };
+  </script>
+</body>
+</html>
