@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sabedoria Meditativa</title>
+  <meta name="description" content="Meditação guiada, respiração e sons relaxantes. Funciona offline.">
+  <meta name="theme-color" content="#14112b">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Meditar">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Sabedoria <span>Meditativa</span></h1>
+    <button id="installBtn" class="chip" hidden>Instalar app</button>
+  </header>
+
+  <main>
+    <!-- ============ MEDITAR ============ -->
+    <section id="tab-meditar" class="tab active" aria-labelledby="nav-meditar">
+      <div id="meditarSetup">
+        <h2>Meditações guiadas</h2>
+        <div id="guidedList" class="cards"></div>
+
+        <h2>Meditação livre</h2>
+        <div class="panel">
+          <label class="field-label">Duração</label>
+          <div id="durationChips" class="chips"></div>
+
+          <label class="field-label" for="ambientSelect">Som de fundo</label>
+          <select id="ambientSelect"></select>
+
+          <label class="toggle">
+            <input type="checkbox" id="intervalBell">
+            <span>Sino a cada minuto</span>
+          </label>
+
+          <button id="startFree" class="btn primary wide">Começar</button>
+        </div>
+      </div>
+
+      <div id="session" class="session" hidden>
+        <p id="sessionTitle" class="session-title"></p>
+        <div class="ring-wrap">
+          <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="ring-bg" cx="100" cy="100" r="90"/>
+            <circle id="ringFg" class="ring-fg" cx="100" cy="100" r="90"/>
+          </svg>
+          <div class="ring-center">
+            <div id="timeLeft" class="time">00:00</div>
+          </div>
+        </div>
+        <p id="guideText" class="guide-text" aria-live="polite"></p>
+        <div class="row">
+          <button id="pauseBtn" class="btn">Pausar</button>
+          <button id="stopBtn" class="btn ghost">Encerrar</button>
+        </div>
+        <label class="toggle center" id="voiceToggleWrap">
+          <input type="checkbox" id="voiceToggle" checked>
+          <span>Narração por voz</span>
+        </label>
+      </div>
+
+      <div id="done" class="session" hidden>
+        <div class="done-icon">🪷</div>
+        <h2>Sessão concluída</h2>
+        <p id="doneText" class="muted"></p>
+        <button id="doneBtn" class="btn primary">Voltar</button>
+      </div>
+    </section>
+
+    <!-- ============ RESPIRAR ============ -->
+    <section id="tab-respirar" class="tab" aria-labelledby="nav-respirar">
+      <h2>Exercícios de respiração</h2>
+      <div id="breathChips" class="chips"></div>
+      <p id="breathDesc" class="muted small"></p>
+
+      <div class="breath-stage">
+        <div id="breathCircle" class="breath-circle">
+          <span id="breathLabel">Pronto?</span>
+          <small id="breathCount"></small>
+        </div>
+      </div>
+      <p id="breathCycles" class="muted center"></p>
+      <button id="breathBtn" class="btn primary wide">Começar</button>
+    </section>
+
+    <!-- ============ SONS ============ -->
+    <section id="tab-sons" class="tab" aria-labelledby="nav-sons">
+      <h2>Sons relaxantes</h2>
+      <p class="muted small">Toque para ouvir. Os sons são gerados no aparelho e funcionam sem internet.</p>
+      <div id="soundGrid" class="sound-grid"></div>
+      <label class="field-label" for="volume">Volume</label>
+      <input type="range" id="volume" min="0" max="1" step="0.01" value="0.6">
+      <label class="field-label">Desligar após</label>
+      <div id="sleepChips" class="chips"></div>
+    </section>
+
+    <!-- ============ PROGRESSO ============ -->
+    <section id="tab-progresso" class="tab" aria-labelledby="nav-progresso">
+      <h2>Seu progresso</h2>
+      <div class="stats">
+        <div class="stat"><b id="statStreak">0</b><span>dias seguidos</span></div>
+        <div class="stat"><b id="statMinutes">0</b><span>minutos</span></div>
+        <div class="stat"><b id="statSessions">0</b><span>sessões</span></div>
+        <div class="stat"><b id="statBest">0</b><span>maior sequência</span></div>
+      </div>
+      <h3>Últimos 7 dias</h3>
+      <div id="weekChart" class="week"></div>
+      <h3>Histórico</h3>
+      <ul id="history" class="history"></ul>
+      <button id="clearHistory" class="btn ghost small-btn">Apagar histórico</button>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button id="nav-meditar" data-tab="meditar" class="active"><span>🧘</span>Meditar</button>
+    <button id="nav-respirar" data-tab="respirar"><span>🌬️</span>Respirar</button>
+    <button id="nav-sons" data-tab="sons"><span>🎧</span>Sons</button>
+    <button id="nav-progresso" data-tab="progresso"><span>📈</span>Progresso</button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>
