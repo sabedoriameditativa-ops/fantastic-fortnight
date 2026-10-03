@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#06121c">
+  <meta name="description" content="Quinzena Fantástica: sobreviva a catorze noites no farol da Ilha Perdida.">
+  <title>Quinzena Fantástica</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:wght@500;700&amp;family=IM+Fell+English+SC&amp;display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script src="game.js" defer></script>
+</head>
+<body>
+  <div id="app" class="app">
+    <canvas id="game" class="stage" aria-label="Ilha Perdida — área de jogo"></canvas>
+
+    <!-- HUD -->
+    <div id="hud" class="hud" hidden>
+      <div class="hud-left">
+        <div class="bar bar-hp" id="hp-bar" role="meter" aria-label="Vida" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+          <div class="bar-fill" id="hp-fill"></div>
+          <span class="bar-label">
+            <svg class="bar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14.2 2.3 8.6A3.4 3.4 0 0 1 7.1 3.8L8 4.7l.9-.9a3.4 3.4 0 0 1 4.8 4.8z" fill="currentColor"/></svg>
+            <span id="hp-text">100/100</span>
+          </span>
+        </div>
+        <div class="bar bar-xp" id="xp-bar" role="meter" aria-label="Experiência" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="bar-fill" id="xp-fill"></div>
+          <span class="bar-label"><span id="xp-text">Nív. 1</span></span>
+        </div>
+        <div class="hud-stats">
+          <span><b id="kills">0</b> abates</span>
+          <span class="sep" aria-hidden="true">·</span>
+          <span><b id="score">0</b> pts</span>
+        </div>
+      </div>
+      <div class="hud-center">
+        <div class="night-label" id="night-label">Noite 1/14</div>
+        <div class="night-timer" id="night-timer">00:40</div>
+      </div>
+      <div class="hud-right">
+        <button class="icon-btn" id="btn-pause" type="button" aria-label="Pausar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-mute" type="button" aria-label="Desligar som">
+          <svg class="ico-sound-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <svg class="ico-sound-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="m15.5 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="boss-bar" id="boss-bar" hidden>
+        <div class="boss-name" id="boss-name">Caranguejo-Rei</div>
+        <div class="bar bar-boss" role="meter" aria-label="Vida do chefe" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" id="boss-meter">
+          <div class="bar-fill" id="boss-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="banner" class="banner" aria-live="polite">
+      <div class="banner-title" id="banner-title"></div>
+      <div class="banner-sub" id="banner-sub"></div>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- Título -->
+    <section class="overlay overlay-title" id="ov-title" role="dialog" aria-labelledby="title-h">
+      <div class="panel panel-hero">
+        <p class="eyebrow">Diário do farol</p>
+        <h1 class="game-title" id="title-h">Quinzena Fantástica</h1>
+        <p class="subtitle">Catorze noites no farol da Ilha Perdida</p>
+        <div class="divider" aria-hidden="true"><span></span></div>
+        <p class="story"><span>Toda noite, criaturas luminosas sobem do mar e rastejam até o farol.</span> <span>Mantenha a lanterna acesa e resista até o fim da quinzena.</span></p>
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-start" type="button">Começar</button>
+          <button class="btn" id="btn-howto" type="button">Como jogar</button>
+        </div>
+        <p class="record" id="title-record">Nenhum recorde ainda</p>
+        <button class="btn btn-ghost btn-small" id="btn-sound-title" type="button">Som: ligado</button>
+      </div>
+    </section>
+
+    <!-- Como jogar -->
+    <section class="overlay" id="ov-howto" role="dialog" aria-labelledby="howto-h" hidden>
+      <div class="panel">
+        <h2 class="panel-title" id="howto-h">Como jogar</h2>
+        <div class="howto">
+          <h3>Controles</h3>
+          <ul class="keys">
+            <li><span class="keyset"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ou setas</span><span>mover</span></li>
+            <li><span class="keyset"><kbd>P</kbd> ou <kbd>Esc</kbd></span><span>pausar</span></li>
+            <li><span class="keyset"><kbd>M</kbd></span><span>ligar ou desligar o som</span></li>
+            <li><span class="keyset"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>escolher a melhoria</span></li>
+            <li><span class="keyset">Toque ou mouse</span><span>arraste em qualquer lugar da tela para mover — surge um joystick virtual</span></li>
+          </ul>
+          <h3>Regras</h3>
+          <ul class="rules">
+            <li>Suas armas disparam sozinhas: você só precisa se mover.</li>
+            <li>Criaturas derrotadas deixam brasas. Recolha-as para subir de nível e escolher melhorias.</li>
+            <li>O facho do farol desacelera as criaturas que ilumina.</li>
+            <li>Sobreviva às 14 noites. Nas noites 7 e 14, um chefe sobe do mar.</li>
+            <li>A cada amanhecer você recupera parte da vida.</li>
+          </ul>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-howto-back" type="button">Voltar</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Melhoria -->
+    <section class="overlay overlay-levelup" id="ov-levelup" role="dialog" aria-labelledby="lu-h" hidden>
+      <div class="panel panel-wide">
+        <h2 class="panel-title" id="lu-h">Subiu para o nível 2</h2>
+        <p class="panel-sub" id="lu-sub">Escolha uma melhoria</p>
+        <div class="cards" id="lu-cards"></div>
+      </div>
+    </section>
+
+    <!-- Amanhecer -->
+    <section class="overlay overlay-dawn" id="ov-dawn" role="dialog" aria-labelledby="dawn-h" hidden>
+      <div class="panel">
+        <p class="eyebrow">Diário do farol</p>
+        <h2 class="panel-title" id="dawn-h">Amanhecer</h2>
+        <p class="panel-sub" id="dawn-sub">Dia 1 sobrevivido</p>
+        <div class="pips" id="dawn-pips" aria-hidden="true"></div>
+        <dl class="stats" id="dawn-stats"></dl>
+        <p class="hint" id="dawn-hint"></p>
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-next-night" type="button">Começar a noite 2</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pausa -->
+    <section class="overlay" id="ov-pause" role="dialog" aria-labelledby="pause-h" hidden>
+      <div class="panel panel-narrow">
+        <h2 class="panel-title" id="pause-h">Pausado</h2>
+        <p class="panel-sub" id="pause-sub"></p>
+        <div class="actions actions-col" id="pause-actions">
+          <button class="btn btn-primary" id="btn-resume" type="button">Continuar</button>
+          <button class="btn" id="btn-restart" type="button">Recomeçar</button>
+          <button class="btn" id="btn-sound-pause" type="button">Som: ligado</button>
+          <button class="btn btn-ghost" id="btn-quit" type="button">Sair para o menu</button>
+        </div>
+        <div class="confirm" id="pause-confirm" hidden>
+          <p class="confirm-text" id="confirm-text">Recomeçar perde o progresso desta quinzena.</p>
+          <div class="actions actions-col">
+            <button class="btn btn-danger" id="btn-confirm-yes" type="button">Sim, recomeçar</button>
+            <button class="btn" id="btn-confirm-no" type="button">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Fim de jogo -->
+    <section class="overlay overlay-end" id="ov-gameover" role="dialog" aria-labelledby="go-h" hidden>
+      <div class="panel">
+        <h2 class="panel-title" id="go-h">A luz se apagou</h2>
+        <p class="panel-sub" id="go-sub"></p>
+        <p class="badge-wrap"><span class="badge" id="go-record" hidden>Novo recorde!</span></p>
+        <div class="pips" id="go-pips" aria-hidden="true"></div>
+        <dl class="stats" id="go-stats"></dl>
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-retry" type="button">Tentar de novo</button>
+          <button class="btn" id="btn-go-menu" type="button">Menu</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Vitória -->
+    <section class="overlay overlay-end overlay-victory" id="ov-victory" role="dialog" aria-labelledby="win-h" hidden>
+      <div class="panel">
+        <p class="eyebrow">Fim da quinzena</p>
+        <h2 class="panel-title" id="win-h">O farol resistiu à quinzena</h2>
+        <p class="panel-sub" id="win-sub">Catorze noites, e a luz nunca se apagou.</p>
+        <p class="badge-wrap"><span class="badge" id="win-record" hidden>Novo recorde!</span></p>
+        <div class="pips" id="win-pips" aria-hidden="true"></div>
+        <dl class="stats" id="win-stats"></dl>
+        <p class="record" id="win-best"></p>
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-again" type="button">Jogar de novo</button>
+          <button class="btn" id="btn-win-menu" type="button">Menu</button>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>
