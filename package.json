@@ -1,0 +1,8 @@
+{
+  "name": "quinzena-fantastica",
+  "private": true,
+  "scripts": {
+    "test": "node tests/smoke.mjs",
+    "start": "npx --yes serve ."
+  }
+}
