@@ -23,11 +23,11 @@ nível, você escolhe uma entre três melhorias.
 
 **Regras em poucas linhas**
 
-- Suas armas disparam sozinhas: você só precisa se mover e se manter vivo.
+- Suas armas disparam sozinhas: você só precisa se mover e sobreviver.
 - Recolha as brasas deixadas pelas criaturas para subir de nível e escolher melhorias.
 - O facho do farol sempre desacelera as criaturas que ilumina — com a *Lente de Fresnel*, ele também queima.
 - Cada noite dura um pouco mais que a anterior. Ao amanhecer, você recupera 30% da vida.
-- Nas noites 7 e 14 a noite só termina quando o chefe cai: o **Caranguejo-Rei** e o **Leviatã das Marés**.
+- Nas noites 7 e 14, o amanhecer só chega quando o chefe cai: o **Caranguejo-Rei** e o **Leviatã das Marés**.
 
 **Arsenal:** Faísca, Lente de Fresnel, Lanterna Ardente, Âncoras Giratórias e Arpão (até quatro
 armas por vez), além de sete melhorias passivas — Botas de Marinheiro, Casco Reforçado,
@@ -52,7 +52,7 @@ npm test
 ```
 
 O teste de fumaça (`tests/smoke.mjs`) usa o Playwright com Chromium (instalação local ou global):
-abre o jogo em modo de depuração (`index.html#debug`), joga as telas principais — título,
+abre o jogo em modo de depuração (`index.html#debug`), percorre as telas principais — título,
 partida, melhoria, amanhecer, chefes, vitória, fim de jogo, pausa — e confere o layout em
 celular (retrato e paisagem). Para salvar capturas de tela, defina `SHOT_DIR`:
 

@@ -57,11 +57,11 @@
       </div>
     </div>
 
-    <div id="banner" class="banner" aria-live="polite">
+    <div id="banner" class="banner" aria-live="polite" aria-hidden="true">
       <div class="banner-title" id="banner-title"></div>
       <div class="banner-sub" id="banner-sub"></div>
     </div>
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-hidden="true"></div>
 
     <!-- Título -->
     <section class="overlay overlay-title" id="ov-title" role="dialog" aria-labelledby="title-h">
@@ -81,16 +81,17 @@
     </section>
 
     <!-- Como jogar -->
-    <section class="overlay" id="ov-howto" role="dialog" aria-labelledby="howto-h" hidden>
+    <section class="overlay" id="ov-howto" role="dialog" aria-modal="true" aria-labelledby="howto-h" hidden>
       <div class="panel">
         <h2 class="panel-title" id="howto-h">Como jogar</h2>
         <div class="howto">
           <h3>Controles</h3>
           <ul class="keys">
-            <li><span class="keyset"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ou setas</span><span>mover</span></li>
-            <li><span class="keyset"><kbd>P</kbd> ou <kbd>Esc</kbd></span><span>pausar</span></li>
-            <li><span class="keyset"><kbd>M</kbd></span><span>ligar ou desligar o som</span></li>
-            <li><span class="keyset"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>escolher a melhoria</span></li>
+            <li class="kb"><span class="keyset"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ou setas</span><span>mover</span></li>
+            <li class="kb"><span class="keyset"><kbd>P</kbd> ou <kbd>Esc</kbd></span><span>pausar e continuar</span></li>
+            <li class="kb"><span class="keyset"><kbd>M</kbd></span><span>ligar ou desligar o som</span></li>
+            <li class="kb"><span class="keyset"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>escolher a melhoria (ou setas e Enter)</span></li>
+            <li class="kb"><span class="keyset"><kbd>Enter</kbd></span><span>começar a próxima noite (ou Espaço)</span></li>
             <li><span class="keyset">Toque ou mouse</span><span>arraste em qualquer lugar da tela para mover — surge um joystick virtual</span></li>
           </ul>
           <h3>Regras</h3>
@@ -109,7 +110,7 @@
     </section>
 
     <!-- Melhoria -->
-    <section class="overlay overlay-levelup" id="ov-levelup" role="dialog" aria-labelledby="lu-h" hidden>
+    <section class="overlay overlay-levelup" id="ov-levelup" role="dialog" aria-modal="true" aria-labelledby="lu-h" hidden>
       <div class="panel panel-wide">
         <h2 class="panel-title" id="lu-h">Subiu para o nível 2</h2>
         <p class="panel-sub" id="lu-sub">Escolha uma melhoria</p>
@@ -118,7 +119,7 @@
     </section>
 
     <!-- Amanhecer -->
-    <section class="overlay overlay-dawn" id="ov-dawn" role="dialog" aria-labelledby="dawn-h" hidden>
+    <section class="overlay overlay-dawn" id="ov-dawn" role="dialog" aria-modal="true" aria-labelledby="dawn-h" aria-describedby="dawn-sub" hidden>
       <div class="panel">
         <p class="eyebrow">Diário do farol</p>
         <h2 class="panel-title" id="dawn-h">Amanhecer</h2>
@@ -133,7 +134,7 @@
     </section>
 
     <!-- Pausa -->
-    <section class="overlay" id="ov-pause" role="dialog" aria-labelledby="pause-h" hidden>
+    <section class="overlay" id="ov-pause" role="dialog" aria-modal="true" aria-labelledby="pause-h" aria-describedby="pause-sub" hidden>
       <div class="panel panel-narrow">
         <h2 class="panel-title" id="pause-h">Pausado</h2>
         <p class="panel-sub" id="pause-sub"></p>
@@ -154,7 +155,7 @@
     </section>
 
     <!-- Fim de jogo -->
-    <section class="overlay overlay-end" id="ov-gameover" role="dialog" aria-labelledby="go-h" hidden>
+    <section class="overlay overlay-end" id="ov-gameover" role="dialog" aria-modal="true" aria-labelledby="go-h" aria-describedby="go-sub" hidden>
       <div class="panel">
         <h2 class="panel-title" id="go-h">A luz se apagou</h2>
         <p class="panel-sub" id="go-sub"></p>
@@ -169,7 +170,7 @@
     </section>
 
     <!-- Vitória -->
-    <section class="overlay overlay-end overlay-victory" id="ov-victory" role="dialog" aria-labelledby="win-h" hidden>
+    <section class="overlay overlay-end overlay-victory" id="ov-victory" role="dialog" aria-modal="true" aria-labelledby="win-h" aria-describedby="win-sub" hidden>
       <div class="panel">
         <p class="eyebrow">Fim da quinzena</p>
         <h2 class="panel-title" id="win-h">O farol resistiu à quinzena</h2>

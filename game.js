@@ -80,7 +80,7 @@
     baseDuration: 40,
     perNight: 3,
     bossNights: [7, 14],
-    bossSpawnFactor: 0.5,
+    bossSpawnFactor: 0.3, // deviates from the spec's 50 %: long boss fights otherwise drown in regular spawns
     bossDelay: 1.2,
     dawnHeal: 0.3,
     sunrise: 1.2,
@@ -93,12 +93,13 @@
   const SCORE = { kill: 10, ember: 2, night: 500, boss: 2500 };
 
   const SPAWN = {
-    base: 0.9,
+    base: 0.75, // spec: 0.9; lowered together with the closer edge spawns below so night 1 is not harder
     perNight: 0.28,
     rampStart: 1.0,
     rampEnd: 1.6,
     maxAlive: 260,
-    ringMargin: 120,
+    ringMargin: 120, // recycling ring: beyond the screen corner distance
+    edgeMargin: 120, // new spawns: this far outside the visible rect
     groupChance: 0.2,
     groupSize: 3,
     recycleExtra: 900,
@@ -124,13 +125,14 @@
     squid: { name: 'Lula-tinteira', from: 8, hp: 30, speed: 85, dmg: 6, ember: 3, r: 15, glow: '#82b4ff', body: '#3f4f86', shell: '#2a355e', keep: 300, shotEvery: 2.6, shotDmg: 8, shotSpeed: 240, shotRange: 560 },
   };
 
-  // Spawn weights shift toward newer creatures as nights go by.
+  // Spawn weights shift toward newer creatures as nights go by (debut nights come from ENEMIES[*].from).
   function spawnWeights(n) {
-    const w = [['crab', Math.max(0.3, 1.1 - 0.07 * (n - 1))]];
-    if (n >= 2) w.push(['jelly', 0.75 * (n === 2 ? 1.5 : 1)]);
-    if (n >= 4) w.push(['eel', (0.45 + 0.04 * (n - 4)) * (n === 4 ? 1.6 : 1)]);
-    if (n >= 5) w.push(['puffer', (0.22 + 0.025 * (n - 5)) * (n === 5 ? 1.6 : 1)]);
-    if (n >= 8) w.push(['squid', (0.28 + 0.03 * (n - 8)) * (n === 8 ? 1.6 : 1)]);
+    const E = ENEMIES;
+    const w = [['crab', Math.max(0.3, 1.1 - 0.07 * (n - E.crab.from))]];
+    if (n >= E.jelly.from) w.push(['jelly', 0.75 * (n === E.jelly.from ? 1.5 : 1)]);
+    if (n >= E.eel.from) w.push(['eel', (0.45 + 0.04 * (n - E.eel.from)) * (n === E.eel.from ? 1.6 : 1)]);
+    if (n >= E.puffer.from) w.push(['puffer', (0.22 + 0.025 * (n - E.puffer.from)) * (n === E.puffer.from ? 1.6 : 1)]);
+    if (n >= E.squid.from) w.push(['squid', (0.28 + 0.03 * (n - E.squid.from)) * (n === E.squid.from ? 1.6 : 1)]);
     return w;
   }
 
@@ -151,11 +153,13 @@
   };
 
   const WEAPONS = {
-    spark: { range: 460, cooldown: 0.55, dmg: 12, speed: 560, life: 1.1, r: 5, spread: 0.14, knock: 45 },
+    // bossThreatR: aim at the boss unless a creature is this close; fanWidth caps the fan's spread at the target (world units)
+    spark: { range: 460, cooldown: 0.55, dmg: 12, speed: 560, life: 1.1, r: 5, spread: 0.14, fanWidth: 14, knock: 45, bossThreatR: 150 },
     // the light burns hottest near the lens: full damage up to falloffStart, fading to falloffMin at falloffEnd
     beam: { dps: 18, dpsPerLevel: 12, halfPerLevel: 1.5 * DEG, rotPerLevel: 0.1, falloffStart: 380, falloffEnd: 1100, falloffMin: 0.45 },
     aura: { radiusFactor: 0.42, tick: 0.5, dmg: 6, dmgPerLevel: 4, radiusPerLevel: 0.08, knock: 25 },
-    anchors: { orbit: 95, spin: 2.6, dmg: 14, dmgPerLevel: 3, hitCd: 0.4, r: 13, knock: 90 },
+    // dmg/orbit raised from the spec's 14 / 95 u: at 14 the anchors were the weakest pick by far
+    anchors: { orbit: 110, spin: 2.6, dmg: 18, dmgPerLevel: 3, hitCd: 0.4, r: 13, knock: 90 },
     harpoon: { cooldown: 2.4, dmg: 40, dmgL2: 15, cdL3: 0.9, dmgL5: 1.5, speed: 760, life: 1.5, r: 14, knock: 110 },
   };
 
@@ -270,38 +274,53 @@
     let muted = false;
     let ambientWanted = 0;
     const recent = [];
+    const recentHits = [];
+
+    function suspend() {
+      try {
+        if (ctx && ctx.state === 'running') {
+          const p = ctx.suspend();
+          if (p && p.catch) p.catch(() => {});
+        }
+      } catch (e) { /* ignore */ }
+    }
+    // also recovers iOS's 'interrupted' state; a muted game stays suspended
+    function resume() {
+      try {
+        if (ctx && !muted && ctx.state !== 'running' && ctx.state !== 'closed') {
+          const p = ctx.resume();
+          if (p && p.catch) p.catch(() => {});
+        }
+      } catch (e) { /* ignore */ }
+    }
 
     function init() {
       try {
-        if (ctx) {
-          if (ctx.state === 'suspended') {
-            const p = ctx.resume();
-            if (p && p.catch) p.catch(() => {});
-          }
-          return;
-        }
+        if (ctx) { resume(); return; }
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return;
         ctx = new AC();
+        // a real limiter: the SFX bus runs hot, and boss stacks must stay below 0 dBFS
         const comp = ctx.createDynamicsCompressor();
-        comp.threshold.value = -14;
-        comp.ratio.value = 4;
+        comp.threshold.value = -6;
+        comp.knee.value = 2;
+        comp.ratio.value = 16;
+        comp.attack.value = 0.002;
+        comp.release.value = 0.15;
         master = ctx.createGain();
         master.gain.value = muted ? 0 : 0.85;
         master.connect(comp);
         comp.connect(ctx.destination);
         sfxBus = ctx.createGain();
-        sfxBus.gain.value = 0.9;
+        sfxBus.gain.value = 2.5;
         sfxBus.connect(master);
         const len = Math.floor(ctx.sampleRate * 2);
         noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
         const data = noiseBuf.getChannelData(0);
         for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
         startAmbient();
-        if (ctx.state === 'suspended') {
-          const p = ctx.resume();
-          if (p && p.catch) p.catch(() => {});
-        }
+        if (muted) suspend();
+        else resume();
       } catch (e) {
         ctx = null;
       }
@@ -352,14 +371,23 @@
       muted = !!m;
       if (!ctx || !master) return;
       try { master.gain.setTargetAtTime(muted ? 0 : 0.85, ctx.currentTime, 0.03); } catch (e) { /* ignore */ }
+      // a muted game does not need a running audio graph: suspend once the fade is done
+      if (muted) setTimeout(() => { if (muted) suspend(); }, 150);
+      else resume();
     }
 
-    function canPlay(force) {
+    function canPlay(force, name) {
       if (!ctx || muted || ctx.state !== 'running') return false;
       if (force) return true;
       const now = performance.now();
       while (recent.length && now - recent[0] > 50) recent.shift();
+      while (recentHits.length && now - recentHits[0] > 50) recentHits.shift();
       if (recent.length >= 6) return false;
+      // hit ticks may take at most 2 of the 6 slots, so deaths and pickups in the same burst still sound
+      if (name === 'hit') {
+        if (recentHits.length >= 2) return false;
+        recentHits.push(now);
+      }
       recent.push(now);
       return true;
     }
@@ -422,7 +450,7 @@
         noise({ dur: 0.22, gain: 0.1, filter: 'bandpass', f0: 500, f1: 2600, q: 1.4 });
         tone({ type: 'sawtooth', f0: 180, f1: 90, dur: 0.12, gain: 0.025 });
       },
-      hit() { noise({ dur: 0.045, gain: 0.045, filter: 'bandpass', f0: 1500 + Math.random() * 800, q: 2.2 }); },
+      hit() { noise({ dur: 0.045, gain: 0.08, filter: 'bandpass', f0: 1500 + Math.random() * 800, q: 2.2 }); },
       death() {
         const b = 220 + Math.random() * 120;
         tone({ type: 'sine', f0: b, f1: b * 3.6, dur: 0.09, gain: 0.07 });
@@ -482,13 +510,13 @@
 
     function play(name, arg, force) {
       try {
-        if (!canPlay(force)) return;
+        if (!canPlay(force, name)) return;
         const fn = sfx[name];
         if (fn) fn(arg);
       } catch (e) { /* audio must never break the game */ }
     }
 
-    return { init, play, setMuted, setAmbient };
+    return { init, play, setMuted, setAmbient, suspend, resume };
   })();
 
   // =========================================================================
@@ -506,7 +534,7 @@
 
   const Input = {
     keys: new Set(),
-    joy: { active: false, id: null, bx: 0, by: 0, kx: 0, ky: 0 },
+    joy: { active: false, id: null, bx: 0, by: 0, kx: 0, ky: 0, l: 0, t: 0, r: 0, b: 0 }, // l..b: canvas edges
     vec: { x: 0, y: 0 },
     clearKeys() { this.keys.clear(); },
     releasePointer() { this.joy.active = false; this.joy.id = null; },
@@ -520,7 +548,18 @@
       if (kl > 0) { x /= kl; y /= kl; }
       const j = this.joy;
       if (j.active) {
-        const dx = j.kx - j.bx, dy = j.ky - j.by;
+        let dx = j.kx - j.bx, dy = j.ky - j.by;
+        // a stick placed near a screen edge has less room toward it: scale the throw so full speed stays reachable.
+        // One factor from the room along the drag direction, so the direction itself is never bent.
+        const d0 = Math.hypot(dx, dy);
+        if (d0 > 0) {
+          const ux = dx / d0, uy = dy / d0;
+          const room = Math.min(
+            ux ? (ux < 0 ? j.bx - j.l : j.r - j.bx) / Math.abs(ux) : Infinity,
+            uy ? (uy < 0 ? j.by - j.t : j.b - j.by) / Math.abs(uy) : Infinity);
+          const f = JOY.max / clamp(room - 2, JOY.dead + 16, JOY.max);
+          dx *= f; dy *= f;
+        }
         const d = Math.hypot(dx, dy);
         if (d > JOY.dead) {
           const mag = Math.min(1, (d - JOY.dead) / (JOY.max - JOY.dead));
@@ -607,7 +646,7 @@
   }
   let state = makeState();
 
-  const view = { w: 1, h: 1, dpr: 1, zoom: 1, scale: 1 };
+  const view = { w: 1, h: 1, dpr: 1, zoom: 1, scale: 1, insL: 12, insR: 12, insB: 16 }; // ins*: safe-area insets + margins (CSS px)
   const cam = { x: 0, y: 0 };
   let timeScale = 1;
 
@@ -662,7 +701,16 @@
     return out;
   }
 
-  function nearestTarget(x, y, range) {
+  // bossThreatR (optional): prefer the boss while no other creature is closer than this
+  function nearestTarget(x, y, range, bossThreatR) {
+    const boss = state.boss;
+    if (bossThreatR && boss && !boss.dead && boss.emerge >= 1 && dist2(x, y, boss.x, boss.y) - boss.r * boss.r < range * range) {
+      let threat = false;
+      for (const e of state.enemies) {
+        if (!e.dead && e.emerge >= 0.6 && dist2(x, y, e.x, e.y) < bossThreatR * bossThreatR) { threat = true; break; }
+      }
+      if (!threat) return boss;
+    }
     let best = null, bd = range * range;
     for (const e of state.enemies) {
       if (e.dead || e.emerge < 0.6) continue;
@@ -721,12 +769,12 @@
       ][L - 1],
     },
     { id: 'boots', kind: 'passive', name: 'Botas de Marinheiro', desc: () => 'Você corre 10% mais rápido.' },
-    { id: 'hull', kind: 'passive', name: 'Casco Reforçado', desc: () => '+20 de vida máxima e cura 20 de vida.' },
-    { id: 'regen', kind: 'passive', name: 'Pulmões de Faroleiro', desc: () => 'Recupera +0,8 de vida por segundo.' },
+    { id: 'hull', kind: 'passive', name: 'Casco Reforçado', desc: () => '+20 de vida máxima e recupera 20 de vida.' },
+    { id: 'regen', kind: 'passive', name: 'Pulmões de Faroleiro', desc: () => '+0,8 de vida recuperada por segundo.' },
     { id: 'magnet', kind: 'passive', name: 'Ímã de Brasas', desc: () => 'Atrai brasas de 35% mais longe.' },
     { id: 'wick', kind: 'passive', name: 'Pavio Longo', desc: () => 'A lanterna ilumina 15% mais longe — e a Lanterna Ardente também.' },
     { id: 'powder', kind: 'passive', name: 'Pólvora Seca', desc: () => 'Todas as armas causam 12% mais dano.' },
-    { id: 'hourglass', kind: 'passive', name: 'Ampulheta', desc: () => 'Todas as armas recarregam 8% mais rápido.' },
+    { id: 'hourglass', kind: 'passive', name: 'Ampulheta', desc: () => 'Faísca, Arpão e Lanterna Ardente recarregam 8% mais rápido.' },
   ];
   const FALLBACKS = [
     { id: 'tea', kind: 'item', name: 'Chá quente', desc: () => 'Recupera 40 de vida.' },
@@ -748,6 +796,7 @@
       const L = lv(u.id);
       if (L >= MAX_LEVEL) continue;
       if (u.kind === 'weapon' && L === 0 && owned >= MAX_WEAPONS) continue;
+      if (u.id === 'wick' && !lv('aura')) continue; // a longer wick only matters with Lanterna Ardente
       let w = 1;
       if (u.kind === 'weapon') w = L > 0 ? 1.35 : owned < 2 ? 1.8 : 1.2;
       pool.push([u, w]);
@@ -882,12 +931,14 @@
     if (w.sparkCd > 0) return;
     const p = state.player;
     const W = WEAPONS.spark;
-    const target = nearestTarget(p.x, p.y, W.range);
+    const target = nearestTarget(p.x, p.y, W.range, W.bossThreatR);
     if (!target) { w.sparkCd = 0; return; }
     const st = sparkStats(L);
     const base = Math.atan2(target.y - p.y, target.x - p.x);
+    // narrow the fan at range so the side sparks still reach the target instead of straddling it
+    const spread = Math.min(W.spread, W.fanWidth / Math.max(1, Math.hypot(target.x - p.x, target.y - p.y)));
     for (let i = 0; i < st.count; i++) {
-      const a = base + (i - (st.count - 1) / 2) * W.spread;
+      const a = base + (i - (st.count - 1) / 2) * spread;
       state.shots.push({
         kind: 'spark', x: p.x + Math.cos(a) * p.r * 0.6, y: p.y + Math.sin(a) * p.r * 0.6,
         vx: Math.cos(a) * W.speed, vy: Math.sin(a) * W.speed, a, r: W.r,
@@ -993,7 +1044,7 @@
         if (dist2(an.x, an.y, b.x, b.y) < rr * rr) {
           b.anchorCd = W.hitCd;
           hurtBoss(dmg, false);
-          addText(b.x + rand(-20, 20), b.y - b.r * 0.6, Math.round(dmg), COLORS.parchment, 14);
+          b.dmgAcc += dmg; // shown as one summed number (updateBoss)
         }
       }
     }
@@ -1037,7 +1088,7 @@
           const rr = b.r * 0.9 + s.r;
           if (dist2(s.x, s.y, b.x, b.y) < rr * rr) {
             hurtBoss(s.dmg, false);
-            addText(s.x, s.y - 10, Math.round(s.dmg), COLORS.parchment, s.kind === 'harpoon' ? 18 : 13);
+            b.dmgAcc += s.dmg;
             burst(s.x, s.y, 4, COLORS.lantern, 120, 0.3, 3);
             if (s.kind === 'harpoon') s.hit.add('boss');
             else s.life = 0;
@@ -1091,8 +1142,10 @@
 
   function spawnAtRing(type, count) {
     const p = state.player;
-    const R = spawnRingRadius();
     const a = Math.random() * TAU;
+    // just outside the visible rect in this direction (a corner-distance ring left side spawns ~8 s from view)
+    const hw = view.w / view.zoom / 2, hh = view.h / view.zoom / 2;
+    const R = Math.min(hw / Math.max(1e-4, Math.abs(Math.cos(a))), hh / Math.max(1e-4, Math.abs(Math.sin(a)))) + SPAWN.edgeMargin;
     for (let i = 0; i < count; i++) {
       const aa = a + (count > 1 ? rand(-0.12, 0.12) : 0);
       const rr = R + (count > 1 ? rand(0, 60) : 0);
@@ -1320,7 +1373,7 @@
       attackT: type === 'crabKing' ? 2.5 : 1.5,
       summonT: type === 'crabKing' ? def.summonEvery * 0.6 : def.summonEvery,
       ringT: 1.6, slamT: 3.2, dashDx: 0, dashDy: 0, dashLeft: 0,
-      enraged: false, segs: [], wobble: 0,
+      enraged: false, segs: [], wobble: 0, dmgAcc: 0, dmgT: 0,
     };
     if (type === 'leviathan') {
       for (let i = 0; i < 11; i++) b.segs.push({ x: b.x - Math.cos(b.face) * i * 40, y: b.y - Math.sin(b.face) * i * 40 });
@@ -1379,6 +1432,13 @@
     if (b.flash > 0) b.flash -= dt;
     if (b.burn > 0) b.burn -= dt;
     b.anchorCd -= dt;
+    // simultaneous hits on the boss would stack into unreadable digits: show their sum every 0.25 s
+    b.dmgT -= dt;
+    if (b.dmgAcc > 0 && b.dmgT <= 0) {
+      addText(b.x + rand(-12, 12), b.y - b.r * 0.7, Math.round(b.dmgAcc), COLORS.parchment, 16);
+      b.dmgAcc = 0;
+      b.dmgT = 0.25;
+    }
     if (b.emerge < 1) {
       b.emerge = Math.min(1, b.emerge + dt / 1.2);
       if (Math.random() < dt * 30) addParticle(b.x + rand(-b.r, b.r), b.y + rand(-b.r, b.r), rand(-30, 30), rand(-80, -30), 0.8, 4, def.glow);
@@ -1530,9 +1590,21 @@
     if (value <= 0) return;
     const list = state.embers;
     if (list.length >= LIMITS.embers) {
-      const o = list[(Math.random() * list.length) | 0];
-      o.value += value;
-      return;
+      // merge into a nearby ember, or recycle the one farthest from the keeper so the drop still shows at the kill
+      const p = state.player;
+      let near = null, nd = 120 * 120, far = -1, fd = -1;
+      for (let i = 0; i < list.length; i++) {
+        const o = list[i];
+        const d = dist2(x, y, o.x, o.y);
+        if (d < nd) { nd = d; near = o; }
+        const dp = dist2(p.x, p.y, o.x, o.y);
+        if (o.pull <= 0 && dp > fd) { fd = dp; far = i; }
+      }
+      if (near) { near.value += value; return; }
+      if (far < 0) { list[(Math.random() * list.length) | 0].value += value; return; }
+      value += list[far].value;
+      list[far] = list[list.length - 1];
+      list.pop();
     }
     const a = Math.random() * TAU, s = rand(20, speed || 80);
     list.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, value, t: 0, pull: 0, seed: Math.random() * TAU });
@@ -1911,6 +1983,7 @@
     state.bossDefeated = true;
     for (const e of state.enemies) {
       if (e.dead) continue;
+      e.dead = true; // dissolved: hit checks later in this tick (killBoss → endNight mid-update) must not find it in the grid
       const c = e.elite ? COLORS.gold : e.def.glow;
       for (let i = 0; i < 3; i++) {
         addParticle(e.x + rand(-e.r, e.r), e.y + rand(-e.r, e.r), rand(-25, 25), rand(-50, -10), rand(0.7, 1.3), rand(2.5, 4.5), c, 'bubble');
@@ -1970,6 +2043,7 @@
   const darkGrad = {};
   const DOCK_ANGLE = 2.25;
   const DARK_RES = 0.6; // darkness buffer pixels per CSS pixel
+  const LAMP_LIGHT_R = 180; // light hole of the lighthouse lamp (world units)
 
   const coastRadius = a => WORLD.islandR + 30 + 14 * Math.sin(5 * a + 0.6) + 8 * Math.sin(13 * a + 2.1) + 5 * Math.sin(23 * a + 4);
   const grassRadius = a => WORLD.islandR - WORLD.sandWidth + 18 * Math.sin(4 * a + 1) + 10 * Math.sin(9 * a) + 6 * Math.sin(17 * a + 2);
@@ -2185,6 +2259,13 @@
     view.dpr = dpr;
     view.zoom = clamp(Math.min(cssW, cssH) / 760, 0.55, 1.6);
     view.scale = view.zoom * dpr;
+    // the HUD padding is the safe-area inset plus a margin, the overlay's bottom padding max(gutter, safe-b)
+    try {
+      const hs = getComputedStyle(el.hud);
+      view.insL = parseFloat(hs.paddingLeft) || 12;
+      view.insR = parseFloat(hs.paddingRight) || 12;
+      view.insB = parseFloat(getComputedStyle($('ov-pause')).paddingBottom) || 16;
+    } catch (e) { /* keep the defaults */ }
     const bw = Math.max(1, Math.round(cssW * dpr)), bh = Math.max(1, Math.round(cssH * dpr));
     if (canvas.width !== bw || canvas.height !== bh) {
       canvas.width = bw;
@@ -2263,7 +2344,22 @@
     drawEmbers(visible, false);
     drawSlamsGround();
     if (state.boss) drawBoss(state.boss, false);
-    for (const e of state.enemies) if (visible(e.x, e.y, e.r * 3)) drawEnemy(e, false);
+    // creatures outside every light sit under the darkness, so a plain body blob is enough there
+    // (their glowing outlines are drawn in full in the glow pass)
+    const lod = darknessAlpha() > 0.7;
+    const lp0 = lanternPos(), lr0 = lanternRadius() * 0.95;
+    const lodHalf = beamStats(lv('beam')).half * BEAM_LAYERS[0].k;
+    for (const e of state.enemies) {
+      if (!visible(e.x, e.y, e.r * 3)) continue;
+      const lampR = LAMP_LIGHT_R + e.r;
+      if (lod && e.flash <= 0 && e.emerge >= 1 && dist2(e.x, e.y, lp0.x, lp0.y) > lr0 * lr0 &&
+        e.x * e.x + e.y * e.y > lampR * lampR && !inBeam(e.x, e.y, e.r, state.wpn.beamAngle, lodHalf)) {
+        ctx.fillStyle = e.def.body;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.r, 0, TAU);
+        ctx.fill();
+      } else drawEnemy(e, false);
+    }
     drawShots(visible, false);
     drawAnchors(false);
     drawPlayer();
@@ -2296,10 +2392,9 @@
     drawAura();
     drawSlamsGlow();
     drawEmbers(visible, true);
-    ctx.globalCompositeOperation = 'lighter';
+    // plain alpha blending here: on the dark backdrop it looks almost the same as 'lighter' and rasterizes much faster
     if (state.boss) drawBossGlow(state.boss);
     for (const e of state.enemies) if (visible(e.x, e.y, e.r * 3)) drawEnemy(e, true);
-    ctx.globalCompositeOperation = 'source-over';
     drawInks(visible);
     drawShots(visible, true);
     drawAnchors(true);
@@ -2708,7 +2803,7 @@
     }
     // lighthouse lamp
     if (!darkGrad.lamp) {
-      const g = d.createRadialGradient(0, 0, 0, 0, 0, 180);
+      const g = d.createRadialGradient(0, 0, 0, 0, 0, LAMP_LIGHT_R);
       g.addColorStop(0, 'rgba(0,0,0,1)');
       g.addColorStop(0.3, 'rgba(0,0,0,0.75)');
       g.addColorStop(1, 'rgba(0,0,0,0)');
@@ -2716,7 +2811,7 @@
     }
     d.fillStyle = darkGrad.lamp;
     d.beginPath();
-    d.arc(0, 0, 180, 0, TAU);
+    d.arc(0, 0, LAMP_LIGHT_R, 0, TAU);
     d.fill();
     // rotating beam: two opposite cones with soft layered edges
     if (!darkGrad.beam) darkGrad.beam = BEAM_LAYERS.map(l => beamGradient(d, l.a));
@@ -3123,9 +3218,10 @@
     if (x > -m && x < view.w + m && y > -m && y < view.h + m) return;
     const cx = view.w / 2, cy = view.h / 2;
     const a = Math.atan2(y - cy, x - cx);
-    const pad = 34;
-    const ex = clamp(cx + Math.cos(a) * view.w, pad, view.w - pad);
-    const ey = clamp(cy + Math.sin(a) * view.h, pad + 70, view.h - pad);
+    // stay clear of notches / rounded corners and below the HUD (it grows when the boss bar shows)
+    const top = el.hud.hidden ? 34 : el.hud.getBoundingClientRect().bottom + 20;
+    const ex = clamp(cx + Math.cos(a) * view.w, view.insL + 22, view.w - view.insR - 22);
+    const ey = clamp(cy + Math.sin(a) * view.h, top, view.h - view.insB - 22);
     ctx.save();
     ctx.translate(ex, ey);
     ctx.rotate(a);
@@ -3179,7 +3275,7 @@
     let dx = j.kx - j.bx, dy = j.ky - j.by;
     const d = Math.hypot(dx, dy);
     if (d > JOY.max) { dx *= JOY.max / d; dy *= JOY.max / d; }
-    ctx.fillStyle = 'rgba(4,10,18,0.35)';
+    ctx.fillStyle = 'rgba(4,10,18,0.2)';
     ctx.strokeStyle = 'rgba(241,228,198,0.45)';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -3191,12 +3287,16 @@
     ctx.arc(bx, by, JOY.dead, 0, TAU);
     ctx.stroke();
     const g = ctx.createRadialGradient(bx + dx, by + dy, 2, bx + dx, by + dy, JOY.knob);
-    g.addColorStop(0, 'rgba(255,214,140,0.95)');
-    g.addColorStop(1, 'rgba(255,160,60,0.7)');
+    // see-through knob with a bright rim, so the keeper stays visible under it
+    g.addColorStop(0, 'rgba(255,214,140,0.5)');
+    g.addColorStop(1, 'rgba(255,160,60,0.3)');
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(bx + dx, by + dy, JOY.knob, 0, TAU);
     ctx.fill();
+    ctx.strokeStyle = 'rgba(255,214,140,0.8)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
   }
 
   // ---- Creatures (procedural; body pass + glow pass) ----
@@ -3643,7 +3743,6 @@
       ctx.save();
       ctx.translate(b.x, b.y);
       ctx.rotate(Math.atan2(b.dashDy, b.dashDx));
-      ctx.globalCompositeOperation = 'source-over';
       const blink = reducedMotion ? 1 : 0.7 + 0.3 * Math.sin(renderTime * 28);
       ctx.fillStyle = 'rgba(255,84,104,' + (0.08 + 0.17 * k).toFixed(3) + ')';
       ctx.fillRect(0, -b.r * 0.85, len, b.r * 1.7);
@@ -3663,7 +3762,6 @@
       ctx.closePath();
       ctx.fill();
       ctx.restore();
-      ctx.globalCompositeOperation = 'lighter';
     }
     drawBoss(b, true);
   }
@@ -3969,7 +4067,7 @@
   const $ = id => document.getElementById(id);
   const el = {};
   const OVERLAYS = ['ov-title', 'ov-howto', 'ov-levelup', 'ov-dawn', 'ov-pause', 'ov-gameover', 'ov-victory'];
-  const ui = { lockUntil: 0, bannerT: 0, toastT: 0, cache: {}, confirmKind: null };
+  const ui = { lockUntil: 0, bannerT: 0, toastT: 0, cache: {}, confirmKind: null, muteTouched: false };
 
   const DAWN_HINTS = {
     2: 'Águas-vivas começam a subir à praia esta noite.',
@@ -3978,11 +4076,11 @@
     5: 'Baiacus espinhosos se aproximam — eles incham quando chegam perto.',
     6: 'A lua está quase cheia. Algo grande se mexe no fundo.',
     7: 'O Caranguejo-Rei sai da toca esta noite. Cuidado com as investidas.',
-    8: 'Lulas-tinteiras cospem tinta de longe. Não fique parado.',
+    8: 'Lulas-tinteiras cospem tinta de longe. Continue em movimento.',
     9: 'Metade da quinzena já passou. O farol continua aceso.',
     10: 'Criaturas douradas, bem mais resistentes, surgem na escuridão.',
     11: 'As noites estão mais longas. Cada ponto de vida conta.',
-    12: 'Faltam só três noites. O mar não dá trégua.',
+    12: 'Reta final da quinzena. O mar não dá trégua.',
     13: 'A penúltima noite. Um canto grave ecoa sob as ondas.',
     14: 'A última noite: o Leviatã das Marés virá atrás do farol.',
   };
@@ -4033,6 +4131,12 @@
     if (cls) n.className = cls;
     if (text != null) n.textContent = text;
     return n;
+  }
+  // secondary subtitle part: ' · text' inline, its own line (no dot) on narrow screens
+  function appendSubExtra(node, text) {
+    const x = make('span', 'sub-extra');
+    x.append(make('span', 'sub-sep', ' · '), text);
+    node.appendChild(x);
   }
 
   function setText(node, key, v) {
@@ -4101,6 +4205,7 @@
 
   function showBanner(title, sub, dur, boss) {
     if (!el.banner) return;
+    el.banner.removeAttribute('aria-hidden');
     el.bannerTitle.textContent = title;
     el.bannerSub.textContent = sub || '';
     el.banner.classList.toggle('is-boss', !!boss);
@@ -4109,10 +4214,14 @@
   }
   function hideBanner() {
     ui.bannerT = 0;
-    if (el.banner) el.banner.classList.remove('show');
+    if (el.banner) {
+      el.banner.classList.remove('show');
+      el.banner.setAttribute('aria-hidden', 'true');
+    }
   }
   function showToast(text, dur) {
     if (!el.toast) return;
+    el.toast.removeAttribute('aria-hidden');
     el.toast.textContent = text;
     el.toast.classList.add('show');
     ui.toastT = dur || 2.4;
@@ -4120,11 +4229,17 @@
   function updateBannerToast(dt) {
     if (ui.bannerT > 0) {
       ui.bannerT -= dt;
-      if (ui.bannerT <= 0) el.banner.classList.remove('show');
+      if (ui.bannerT <= 0) {
+        el.banner.classList.remove('show');
+        el.banner.setAttribute('aria-hidden', 'true');
+      }
     }
     if (ui.toastT > 0) {
       ui.toastT -= dt;
-      if (ui.toastT <= 0) el.toast.classList.remove('show');
+      if (ui.toastT <= 0) {
+        el.toast.classList.remove('show');
+        el.toast.setAttribute('aria-hidden', 'true');
+      }
     }
   }
 
@@ -4174,7 +4289,8 @@
     const shown = state.level - state.pendingLevelUps + 1;
     el.luH.textContent = 'Subiu para o nível ' + shown;
     const more = state.pendingLevelUps - 1;
-    el.luSub.textContent = more > 0 ? 'Escolha uma melhoria · mais\u00a0' + more + '\u00a0a\u00a0seguir' : 'Escolha uma melhoria';
+    el.luSub.textContent = 'Escolha uma melhoria';
+    if (more > 0) appendSubExtra(el.luSub, 'mais\u00a0' + more + '\u00a0a\u00a0seguir');
     const wrap = el.luCards;
     wrap.textContent = '';
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -4198,8 +4314,8 @@
       body.appendChild(make('span', 'card-desc', o.desc(L + 1)));
       body.appendChild(make('span', 'card-kind', o.kind === 'weapon' ? 'Arma' : o.kind === 'passive' ? 'Passiva' : 'Item'));
       btn.appendChild(body);
-      btn.addEventListener('click', ev => {
-        if (ev.detail > 0 && performance.now() < ui.lockUntil) return; // avoid accidental taps
+      btn.addEventListener('click', () => {
+        if (performance.now() < ui.lockUntil) return; // avoid accidental taps and key mashing
         pickOffer(i);
       });
       wrap.appendChild(btn);
@@ -4226,10 +4342,11 @@
   }
   function closeConfirm() {
     const wasOpen = !el.pauseConfirm.hidden;
+    const kind = ui.confirmKind;
     ui.confirmKind = null;
     el.pauseConfirm.hidden = true;
     el.pauseActions.hidden = false;
-    if (wasOpen) el.btnResume.focus();
+    if (wasOpen) (kind === 'quit' ? el.btnQuit : el.btnRestart).focus(); // back to the button that asked
   }
 
   // =========================================================================
@@ -4242,7 +4359,15 @@
     if (el.hud && el.hud.hidden === hudOn) el.hud.hidden = !hudOn;
     // keep keyboard focus inside the open overlay
     if (el.hud) el.hud.inert = s !== 'playing';
-    if (s !== 'playing') Input.releasePointer();
+    if (s !== 'playing') {
+      Input.releasePointer();
+      // overlays hide the banner and toast (CSS): keep their stale text out of the accessibility tree too
+      if (el.banner) el.banner.setAttribute('aria-hidden', 'true');
+      if (el.toast) el.toast.setAttribute('aria-hidden', 'true');
+    } else {
+      if (el.banner && ui.bannerT > 0) el.banner.removeAttribute('aria-hidden');
+      if (el.toast && ui.toastT > 0) el.toast.removeAttribute('aria-hidden');
+    }
     Sound.setAmbient(s === 'playing' ? 1 : s === 'paused' || s === 'levelup' ? 0.4 : 0.75);
     try { document.body.setAttribute('data-screen', s); } catch (e) { /* ignore */ }
   }
@@ -4262,12 +4387,14 @@
     if (state.screen !== 'howto') return;
     setScreen('title');
     showOverlay('ov-title');
+    el.btnHowto.focus();
   }
 
   function pauseGame() {
     if (state.screen !== 'playing') return;
     setScreen('paused');
-    el.pauseSub.textContent = 'Noite ' + state.night + '/' + NIGHTS.total + ' · Nív. ' + state.level + ' · ' + fmtInt(currentScore()) + ' pontos';
+    el.pauseSub.textContent = 'Noite ' + state.night + '/' + NIGHTS.total + ' · Nív.\u00a0' + state.level;
+    appendSubExtra(el.pauseSub, fmtInt(currentScore()) + ' pontos');
     ui.confirmKind = null;
     el.pauseConfirm.hidden = true;
     el.pauseActions.hidden = false;
@@ -4335,7 +4462,8 @@
     p.hp += amount;
     state.lastDawnHeal = Math.round(amount);
     setScreen('dawn');
-    el.dawnSub.textContent = 'Dia ' + state.night + ' sobrevivido · faltam ' + (NIGHTS.total - state.night) + (NIGHTS.total - state.night === 1 ? ' noite' : ' noites');
+    const left = NIGHTS.total - state.night;
+    el.dawnSub.textContent = 'Dia ' + state.night + ' sobrevivido · ' + (left === 1 ? 'falta 1 noite' : 'faltam ' + left + ' noites');
     renderPips(el.dawnPips, state.night, 0);
     renderStats(el.dawnStats, [
       ['Criaturas derrotadas', fmtInt(state.nightKills)],
@@ -4395,6 +4523,7 @@
   }
 
   function toggleMute() {
+    ui.muteTouched = true;
     prefs.muted = !prefs.muted;
     Sound.setMuted(prefs.muted);
     savePrefs();
@@ -4415,7 +4544,8 @@
     on(el.btnHowtoBack, () => { Sound.play('click'); closeHowto(); });
     on(el.btnSoundTitle, toggleMute);
     on(el.btnSoundPause, toggleMute);
-    on(el.btnMute, toggleMute);
+    // drop focus after a pointer click so Enter during play cannot toggle it again
+    on(el.btnMute, ev => { toggleMute(); if (ev.detail > 0) el.btnMute.blur(); });
     on(el.btnPause, () => pauseGame());
     on(el.btnResume, () => resumeGame());
     on(el.btnRestart, () => openConfirm('restart'));
@@ -4428,8 +4558,8 @@
       if (kind === 'quit') toMenu();
       else restartRun();
     });
-    on(el.btnNextNight, ev => {
-      if (ev.detail > 0 && performance.now() < ui.lockUntil) return;
+    on(el.btnNextNight, () => {
+      if (performance.now() < ui.lockUntil) return; // a fast double press must not skip the Dawn screen
       startNextNight();
     });
     on(el.btnRetry, () => { if (state.screen === 'gameover') restartRun(); });
@@ -4440,10 +4570,30 @@
 
   // ---- Input wiring ----
 
+  // Tab cycles through an open modal dialog's buttons instead of leaving the game (matters when it is embedded).
+  // The non-modal title screen is not trapped, so keyboard users can Tab back out to the host page.
+  function trapTab(e) {
+    let ov = null;
+    for (const id of OVERLAYS) { const o = $(id); if (!o.hidden) { ov = o; break; } }
+    if (!ov || ov.getAttribute('aria-modal') !== 'true') return;
+    const btns = Array.prototype.filter.call(ov.querySelectorAll('button'), b => b.offsetParent !== null && !b.disabled);
+    if (!btns.length) return;
+    const first = btns[0], last = btns[btns.length - 1], a = document.activeElement;
+    let to = null;
+    if (!ov.contains(a)) to = e.shiftKey ? last : first;
+    else if (e.shiftKey && a === first) to = last;
+    else if (!e.shiftKey && a === last) to = first;
+    if (to) { e.preventDefault(); to.focus(); }
+  }
+
   function onKeyDown(e) {
     const code = codeOf(e);
     const key = (e.key || '').toLowerCase();
     Sound.init();
+    if (code === 'Tab') {
+      if (state.screen !== 'playing') trapTab(e);
+      return;
+    }
     if (MOVE_KEYS[code]) {
       Input.keys.add(code);
       if (state.screen === 'playing') e.preventDefault();
@@ -4459,8 +4609,11 @@
     }
     if (e.repeat) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (code === 'KeyM') { toggleMute(); return; }
-    if (code === 'KeyP' || code === 'Escape' || key === 'escape') {
+    // letter shortcuts follow the typed letter (AZERTY, Dvorak…); non-Latin layouts fall back to the physical key
+    const ascii = key.length === 1 && key >= '!' && key <= '~';
+    const letter = (ch, c) => (ascii ? key === ch : code === c);
+    if (letter('m', 'KeyM')) { toggleMute(); return; }
+    if (letter('p', 'KeyP') || code === 'Escape' || key === 'escape') {
       const esc = code === 'Escape' || key === 'escape';
       if (state.screen === 'playing') { e.preventDefault(); pauseGame(); }
       else if (state.screen === 'paused') {
@@ -4480,7 +4633,7 @@
     }
     if (state.screen === 'dawn' && (code === 'Enter' || code === 'NumpadEnter' || code === 'Space')) {
       const t = e.target;
-      if (!(t && t.tagName === 'BUTTON')) { e.preventDefault(); startNextNight(); }
+      if (!(t && t.tagName === 'BUTTON')) { e.preventDefault(); if (performance.now() >= ui.lockUntil) startNextNight(); }
       return;
     }
     if (state.screen === 'playing' && code === 'Space') e.preventDefault();
@@ -4491,20 +4644,36 @@
     Input.keys.delete(code);
   }
 
+  const downPointers = new Map(); // pointerId -> { sx, sy, x, y } for pointers held on the canvas
+
+  function grabJoystick(id, bx, by, kx, ky) {
+    const j = Input.joy;
+    const r = canvas.getBoundingClientRect();
+    j.active = true;
+    j.id = id;
+    j.bx = bx; j.by = by;
+    j.kx = kx; j.ky = ky;
+    j.l = r.left; j.t = r.top; j.r = r.right; j.b = r.bottom;
+  }
+
   function onPointerDown(e) {
     Sound.init();
     if (state.screen !== 'playing' || state.phase === 'dying') return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    const j = Input.joy;
-    if (j.active) return;
+    if (e.isPrimary) {
+      // a new primary pointer means no older one is still down: drop anything stale
+      downPointers.clear();
+      Input.releasePointer();
+    }
+    downPointers.set(e.pointerId, { sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY });
     e.preventDefault();
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-    j.active = true;
-    j.id = e.pointerId;
-    j.bx = j.kx = e.clientX;
-    j.by = j.ky = e.clientY;
+    if (Input.joy.active) return;
+    grabJoystick(e.pointerId, e.clientX, e.clientY, e.clientX, e.clientY);
   }
   function onPointerMove(e) {
+    const dp = downPointers.get(e.pointerId);
+    if (dp) { dp.x = e.clientX; dp.y = e.clientY; }
     const j = Input.joy;
     if (!j.active || e.pointerId !== j.id) return;
     e.preventDefault();
@@ -4520,8 +4689,18 @@
     }
   }
   function onPointerUp(e) {
+    downPointers.delete(e.pointerId);
     const j = Input.joy;
-    if (j.active && e.pointerId === j.id) Input.releasePointer();
+    if (!(j.active && e.pointerId === j.id)) return;
+    Input.releasePointer();
+    // hand the stick to another finger that is still down (thumb swap)
+    if (state.screen !== 'playing' || state.phase === 'dying') return;
+    for (const [id, dp] of downPointers) {
+      const dx = dp.x - dp.sx, dy = dp.y - dp.sy, d = Math.hypot(dx, dy), lim = JOY.max * 1.5;
+      const k = d > lim ? lim / d : 1;
+      grabJoystick(id, dp.x - dx * k, dp.y - dy * k, dp.x, dp.y);
+      break;
+    }
   }
 
   function bindInput() {
@@ -4530,14 +4709,17 @@
     window.addEventListener('blur', () => {
       Input.clearKeys();
       Input.releasePointer();
+      downPointers.clear();
       if (state.screen === 'playing') pauseGame();
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         Input.clearKeys();
         Input.releasePointer();
+        downPointers.clear();
         if (state.screen === 'playing') pauseGame();
-      }
+        Sound.suspend(); // no sea noise from a background tab
+      } else Sound.resume();
     });
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
@@ -4592,21 +4774,33 @@
     updateBannerToast(dt);
   }
 
-  let started = false;
-  function start(data) {
-    if (started) return;
-    started = true;
-    data = data || {};
-    if (!loadPrefs()) {
-      const best = data.best;
-      if (best && typeof best === 'object') {
-        prefs.bestScore = Math.max(0, Number(best.score) || 0);
-        prefs.bestNight = clamp(Number(best.night) || 0, 0, NIGHTS.total);
-      } else if (typeof best === 'number') {
-        prefs.bestScore = Math.max(0, best);
-      }
-      if (typeof data.muted === 'boolean') prefs.muted = data.muted;
+  let started = false, storageLoaded = false;
+  // record and mute setting from the Artifact host, used when storage has nothing for us
+  function applyHotData(data) {
+    const best = data.best;
+    if (best && typeof best === 'object') {
+      prefs.bestScore = Math.max(prefs.bestScore, Number(best.score) || 0);
+      prefs.bestNight = Math.max(prefs.bestNight, clamp(Number(best.night) || 0, 0, NIGHTS.total));
+    } else if (typeof best === 'number') {
+      prefs.bestScore = Math.max(prefs.bestScore, best);
     }
+    if (typeof data.muted === 'boolean' && !ui.muteTouched) prefs.muted = data.muted;
+  }
+  function start(data) {
+    data = data || {};
+    if (started) {
+      // the host answered after the boot fallback had already started the game
+      if (!storageLoaded) {
+        applyHotData(data);
+        Sound.setMuted(prefs.muted);
+        updateRecordLine();
+        syncSoundUi();
+      }
+      return;
+    }
+    started = true;
+    storageLoaded = loadPrefs();
+    if (!storageLoaded) applyHotData(data);
     Sound.setMuted(prefs.muted);
 
     canvas = $('game');

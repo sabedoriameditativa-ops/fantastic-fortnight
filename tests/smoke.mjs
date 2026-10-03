@@ -210,6 +210,32 @@ try {
     return 'night ' + s.night;
   });
 
+  await step('6b. Enter pressed twice fast on a sunrise level-up stops at Dawn', async () => {
+    let s = await getState(page);
+    if (s.screen === 'levelup') s = await resolveLevelUps(page, "s.screen === 'playing'");
+    await debug(page, 'skipNight');
+    await debug(page, 'addXp', s.xpToNext); // queues a level-up for the end of the sunrise
+    s = await waitState(page, "s.screen === 'levelup'", 4000);
+    while (s.screen === 'levelup' && s.pendingLevelUps > 1) {
+      await page.keyboard.press('1');
+      await page.waitForTimeout(80);
+      s = await getState(page);
+    }
+    assert(s.screen === 'levelup', 'screen ' + s.screen);
+    await page.waitForTimeout(350);
+    await page.focus('#lu-cards .card');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(40);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+    s = await getState(page);
+    assert(s.screen === 'dawn', `screen ${s.screen}, night ${s.night} (Dawn was skipped)`);
+    await page.waitForTimeout(350);
+    await page.keyboard.press('Enter');
+    s = await waitState(page, "s.screen === 'playing' && s.night === 3", 2000);
+    return 'dawn held; a later Enter started night ' + s.night;
+  });
+
   await step('7. setNight(7) → boss night with boss; damageBoss → dawn', async () => {
     await debug(page, 'setNight', 7);
     let s = await waitState(page, 's.isBossNight && s.bossAlive', 2000);
@@ -302,6 +328,30 @@ try {
     await pp.waitForTimeout(400);
     await shot(pp, 'phone-04-gameover');
     return notes.join(', ');
+  });
+
+  await step('11b. Phone: lifting the joystick finger hands the stick to a finger still down', async () => {
+    await pp.tap('#btn-retry');
+    await waitState(pp, "s.screen === 'playing'", 1500);
+    await pp.evaluate(() => window.QF.debug.godMode(true));
+    const cdp = await phone.newCDPSession(pp);
+    const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([id, x, y]) => ({ id, x, y })) });
+    // finger A drags right
+    await touch('touchStart', [[1, 120, 600]]);
+    for (let i = 1; i <= 6; i++) { await touch('touchMove', [[1, 120 + i * 10, 600]]); await pp.waitForTimeout(16); }
+    // finger B goes down and drags left while A is still held
+    await touch('touchStart', [[1, 180, 600], [2, 300, 600]]);
+    for (let i = 1; i <= 6; i++) { await touch('touchMove', [[1, 180, 600], [2, 300 - i * 10, 600]]); await pp.waitForTimeout(16); }
+    // A lifts; B stays down and keeps pulling left
+    await touch('touchEnd', [[1, 180, 600]]);
+    for (let i = 1; i <= 3; i++) { await touch('touchMove', [[2, 240 - i * 2, 600]]); await pp.waitForTimeout(16); }
+    await pp.waitForTimeout(150);
+    const p0 = (await getState(pp)).player;
+    await pp.waitForTimeout(400);
+    const p1 = (await getState(pp)).player;
+    await touch('touchEnd', []);
+    assert(p1.x < p0.x - 30, `x ${p0.x.toFixed(1)} -> ${p1.x.toFixed(1)} after finger A lifted`);
+    return `moved ${(p1.x - p0.x).toFixed(0)} u with finger B`;
   });
   await phone.close();
 
