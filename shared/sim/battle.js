@@ -66,7 +66,7 @@ export function createBattle(config) {
   const placed = planDeployment(players, world);
   for (const d of placed) {
     const id = state.nextId++;
-    const s = makeShip({ id, cls: d.cls, owner: d.owner, team: d.team, x: d.x, y: d.y, heading: d.a, tick: 0, slot: state.alive[d.team].length });
+    const s = makeShip({ id, cls: d.cls, owner: d.owner, team: d.team, x: d.x, y: d.y, heading: d.a, tick: 0 });
     s.ai.nextThink = id % profiles[d.owner].thinkInterval;
     state.ships.push(s);
     state.alive[d.team].push(id);
@@ -128,8 +128,7 @@ export function stepBattle(state) {
   const tick = state.tick, ships = state.ships;
   rebuildGrid(state);
   recomputeTargeting(state);
-  if (tick % 10 === 0) teamThink(state, 0);
-  else if (tick % 10 === 5) teamThink(state, 1);
+  if (tick % 10 === 0) { teamThink(state, 0); teamThink(state, 1); } // both teams on the same tick: a staggered think let one side switch phase/leash first on every seed
   if (tick >= state.suddenDeathTick) {
     if (!state.suddenDeath) { state.suddenDeath = true; events.push(['phase', 'suddenDeath']); }
     state.sdMul = 1 + SUDDEN_DEATH_RAMP * Math.floor((tick - state.suddenDeathTick) / SUDDEN_DEATH_RAMP_TICKS);

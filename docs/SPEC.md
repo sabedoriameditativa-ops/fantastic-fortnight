@@ -199,15 +199,15 @@ Teleport destinations are clamped inside the arena and pushed out of other hulls
 | knob | facil | normal | dificil | especialista |
 |---|---|---|---|---|
 | thinkInterval (ticks) | 16 | 8 | 5 | 4 |
-| scoreNoise σ | 0.6 | 0.25 | 0.08 | 0 |
-| randomTargetProb | 0.3 | 0.1 | 0 | 0 |
+| scoreNoise σ | 0.6 | 0.25 | 0.12 | 0 |
+| randomTargetProb | 0.3 | 0.1 | 0.03 | 0 |
 | abilityDelayTicks | 20 | 8 | 2 | 0 |
-| abilityMiscastProb | 0.3 | 0.1 | 0 | 0 |
+| abilityMiscastProb | 0.3 | 0.1 | 0.05 | 0 |
 | abilityNoise (threshold jitter) | 0.5 | 0.2 | 0.05 | 0 |
 | teamWeight (focus fire) | 0 | 0.5 | 1 | 1 |
 | overkillAvoid | off | off | on | on |
 | retreat / formation / kiting | off | on | on | on |
-| budgetMul (enemy budget) | 0.8 | 1.0 | 1.15 | 1.3 |
+| budgetMul (enemy budget) | 0.8 | 1.0 | 1.05 | 1.2 |
 | builder | random | preset | counter | counter |
 Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
 

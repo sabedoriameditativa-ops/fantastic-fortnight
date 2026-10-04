@@ -82,11 +82,13 @@ describe('levelInfo', () => {
 
 describe('enemyBudget', () => {
   test('round(base × levelMul × profile.budgetMul)', () => {
-    assert.equal(enemyBudget(1, 'facil'), Math.round(1500 * 0.5 * 0.8));   // 600
-    assert.equal(enemyBudget(1, 'normal'), 750);
-    assert.equal(enemyBudget(1, 'dificil'), Math.round(1500 * 0.5 * 1.15)); // 863
-    assert.equal(enemyBudget(1, 'especialista'), 975);
-    assert.equal(enemyBudget(15, 'especialista'), Math.round(1500 * 1.5 * 1.3)); // 2925
+    // budgetMul per difficulty is a tuning knob (shared/aiProfiles.js); assert the formula, not the constants
+    const mul = (d) => AI_PROFILES[d].budgetMul;
+    assert.equal(enemyBudget(1, 'facil'), Math.round(1500 * 0.5 * mul('facil')));
+    assert.equal(enemyBudget(1, 'normal'), Math.round(1500 * 0.5 * mul('normal')));
+    assert.equal(enemyBudget(1, 'dificil'), Math.round(1500 * 0.5 * mul('dificil')));
+    assert.equal(enemyBudget(1, 'especialista'), Math.round(1500 * 0.5 * mul('especialista')));
+    assert.equal(enemyBudget(15, 'especialista'), Math.round(1500 * 1.5 * mul('especialista')));
     assert.equal(enemyBudget(9, 'normal'), 1500);
     assert.equal(enemyBudget(levelInfo(9), 'normal'), 1500);
     assert.equal(enemyBudget(3, 'normal', 800), Math.round(800 * 0.7));
