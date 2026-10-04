@@ -523,7 +523,7 @@ export const PRESETS = {
 
   vor_mare: { id: 'vor_mare', faction: 'vorrax', name: 'Maré Viva', style: 'swarm',
     desc: 'Colmeia-mãe, matrizes e dezenas de larvas e zangões.',
-    ships: [['vor_colmeia', 1], ['vor_matriz', 2], ['vor_zangao', 8], ['vor_cuspidor', 4], ['vor_larva', 30]] },
+    ships: [['vor_colmeia', 1], ['vor_matriz', 2], ['vor_zangao', 7], ['vor_cuspidor', 5], ['vor_larva', 25]] },
   vor_garras: { id: 'vor_garras', faction: 'vorrax', name: 'Garras da Rainha', style: 'brawl',
     desc: 'Rainha, mandíbulas e carrapatos: combate corpo a corpo.',
     ships: [['vor_rainha', 1], ['vor_mandibula', 2], ['vor_carrapato', 4], ['vor_zangao', 5], ['vor_larva', 14]] },
