@@ -8,7 +8,8 @@ import fs from 'node:fs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
-const PAGE_URL = pathToFileURL(path.join(ROOT, 'index.html')).href + '#debug';
+const PLAIN_URL = pathToFileURL(path.join(ROOT, 'index.html')).href; // what players load
+const PAGE_URL = PLAIN_URL + '#debug';
 const SHOT_DIR = process.env.SHOT_DIR || '';
 
 async function loadPlaywright() {
@@ -379,7 +380,36 @@ try {
   });
   await land.close();
 
-  await step('13. No console errors or page errors', async () => {
+  // ======================= no #debug (what players get) =======================
+  const plain = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const np = await plain.newPage();
+  watchErrors(np, 'no-debug');
+  await np.goto(PLAIN_URL);
+  await np.waitForFunction(() => window.QF && document.querySelector('#ov-title'), null, { timeout: 5000 });
+  await np.waitForTimeout(400);
+
+  await step('13. Without #debug: QF has only getState, a later #debug adds nothing, the game plays', async () => {
+    const keys = await np.evaluate(() => Object.keys(window.QF));
+    assert(JSON.stringify(keys) === '["getState"]', 'QF keys ' + JSON.stringify(keys));
+    await np.evaluate(() => { location.hash = '#debug'; });
+    await np.waitForTimeout(100);
+    assert(await np.evaluate(() => typeof window.QF.debug) === 'undefined', 'QF.debug appeared after the hash change');
+    await np.click('#btn-start');
+    const s0 = await waitState(np, "s.screen === 'playing'", 1500);
+    await np.keyboard.down('d');
+    await np.waitForTimeout(800);
+    await np.keyboard.up('d');
+    // a few seconds of real play with the Faísca firing: the no-telemetry paths of hits, kills and the night
+    await np.waitForTimeout(3000);
+    const s1 = await getState(np);
+    assert(s1.screen === 'playing' || s1.screen === 'levelup', 'screen ' + s1.screen);
+    assert(s1.nightElapsed > s0.nightElapsed + 1, `night time ${s0.nightElapsed.toFixed(2)} -> ${s1.nightElapsed.toFixed(2)}`);
+    assert(s1.player.x > s0.player.x + 40, `x ${s0.player.x.toFixed(1)} -> ${s1.player.x.toFixed(1)}`);
+    return `night time ${s0.nightElapsed.toFixed(1)} → ${s1.nightElapsed.toFixed(1)} s, x ${s0.player.x.toFixed(0)} → ${s1.player.x.toFixed(0)}, kills ${s1.kills}`;
+  });
+  await plain.close();
+
+  await step('14. No console errors or page errors', async () => {
     assert(errors.length === 0, errors.length + ' error(s): ' + errors.slice(0, 3).join(' | '));
   });
 } catch (err) {

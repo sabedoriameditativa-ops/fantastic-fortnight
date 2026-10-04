@@ -78,12 +78,14 @@ para simular partidas sem desenhar a tela: `seed(n)`, `startRun(seed)`, `runStep
 
 ```bash
 node tools/balance.mjs --bot kite --picks random --runs 40 --concurrency 3 --out /tmp/eq/kite-random.json
-node tools/balance.mjs --bot kite --picks beamFirst --tune '{"WEAPONS.beam.dpsPerLevel": 6}' --runs 40 --out /tmp/eq/lente.json
+node tools/balance.mjs --bot kite --picks beamFirst --tune '{"WEAPONS.beam.dpsPerLevel": 8}' --runs 40 --out /tmp/eq/lente.json
 node tools/balance-summary.mjs /tmp/eq/*.json --out /tmp/eq/RESUMO.md
 ```
 
 Meça com 40 partidas ou mais por configuração: com 20, a taxa de vitória muda bastante de um lote de sementes
-para outro. `--help` lista todas as opções.
+para outro. O resumo junta numa só linha os arquivos com a mesma configuração (robô, `--picks`, `--tune`, `--nights`,
+`--bot-opts` e `--viewport`), como mais sementes do mesmo teste; use `--label` para mantê-los separados. `--help` lista
+todas as opções.
 
 ## Créditos
 

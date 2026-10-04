@@ -49,6 +49,8 @@
     wetSand: '#2b2c22',
     darkness: [4, 10, 18],
   };
+  // squid ink is violet, the Leviatã's orbs cyan (both fly in state.inks)
+  const inkColor = s => (s.boss ? '#9ad8ff' : COLORS.ink);
 
   const SIM = { step: 1 / 60, maxFrame: 0.25, maxSteps: 5 };
 
@@ -103,7 +105,7 @@
     ringMargin: 120, // recycling ring: beyond the screen corner distance
     edgeMargin: 120, // new spawns: this far outside the visible rect
     startAcc: 1, // spawn credit at night start (was 0.6): the first creature surfaces as the night begins
-    firstNightAcc: 2, // new: night 1 opens with two creatures, so the first kill never waits on a far-edge spawn
+    firstNightAcc: 2, // new: night 1 opens with two creatures, so the first kill comes as soon as one is on screen (~2.5 s)
     groupChance: 0.2,
     groupSize: 3,
     recycleExtra: 900,
@@ -164,7 +166,10 @@
       hp: 5200, r: 80, speed: 48, dmg: 30, glow: '#7ff3ff', keep: 180,
       ringEvery: 3.2, ringCount: 16, ringCountEnraged: 24, orbDmg: 8, orbSpeed: 210, orbLife: 6,
       // slamEvery 6 → 7 s, slamWarn 1 → 1.4 s, the 2nd slam's lead 0.9 → 0.6 s of keeper motion, slamDmg 25 → 16 and
-      // orbDmg 10 → 8: the old pair caught anyone who did not read the telegraph, so only dodgers ever won
+      // orbDmg 10 → 8: the old pair caught anyone who did not read the telegraph, so only dodgers ever won.
+      // By design a keeper moving at full speed now clears both circles (the 2nd lands ~1 s of travel behind its lead
+      // point); they punish stopping, turning back, slow joystick input and being pinned at the shore or the tower.
+      // A lead ≥ 1.4 s catches straight runners again and costs ~10 pp of night-14 wins in the kite bot arm
       slamEvery: 7, slamWarn: 1.4, slamR: 120, slamDmg: 16, slamLead: 0.6,
       summonEvery: 7, summonCount: 3, emberTotal: 120,
     },
@@ -173,8 +178,9 @@
   const WEAPONS = {
     // bossThreatR: aim at the boss unless a creature is this close; fanWidth caps the fan's spread at the target (world units)
     // range 460 → 560 and dmg 12 → 15 (spec: 10): a keeper who keeps moving still reaches the bosses and the
-    // squids (and night 1's first crab falls sooner)
-    spark: { range: 560, cooldown: 0.55, dmg: 15, speed: 560, life: 1.1, r: 5, spread: 0.14, fanWidth: 14, knock: 45, bossThreatR: 150 },
+    // squids. Creatures off screen are never targeted (nearestTarget), so on a phone the range only matters along
+    // the long screen axis
+    spark: { range: 560, cooldown: 0.55, dmg: 15, dmgL3: 1.3, cdL5: 0.8, speed: 560, life: 1.1, r: 5, spread: 0.14, fanWidth: 14, knock: 45, bossThreatR: 150 },
     // the light burns hottest near the lens: full damage up to falloffStart, fading to falloffMin at falloffEnd
     // dps 18 → 16, dpsPerLevel 12 → 6, and the heat now stays near the tower (full up to 200 u, none past 650 u; was
     // 380 / 1100 u, 45 %): burning every creature on the island, it out-damaged all the other weapons together
@@ -746,7 +752,9 @@
     return out;
   }
 
-  // bossThreatR (optional): prefer the boss while no other creature is closer than this
+  // bossThreatR (optional): prefer the boss while no other creature is closer than this.
+  // Creatures count only inside the visible rect around (x, y) plus 40 u, so a shot never kills something the keeper
+  // cannot see (the boss has an HP bar and an edge arrow, so it is exempt); `range` stays the upper bound.
   function nearestTarget(x, y, range, bossThreatR) {
     const boss = state.boss;
     if (bossThreatR && boss && !boss.dead && boss.emerge >= 1 && dist2(x, y, boss.x, boss.y) - boss.r * boss.r < range * range) {
@@ -757,8 +765,10 @@
       if (!threat) return boss;
     }
     let best = null, bd = range * range;
+    const vhw = view.w / view.zoom / 2 + 40, vhh = view.h / view.zoom / 2 + 40;
     for (const e of state.enemies) {
       if (e.dead || e.emerge < 0.6) continue;
+      if (Math.abs(e.x - x) > vhw || Math.abs(e.y - y) > vhh) continue;
       const d = dist2(x, y, e.x, e.y);
       if (d < bd) { bd = d; best = e; }
     }
@@ -774,15 +784,17 @@
   // 7. UPGRADES & WEAPONS
   // =========================================================================
 
+  // card numbers come from the tables above, so a tuned value never leaves a card out of date
+  const pct = f => Math.round(f * 100) + '%'; // round: (1 - 0.9) × 100 is 9.999…
   const UPGRADES = [
     {
       id: 'spark', kind: 'weapon', name: 'Faísca',
       desc: L => [
-        'Dispara faíscas na criatura mais próxima.',
+        'Dispara faíscas na criatura mais próxima ou no chefe.',
         'Mais uma faísca por disparo, em leque.',
-        'Faíscas 30% mais fortes.',
+        'Faíscas ' + pct(WEAPONS.spark.dmgL3 - 1) + ' mais fortes.',
         'Cada faísca atravessa mais uma criatura.',
-        'Mais uma faísca e recarga 20% mais rápida.',
+        'Mais uma faísca e recarga ' + pct(1 - WEAPONS.spark.cdL5) + ' mais rápida.',
       ][L - 1],
     },
     {
@@ -795,7 +807,7 @@
       id: 'aura', kind: 'weapon', name: 'Lanterna Ardente',
       desc: L => L === 1
         ? 'Sua lanterna queima quem chega perto: ' + WEAPONS.aura.dmg + ' de dano a cada meio segundo.'
-        : 'Chama mais forte: ' + (WEAPONS.aura.dmg + WEAPONS.aura.dmgPerLevel * (L - 1)) + ' de dano por pulso e ' + Math.round(WEAPONS.aura.radiusPerLevel * 100) + '% mais alcance.',
+        : 'Chama mais forte: ' + (WEAPONS.aura.dmg + WEAPONS.aura.dmgPerLevel * (L - 1)) + ' de dano por pulso e ' + pct(WEAPONS.aura.radiusPerLevel) + ' mais alcance.',
     },
     {
       id: 'anchors', kind: 'weapon', name: 'Âncoras Giratórias',
@@ -806,20 +818,20 @@
     {
       id: 'harpoon', kind: 'weapon', name: 'Arpão',
       desc: L => [
-        'Lança um arpão pesado na criatura mais próxima; ele atravessa todas no caminho.',
-        'Arpão mais pesado: +15 de dano.',
-        'Recarga 10% mais rápida.',
+        'Lança um arpão pesado na criatura mais próxima ou no chefe; ele atravessa todas no caminho.',
+        'Arpão mais pesado: +' + WEAPONS.harpoon.dmgL2 + ' de dano.',
+        'Recarga ' + pct(1 - WEAPONS.harpoon.cdL3) + ' mais rápida.',
         'Lança dois arpões: um no alvo e outro na direção oposta.',
-        'Ponta de ferro forjado: +50% de dano.',
+        'Ponta de ferro forjado: +' + pct(WEAPONS.harpoon.dmgL5 - 1) + ' de dano.',
       ][L - 1],
     },
-    { id: 'boots', kind: 'passive', name: 'Botas de Marinheiro', desc: () => 'Você corre 10% mais rápido.' },
-    { id: 'hull', kind: 'passive', name: 'Casco Reforçado', desc: () => '+20 de vida máxima e recupera 20 de vida.' },
+    { id: 'boots', kind: 'passive', name: 'Botas de Marinheiro', desc: () => 'Você corre ' + pct(PASSIVES.boots) + ' mais rápido.' },
+    { id: 'hull', kind: 'passive', name: 'Casco Reforçado', desc: () => '+' + PASSIVES.hull + ' de vida máxima e recupera ' + PASSIVES.hullHeal + ' de vida.' },
     { id: 'regen', kind: 'passive', name: 'Pulmões de Faroleiro', desc: () => '+' + String(PASSIVES.regen).replace('.', ',') + ' de vida recuperada por segundo.' },
-    { id: 'magnet', kind: 'passive', name: 'Ímã de Brasas', desc: () => 'Atrai brasas de 35% mais longe.' },
-    { id: 'wick', kind: 'passive', name: 'Pavio Longo', desc: () => 'A lanterna ilumina 15% mais longe — e a Lanterna Ardente também.' },
-    { id: 'powder', kind: 'passive', name: 'Pólvora Seca', desc: () => 'Todas as armas causam 12% mais dano.' },
-    { id: 'hourglass', kind: 'passive', name: 'Ampulheta', desc: () => 'Faísca, Arpão e Lanterna Ardente recarregam 8% mais rápido.' },
+    { id: 'magnet', kind: 'passive', name: 'Ímã de Brasas', desc: () => 'Atrai brasas de ' + pct(PASSIVES.magnet) + ' mais longe.' },
+    { id: 'wick', kind: 'passive', name: 'Pavio Longo', desc: () => 'A lanterna ilumina ' + pct(PASSIVES.wick) + ' mais longe — e a Lanterna Ardente também.' },
+    { id: 'powder', kind: 'passive', name: 'Pólvora Seca', desc: () => 'Todas as armas causam ' + pct(PASSIVES.powder) + ' mais dano.' },
+    { id: 'hourglass', kind: 'passive', name: 'Ampulheta', desc: () => 'Faísca, Arpão e Lanterna Ardente recarregam ' + pct(PASSIVES.hourglass) + ' mais rápido.' },
   ];
   const FALLBACKS = [
     { id: 'tea', kind: 'item', name: 'Chá quente', desc: () => 'Recupera 40 de vida.' },
@@ -890,9 +902,9 @@
     const W = WEAPONS.spark;
     return {
       count: 1 + (L >= 2 ? 1 : 0) + (L >= 5 ? 1 : 0),
-      dmg: W.dmg * (L >= 3 ? 1.3 : 1),
+      dmg: W.dmg * (L >= 3 ? W.dmgL3 : 1),
       pierce: L >= 4 ? 1 : 0,
-      cd: W.cooldown * (L >= 5 ? 0.8 : 1),
+      cd: W.cooldown * (L >= 5 ? W.cdL5 : 1),
     };
   }
   function beamStats(L) {
@@ -951,20 +963,23 @@
     for (const e of state.enemies) {
       if (e.dead) continue;
       e.inBeam = inBeam(e.x, e.y, e.r, a0, bs.half);
-      const hit = e.inBeam && hurting ? dmg * beamFalloff(e.x, e.y) : 0;
+      const k = e.inBeam && hurting ? beamFalloff(e.x, e.y) : 0;
+      const hit = dmg * k;
       if (hit > 0) { // past falloffEnd the beam still slows but no longer burns
         e.burn = 0.12;
+        e.burnK = k; // the ember glow fades with the falloff: it shows how hot the light still is
         if (dbg.tel) dbg.tel.dealt('beam', Math.min(hit, e.hp), false);
         e.hp -= hit;
         if (e.hp <= 0) killEnemy(e, 'beam');
-        else if (Math.random() < dt * 6) addParticle(e.x + fxRand(-e.r, e.r), e.y + fxRand(-e.r, e.r), fxRand(-20, 20), fxRand(-60, -20), 0.5, 3, COLORS.lantern);
+        else if (Math.random() < dt * 6 * e.burnK) addParticle(e.x + fxRand(-e.r, e.r), e.y + fxRand(-e.r, e.r), fxRand(-20, 20), fxRand(-60, -20), 0.5, 3, COLORS.lantern);
       }
     }
     const b = state.boss;
     if (b && !b.dead) {
       b.inBeam = inBeam(b.x, b.y, b.r, a0, bs.half);
-      const hit = b.inBeam && hurting && b.emerge >= 1 ? dmg * beamFalloff(b.x, b.y) : 0;
-      if (hit > 0) { b.burn = 0.12; hurtBoss(hit, true, 'beam'); }
+      const k = b.inBeam && hurting && b.emerge >= 1 ? beamFalloff(b.x, b.y) : 0;
+      const hit = dmg * k;
+      if (hit > 0) { b.burn = 0.12; b.burnK = k; hurtBoss(hit, true, 'beam'); }
     }
     // Lighthouse flare when the beam passes over the player
     const p = state.player;
@@ -1098,7 +1113,10 @@
           const s = inks[i];
           const rr = W.r + s.r;
           if (dist2(an.x, an.y, s.x, s.y) > rr * rr) continue;
-          burst(s.x, s.y, 6, COLORS.ink, 110, 0.35, 2.5);
+          // a bright clink so the block reads: a ring, a puff in the projectile's colour and a hit tick
+          burst(s.x, s.y, 8, inkColor(s), 130, 0.4, 3);
+          addRing(s.x, s.y, 4, 22, 0.25, '#cfe6ff');
+          Sound.play('hit');
           inks[i] = inks[inks.length - 1];
           inks.pop();
         }
@@ -1175,7 +1193,7 @@
       speed: def.speed * rand(0.92, 1.08),
       dmg: def.dmg * (1 + SCALING.dmgPerNight * (n - 1)),
       ember: def.ember * (elite ? SCALING.eliteEmbers : 1),
-      elite: !!elite, flash: 0, burn: 0, anchorCd: 0, inBeam: false, dead: false,
+      elite: !!elite, flash: 0, burn: 0, burnK: 0, anchorCd: 0, inBeam: false, dead: false,
       t: gameRandom() * 10, seed: gameRandom() * TAU, face, heading: face,
       inflate: 0, orbitDir: gameRandom() < 0.5 ? -1 : 1,
       shotT: def.shotEvery ? rand(1.2, def.shotEvery) : 0,
@@ -1403,7 +1421,7 @@
           if (p.invuln <= 0) {
             hurtPlayer(s.dmg, s.boss ? 'orb' : 'ink');
             gone = true;
-            burst(s.x, s.y, 8, COLORS.ink, 120, 0.4, 3);
+            burst(s.x, s.y, 8, inkColor(s), 120, 0.4, 3);
           }
         }
       }
@@ -1427,7 +1445,7 @@
     const R = clamp(Math.min(view.w, view.h) / view.zoom * 0.42, 260, 420);
     const b = {
       type, def, x: p.x + Math.cos(a) * R, y: p.y + Math.sin(a) * R, r: def.r,
-      hp: def.hp, maxHp: def.hp, flash: 0, burn: 0, anchorCd: 0, inBeam: false, dead: false,
+      hp: def.hp, maxHp: def.hp, flash: 0, burn: 0, burnK: 0, anchorCd: 0, inBeam: false, dead: false,
       t: 0, emerge: 0, face: a + Math.PI, mode: 'walk', modeT: 0,
       attackT: type === 'crabKing' ? 2.5 : 1.5,
       summonT: type === 'crabKing' ? def.summonEvery * 0.6 : def.summonEvery,
@@ -2946,7 +2964,8 @@
     if (!darkGrad.haze || darkGrad.hazeKey !== key) {
       const g = ctx.createRadialGradient(0, 0, 30, 0, 0, len);
       if (burning) {
-        // with the Lente, the warm glow marks where the beam burns: bright up to falloffStart, gone by falloffEnd
+        // with the Lente, the warm glow marks where the beam burns: bright up to falloffStart, down to a faint glow
+        // (about 1/8 of its peak, dimmer than the plain beam) by falloffEnd
         const at = r => clamp((r - 30) / (len - 30), 0, 1);
         g.addColorStop(0, 'rgba(255,190,110,' + strength * 3.2 + ')');
         g.addColorStop(at(W.falloffStart), 'rgba(255,180,100,' + strength * 2.8 + ')');
@@ -3103,7 +3122,7 @@
     for (const s of state.inks) {
       if (!visible(s.x, s.y, 30)) continue;
       const wob = 1 + 0.12 * Math.sin(s.t * 14);
-      const col = s.boss ? '#9ad8ff' : COLORS.ink;
+      const col = inkColor(s);
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = 0.8;
       const gs = s.r * 3.6;
@@ -3727,7 +3746,7 @@
       ctx.globalAlpha = baseAlpha * (e.elite ? 0.5 : 0.3);
       ctx.drawImage(glowSprite(col), -hs, -hs, hs * 2, hs * 2);
       if (e.burn > 0) {
-        ctx.globalAlpha = baseAlpha * 0.6;
+        ctx.globalAlpha = baseAlpha * 0.6 * e.burnK;
         const bs = e.r * 2;
         ctx.drawImage(glowSprite(COLORS.ember), -bs, -bs, bs * 2, bs * 2);
       }
@@ -3812,7 +3831,7 @@
     const hs = b.r * 3;
     ctx.drawImage(glowSprite(col), b.x - hs, b.y - hs, hs * 2, hs * 2);
     if (b.burn > 0) {
-      ctx.globalAlpha = 0.4;
+      ctx.globalAlpha = 0.4 * b.burnK;
       ctx.drawImage(glowSprite(COLORS.ember), b.x - b.r * 1.6, b.y - b.r * 1.6, b.r * 3.2, b.r * 3.2);
     }
     ctx.globalAlpha = 1;
@@ -4156,7 +4175,7 @@
     5: 'Baiacus espinhosos se aproximam — eles incham quando chegam perto.',
     6: 'Lulas-tinteiras cospem tinta de longe. Continue em movimento.',
     7: 'O Caranguejo-Rei sai da toca esta noite. Cuidado com as investidas.',
-    8: 'As lulas-tinteiras voltam, e a cada noite em maior número. Não pare de se mover.',
+    8: 'As lulas-tinteiras voltam aos poucos, e a cada noite são mais. Continue em movimento.',
     9: 'Metade da quinzena já passou. O farol continua aceso.',
     10: 'Criaturas douradas, bem mais resistentes, surgem na escuridão.',
     11: 'As noites estão mais longas. Cada ponto de vida conta.',

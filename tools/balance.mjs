@@ -2,9 +2,9 @@
 // Plays whole runs headless through the debug hooks (QF.debug.runSteps / setAutopilot / setPicker / stats), many
 // times faster than real time, with seeded randomness, and writes per-run telemetry as JSON.
 //
-//   node tools/balance.mjs --bot kite --picks random --runs 10 --out /tmp/kite-random.json
-//   node tools/balance.mjs --bot kite --picks beamFirst --tune '{"WEAPONS.beam.dpsPerLevel": 6}' --runs 20
-//   node tools/balance-summary.mjs /tmp/*.json          (markdown tables + balance-target checks)
+//   node tools/balance.mjs --bot kite --picks random --runs 40 --out /tmp/eq/kite-random.json
+//   node tools/balance.mjs --bot kite --picks beamFirst --tune '{"WEAPONS.beam.dpsPerLevel": 8}' --runs 40 --out /tmp/eq/lente.json
+//   node tools/balance-summary.mjs /tmp/eq/*.json       (markdown tables + balance-target checks)
 //
 // Run with --help for every option.
 import { createRequire } from 'node:module';
@@ -12,7 +12,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
-import { renderMarkdown } from './balance-summary.mjs';
+import { renderMarkdown, armKey } from './balance-summary.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -30,13 +30,14 @@ const HELP = `Usage: node tools/balance.mjs [options]
                         (default: random)
   --runs <N>            number of runs (default: 10)
   --seed-base <K>       run i uses seed K + i (default: 1)
-  --tune <file|json>    dotted-path overrides of QF.debug.getConfig(), e.g. {"WEAPONS.beam.dpsPerLevel": 6};
-                        applied before every run (unknown paths are an error)
+  --tune <file|json>    dotted-path overrides of QF.debug.getConfig(), e.g. {"WEAPONS.beam.dpsPerLevel": 8};
+                        applied before every run (unknown paths, tables and values of another type are an error)
   --nights <a-b>        play nights a..b only: nights before a run in god mode (the build grows naturally, no
                         damage taken) and are left out of the summary; the run stops after night b (default: 1-14)
   --concurrency <C>     pages in parallel (default: 2)
   --viewport <WxH>      browser viewport; spawn distances depend on it (default: 1280x800)
-  --label <name>        arm name in the output (default: bot/picks[ @tune])
+  --label <name>        arm name in the output (default: bot/picks[ @tune][ Na-b][ opts-…][ WxH]); runs with the
+                        same arm name are added together by tools/balance-summary.mjs
   --max-sim <s>         cap on simulated seconds per run (default: 3600) → result "timeout"
   --max-night <s>       cap on one night, e.g. an endless boss fight (default: 600) → result "stalled"
   --out <file.json>     write {meta, runs} here
@@ -55,13 +56,23 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => { if (i + 1 >= argv.length) die('missing value for ' + a); return argv[++i]; };
+    const int = min => {
+      const s = v(), n = Number(s);
+      if (s.trim() === '' || !Number.isInteger(n) || n < min) die(a + ' wants an integer >= ' + min + ', got ' + JSON.stringify(s));
+      return n;
+    };
+    const pos = () => {
+      const s = v(), n = Number(s);
+      if (!(n > 0)) die(a + ' wants a positive number, got ' + JSON.stringify(s));
+      return n;
+    };
     switch (a) {
       case '--root': o.root = path.resolve(v()); break;
       case '--bot': o.bot = v(); break;
       case '--bot-opts': o.botOpts = json(v(), '--bot-opts'); break;
       case '--picks': o.picks = v(); break;
-      case '--runs': o.runs = Math.max(1, parseInt(v(), 10) || 1); break;
-      case '--seed-base': o.seedBase = parseInt(v(), 10) || 0; break;
+      case '--runs': o.runs = int(1); break;
+      case '--seed-base': o.seedBase = int(0); break;
       case '--tune': {
         const t = v();
         o.tune = json(t, '--tune');
@@ -75,7 +86,7 @@ function parseArgs(argv) {
         if (o.nights[0] < 1 || o.nights[1] > 14 || o.nights[0] > o.nights[1]) die('--nights must be within 1-14');
         break;
       }
-      case '--concurrency': o.concurrency = Math.max(1, parseInt(v(), 10) || 1); break;
+      case '--concurrency': o.concurrency = int(1); break;
       case '--viewport': {
         const m = /^(\d+)x(\d+)$/.exec(v());
         if (!m) die('--viewport wants WxH');
@@ -83,8 +94,8 @@ function parseArgs(argv) {
         break;
       }
       case '--label': o.label = v(); break;
-      case '--max-sim': o.maxSim = Number(v()) || o.maxSim; break;
-      case '--max-night': o.maxNight = Number(v()) || o.maxNight; break;
+      case '--max-sim': o.maxSim = pos(); break;
+      case '--max-night': o.maxNight = pos(); break;
       case '--out': o.out = path.resolve(v()); break;
       case '--quiet': o.quiet = true; break;
       case '-h': case '--help': console.log(HELP); process.exit(0); break;
@@ -125,14 +136,23 @@ async function launch(pw) {
 
 async function openPage(browser, o, errors) {
   const ctx = await browser.newContext({ viewport: { width: o.viewport[0], height: o.viewport[1] } });
-  const page = await ctx.newPage();
-  page.on('pageerror', e => errors.push(String((e && e.stack) || e)));
-  // only the local files: no web fonts (they would slow loading down and change nothing in the simulation)
-  await page.route('**/*', r => (r.request().url().startsWith('file:') ? r.continue() : r.abort()));
-  await page.goto(pathToFileURL(path.join(o.root, 'index.html')).href + '#debug');
-  await page.waitForFunction(() => window.QF && window.QF.debug && window.QF.debug.runSteps, null, { timeout: 10000 });
-  await page.addScriptTag({ path: BOTS });
-  return { ctx, page };
+  try {
+    const page = await ctx.newPage();
+    page.on('pageerror', e => errors.push(String((e && e.stack) || e)));
+    // only the local files: no web fonts (they would slow loading down and change nothing in the simulation)
+    await page.route('**/*', r => (r.request().url().startsWith('file:') ? r.continue() : r.abort()));
+    await page.goto(pathToFileURL(path.join(o.root, 'index.html')).href + '#debug');
+    try {
+      await page.waitForFunction(() => window.QF && window.QF.debug && window.QF.debug.runSteps, null, { timeout: 10000 });
+    } catch {
+      throw new Error('no QF.debug.runSteps in ' + path.join(o.root, 'index.html') + '#debug (a game without the balance hooks?)');
+    }
+    await page.addScriptTag({ path: BOTS });
+    return { ctx, page };
+  } catch (e) {
+    await ctx.close().catch(() => {}); // a failed page must not stay open (and animating) until the browser closes
+    throw e;
+  }
 }
 
 // ------------------------------------------------------------------ main
@@ -150,16 +170,14 @@ async function main() {
   try { meta.git = execSync('git -C ' + JSON.stringify(o.root) + ' rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { /* not a repo */ }
   try { meta.gitDirty = execSync('git -C ' + JSON.stringify(o.root) + ' status --porcelain -- game.js', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() !== ''; } catch { /* not a repo */ }
 
-  if (o.tune) {
-    // check the overrides once, so a typo is one clear error instead of N failed runs
+  // one probe page first, so a game without the hooks or a typo in --tune is one clear error instead of N failed runs
+  try {
     const pg = await openPage(browser, o, errors);
-    try {
-      meta.tuneApplied = await pg.page.evaluate(t => window.QFBalance.applyTune(t), o.tune);
-    } catch (e) {
-      await browser.close();
-      die(String((e && e.message) || e).split('\n')[0].replace(/^.*?Error: /, ''));
-    }
+    if (o.tune) meta.tuneApplied = await pg.page.evaluate(t => window.QFBalance.applyTune(t), o.tune);
     await pg.ctx.close();
+  } catch (e) {
+    await browser.close();
+    die(String((e && e.message) || e).split('\n')[0].replace(/^.*?Error: /, ''));
   }
 
   const runs = new Array(o.runs);
@@ -208,8 +226,7 @@ async function main() {
     fs.writeFileSync(o.out, JSON.stringify(result));
     console.log('wrote ' + o.out);
   }
-  const key = o.label || o.bot + '/' + o.picks + (o.tuneName !== 'none' ? ' @' + o.tuneName : '');
-  console.log('\n' + renderMarkdown(new Map([[key, { meta, runs }]]), { targets: false }));
+  console.log('\n' + renderMarkdown(new Map([[armKey(meta), { meta, runs }]]), { targets: false }));
   console.log('\n' + o.runs + ' runs in ' + meta.wallSeconds + ' s wall (concurrency ' + o.concurrency + ')');
   if (errors.length || runs.some(r => r.error)) process.exitCode = 1;
 }

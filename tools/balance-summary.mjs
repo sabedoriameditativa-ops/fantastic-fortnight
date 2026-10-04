@@ -3,6 +3,7 @@
 // Dev tool only (also imported by tools/balance.mjs to print a summary after a batch).
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const NIGHTS = 14;
@@ -121,17 +122,55 @@ export function summarizeArm(runs) {
 
 // ------------------------------------------------------------------ loading & grouping
 
-export function armKey(meta) {
-  return meta.label || meta.bot + '/' + meta.picks + (meta.tuneName && meta.tuneName !== 'none' ? ' @' + meta.tuneName : '');
+const DEFAULT_VIEWPORT = '1280x800'; // tools/balance.mjs's default
+// JSON with object keys sorted, so the same settings always give the same text (and hash)
+const stable = v => JSON.stringify(v === undefined ? null : v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x)
+  ? Object.fromEntries(Object.keys(x).sort().map(n => [n, x[n]])) : x));
+const hash = v => createHash('sha1').update(stable(v)).digest('hex').slice(0, 6);
+const fullNights = m => !m.nights || (m.nights[0] === 1 && m.nights[1] === NIGHTS);
+const tuneTitle = m => (m.tuneName === 'inline' ? 'inline-' + hash(m.tune) : m.tuneName || 'none');
+
+// Arm name: everything that changes the outcome (runs that differ only in their seeds share it and are added together).
+// An inline --tune is named by a hash of its content, so two different inline tunes never merge.
+export function armKey(m) {
+  if (m.label) return m.label;
+  const tn = tuneTitle(m);
+  let k = m.bot + '/' + m.picks + (tn !== 'none' ? ' @' + tn : '');
+  if (!fullNights(m)) k += ' N' + m.nights.join('-');
+  if (m.botOpts) k += ' opts-' + hash(m.botOpts);
+  if (m.viewport && m.viewport.join('x') !== DEFAULT_VIEWPORT) k += ' ' + m.viewport.join('x');
+  return k;
 }
+
+const MERGE_FIELDS = ['bot', 'picks', 'tune', 'botOpts', 'nights', 'viewport', 'root', 'git', 'gitDirty'];
 
 export function loadResults(files) {
   const arms = new Map(); // key → { meta, runs }
   for (const f of files) {
-    const data = JSON.parse(fs.readFileSync(f, 'utf8'));
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(f, 'utf8'));
+    } catch (e) {
+      throw new Error(f + ': ' + ((e && e.message) || e));
+    }
+    if (!data || !data.meta || !Array.isArray(data.runs)) throw new Error(f + ': not a tools/balance.mjs result (no meta/runs)');
     const key = armKey(data.meta);
-    if (!arms.has(key)) arms.set(key, { meta: data.meta, runs: [] });
-    arms.get(key).runs.push(...data.runs);
+    const arm = arms.get(key);
+    if (!arm) {
+      arms.set(key, { meta: data.meta, runs: data.runs.slice() });
+      continue;
+    }
+    // same arm name: meant for more seeds of the same experiment, so say so when it is not
+    for (const field of MERGE_FIELDS) {
+      if (stable(arm.meta[field]) !== stable(data.meta[field])) {
+        console.error('balance-summary: warning: ' + f + " merged into '" + key + "' but its " + field + ' differs (' +
+          stable(data.meta[field]) + ' vs ' + stable(arm.meta[field]) + ')');
+      }
+    }
+    const seen = new Set(arm.runs.map(r => r.seed));
+    const twice = data.runs.filter(r => seen.has(r.seed)).length;
+    if (twice) console.error('balance-summary: warning: ' + f + " merged into '" + key + "' repeats " + twice + ' seed(s) already counted');
+    arm.runs.push(...data.runs);
   }
   return arms;
 }
@@ -162,7 +201,7 @@ export function renderMarkdown(arms, opts = {}) {
     ].join(' | ') + ' |');
   }
   L.push('');
-  L.push('### Median damage taken per night (runs that reached the night; n reaching in brackets for the last column set)');
+  L.push('### Median damage taken per night (runs that reached the night; (n) = how many, when fewer than all runs)');
   L.push('');
   L.push('| arm | ' + Array.from({ length: NIGHTS }, (_, i) => 'N' + (i + 1)).join(' | ') + ' |');
   L.push('|---|' + '---|'.repeat(NIGHTS));
@@ -179,11 +218,12 @@ export function renderMarkdown(arms, opts = {}) {
   L.push('|---|' + '---|'.repeat(WEAPONS.length));
   for (const [k, , s] of rows) L.push('| ' + k + ' | ' + WEAPONS.map(w => pct(s.share[w])).join(' | ') + ' |');
   L.push('');
-  L.push('Legend: end night = night of death (W = survived all 14; IQR = 25th–75th percentile). Beam share = the');
-  L.push('Lente de Fresnel\'s part of all damage dealt to regular creatures (boss excluded, overkill not counted), median');
-  L.push('over runs; "@L3+" counts only nights that began with the Lente at level 3 or more, over the runs that had such');
-  L.push('nights (n). TTK = seconds from the boss being fully emerged to its death, median over kills. Levels = level at');
-  L.push('the start of that night. 1st kill = seconds into night 1. N1 end HP = HP left at the end of night 1 (% of max).');
+  L.push('Legend: end night = night of death (W = survived all 14; a run stopped by --nights counts as its last night + 1,');
+  L.push('one that timed out or stalled as the night it was in; IQR = 25th–75th percentile). Beam share = the Lente de');
+  L.push('Fresnel\'s part of all damage dealt to regular creatures (boss excluded, overkill not counted), median over runs;');
+  L.push('"@L3+" counts only nights that began with the Lente at level 3 or more, over the runs that had such nights (n).');
+  L.push('TTK = seconds from the boss being fully emerged to its death, median over kills. Levels = level at the start of');
+  L.push('that night. 1st kill = seconds into night 1. N1 end HP = HP left at the end of night 1 (% of max).');
   if (opts.targets !== false) {
     L.push('');
     L.push(renderTargets(arms));
@@ -203,16 +243,27 @@ function rising(seq) {
 }
 
 export function evaluateTargets(arms) {
-  // one target table per tuning package (meta.tuneName)
+  // one target table per tuning package: same tune (by content) and viewport. The targets are about whole runs, so
+  // arms that played only some nights (--nights) are left out.
   const packages = new Map();
   for (const [k, a] of arms) {
-    const p = a.meta.tuneName || 'none';
-    if (!packages.has(p)) packages.set(p, []);
-    packages.get(p).push({ key: k, meta: a.meta, s: summarizeArm(a.runs) });
+    if (!fullNights(a.meta)) continue;
+    const vp = a.meta.viewport ? a.meta.viewport.join('x') : DEFAULT_VIEWPORT;
+    const id = stable(a.meta.tune || null) + ' ' + vp;
+    if (!packages.has(id)) {
+      const tn = tuneTitle(a.meta);
+      packages.set(id, { pkg: [tn !== 'none' ? 'tune ' + tn : '', vp !== DEFAULT_VIEWPORT ? vp : ''].filter(Boolean).join(' — ') || 'none', list: [] });
+    }
+    packages.get(id).list.push({ key: k, meta: a.meta, s: summarizeArm(a.runs) });
   }
   const out = [];
-  for (const [pkg, list] of packages) {
-    const find = (bot, picks) => list.find(x => x.meta.bot === bot && x.meta.picks === picks && !x.meta.botOpts);
+  for (const { pkg, list } of packages.values()) {
+    const notes = [];
+    const find = (bot, picks) => {
+      const xs = list.filter(x => x.meta.bot === bot && x.meta.picks === picks && !x.meta.botOpts);
+      if (xs.length > 1) notes.push(xs.length + ' arms are ' + bot + '/' + picks + ' (' + xs.map(x => x.key).join(', ') + '); the checks use ' + xs[0].key);
+      return xs[0];
+    };
     const checks = [];
     const add = (id, name, pass, detail) => checks.push({ id, name, pass, detail });
 
@@ -265,44 +316,60 @@ export function evaluateTargets(arms) {
     for (const x of idles) {
       add('T6', 'idle ends night 1 with ≥ 50% HP (' + x.key + ')', x.s.n1EndHp != null && x.s.n1EndHp >= 0.5, pct(x.s.n1EndHp));
     }
-    out.push({ pkg, checks });
+    out.push({ pkg, checks, notes });
   }
   return out;
 }
 
 export function renderTargets(arms) {
   const L = [];
-  for (const { pkg, checks } of evaluateTargets(arms)) {
-    L.push('### Targets' + (pkg !== 'none' ? ' — tune ' + pkg : ''));
+  for (const { pkg, checks, notes } of evaluateTargets(arms)) {
+    if (!checks.length) continue;
+    L.push('### Targets' + (pkg !== 'none' ? ' — ' + pkg : ''));
     L.push('');
     L.push('| target | check | result | measured |');
     L.push('|---|---|---|---|');
     for (const c of checks) L.push('| ' + c.id + ' | ' + c.name + ' | ' + (c.pass ? 'PASS' : '**FAIL**') + ' | ' + c.detail + ' |');
     L.push('');
+    for (const n of notes) L.push('Note: ' + n + '.', '');
   }
   return L.join('\n');
 }
 
 // ------------------------------------------------------------------ CLI
 
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// realpath on both sides: run through a symlinked checkout (or /tmp on macOS), argv[1] keeps the link
+let isMain = false;
+try { isMain = !!process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)); } catch { /* not a file path */ }
 if (isMain) {
+  const USAGE = 'Usage: node tools/balance-summary.mjs <result.json>... [--out SUMMARY.md] [--no-targets]';
+  const die = m => { console.error('balance-summary: ' + m); process.exit(2); };
   const args = process.argv.slice(2);
   const files = [];
   let out = null, targets = true;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--out') out = args[++i];
-    else if (args[i] === '--no-targets') targets = false;
-    else if (args[i] === '-h' || args[i] === '--help') {
-      console.log('Usage: node tools/balance-summary.mjs <result.json>... [--out SUMMARY.md] [--no-targets]');
+    const a = args[i];
+    if (a === '--out') {
+      if (i + 1 >= args.length || args[i + 1].startsWith('--')) die('missing value for --out');
+      out = args[++i];
+    } else if (a === '--no-targets') targets = false;
+    else if (a === '-h' || a === '--help') {
+      console.log(USAGE);
       process.exit(0);
-    } else files.push(args[i]);
+    } else if (a.startsWith('--')) die('unknown option ' + a + '\n' + USAGE);
+    else files.push(a);
   }
-  if (!files.length) {
-    console.error('balance-summary: give one or more result files from tools/balance.mjs');
-    process.exit(2);
+  if (!files.length) die('give one or more result files from tools/balance.mjs\n' + USAGE);
+  let arms;
+  try {
+    arms = loadResults(files);
+  } catch (e) {
+    die((e && e.message) || String(e));
   }
-  const md = renderMarkdown(loadResults(files), { targets });
-  if (out) fs.writeFileSync(out, md + '\n');
+  const md = renderMarkdown(arms, { targets });
+  if (out) {
+    fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
+    fs.writeFileSync(out, md + '\n');
+  }
   console.log(md);
 }

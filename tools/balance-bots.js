@@ -284,6 +284,9 @@
 
   // ------------------------------------------------------------------ tuning
 
+  // a tune may only replace a single value with one of the same kind ("20" for 20 would concatenate in the game)
+  const kind = v => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v);
+
   function applyTune(tune) {
     const cfg = window.QF.debug.getConfig();
     const applied = {};
@@ -296,8 +299,11 @@
       }
       const k = parts[parts.length - 1];
       if (!(k in o)) throw new Error('tune: no such value ' + path);
-      applied[path] = [o[k], tune[path]];
-      o[k] = tune[path];
+      const old = o[k], nu = tune[path];
+      if (kind(old) === 'object') throw new Error('tune: ' + path + ' is a table; tune its values one by one');
+      if (kind(nu) !== kind(old)) throw new Error('tune: ' + path + ' is a ' + kind(old) + ', got ' + JSON.stringify(nu));
+      applied[path] = [old, nu];
+      o[k] = nu;
     }
     return applied; // path → [old, new]
   }
