@@ -48,6 +48,7 @@ Não há etapa de build nem dependências.
 - **Mais simples:** abra o arquivo `index.html` no navegador (funciona direto via `file://`).
 - **Com servidor local:** `npm start` (usa `npx serve .`) e acesse o endereço exibido no terminal.
 - **Pacote para os portais (itch.io, CrazyGames):** `npm run pacote` gera `dist/quinzena-fantastica.zip` só com os arquivos do jogo (`index.html` na raiz, caminhos relativos) e mostra o tamanho e o número de arquivos.
+- **Publicação:** o passo a passo do itch.io e da CrazyGames, com os textos da loja (inglês e português) e as imagens de `publicacao/` (`npm run midia`), está em [`PUBLICACAO.md`](PUBLICACAO.md).
 
 Funciona no computador e no celular, em retrato ou paisagem. Dentro de um iframe, como nos portais, o jogo ocupa o
 quadro inteiro, e as teclas, a roda do mouse e os toques não rolam a página ao redor; um clique ou toque no jogo
@@ -65,11 +66,11 @@ cada um com linhas PASS/FAIL e um resumo no fim. Todos bloqueiam a rede: qualque
 
 | Arquivo | O que confere |
 |---|---|
-| `tests/smoke.mjs` | o jogo em modo de depuração (`index.html#debug`): título, partida, melhoria, amanhecer, chefes, vitória, fim de jogo, pausa, e o layout no celular (retrato e paisagem) |
+| `tests/smoke.mjs` | o jogo em modo de depuração (`index.html#debug`): título, partida (com a dica de controles da primeira noite), melhoria, amanhecer, chefes, vitória, fim de jogo, pausa, nenhum menu de contexto do navegador, e o layout no celular (retrato e paisagem) |
 | `tests/language.mjs` | idioma do navegador (`pt-BR` → português, os demais → inglês), o botão de idioma no título e na pausa, a escolha salva após recarregar, nenhum texto em português no modo inglês (todas as telas, todas as cartas, `aria-label`) e os textos em português intactos |
-| `tests/iframe.mjs` | uma página hospedeira gerada pelo teste, mais alta que a janela, com o jogo num iframe: o jogo ocupa o quadro em 960×540, 1280×720, 1920×1080, 390×844 e 844×390; setas, espaço, PageUp/PageDown, Home/End, roda do mouse e arrastes não rolam a hospedeira; espaço e Enter ainda acionam botões; um clique dá o teclado ao jogo |
+| `tests/iframe.mjs` | uma página hospedeira gerada pelo teste, mais alta que a janela, com o jogo num iframe: o jogo ocupa o quadro em 960×540, 1280×720, 1920×1080, 390×844 e 844×390; título, Como jogar e pausa cabem sem rolagem nos tamanhos de iframe da CrazyGames, no 960×540 do itch.io e em 844×390 (inglês e português); setas, espaço, PageUp/PageDown, Home/End, Ctrl+Home/End, Alt+↑/↓, roda do mouse e arrastes não rolam a hospedeira; espaço e Enter ainda acionam botões; um clique dá o teclado ao jogo |
 | `tests/network.mjs` | nenhuma requisição sai da pasta do jogo (aberto como arquivo e servido por HTTP) e as fontes carregam de `fonts/`, inclusive no canvas |
-| `tests/package.mjs` | roda `tools/pacote.mjs`, confere a lista exata de arquivos do ZIP com `index.html` na raiz, descompacta e joga a cópia sem rede |
+| `tests/package.mjs` | roda `tools/pacote.mjs` (também por um caminho com link simbólico), confere que a validação recusa referências quebradas, confere a lista exata de arquivos do ZIP com `index.html` na raiz, descompacta e joga a cópia sem rede |
 
 Para rodar só alguns: `node tests/run-all.mjs language iframe` (ou `node tests/iframe.mjs`). Para salvar capturas de
 tela do teste de fumaça, defina `SHOT_DIR`:

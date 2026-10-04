@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { ROOT, loadPlaywright, launchChromium, blockNetwork, watchErrors, assert, sleep, createReport, fontReport, checkFonts } from './helpers.mjs';
-import { readZip } from '../tools/pacote.mjs';
+import { readZip, validate } from '../tools/pacote.mjs';
 
 const ZIP = path.join(ROOT, 'dist', 'quinzena-fantastica.zip');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'qf-package-'));
@@ -58,6 +58,57 @@ try {
     assert(fs.existsSync(ZIP), 'no ' + ZIP);
     summary = (r.stdout.trim().split('\n').pop() || '').trim();
     return summary;
+  });
+
+  await rep.step('1b. The validator rejects broken references and accepts good ones', async () => {
+    // Small made-up games: each "bad" one has one broken reference, each "good" one a look-alike that is fine.
+    const html = '<!doctype html><link rel="stylesheet" href="style.css"><script src="game.js" defer></script>';
+    const base = { 'index.html': html, 'style.css': 'body { margin: 0; }', 'game.js': 'const hp = 1, max = 2;' };
+    const files = ['index.html', 'style.css', 'game.js', 'img/ok.png']; // img/ok.png counts as packaged
+    const bad = {
+      'image-set string': { 'style.css': '.a { background: image-set("missing.png" 1x); }' },
+      '> inside a quoted attribute': { 'index.html': html + '<img title="a > b" src="missing.png">' },
+      'JS relative asset path': { 'game.js': "img.src = 'img/missing.png';" },
+      'JS absolute asset path': { 'game.js': "fetch('/abs.json');" },
+      'wss: URL in JS': { 'game.js': "new WebSocket('wss://example.com/s');" },
+      'ftp: URL in JS': { 'game.js': "const u = 'ftp://example.com/f';" },
+    };
+    const good = {
+      'image-set of packaged files': { 'style.css': '.a { background: image-set("img/ok.png" 1x, url(img/ok.png) 2x); }' },
+      'quoted > before a good src': { 'index.html': html + '<img title="a > b" src="img/ok.png" alt="">' },
+      'JS packaged asset and "/" separators': { 'game.js': "img.src = './img/ok.png'; const s = hp + '/' + max + \"/\";" },
+    };
+    const run = (name, over) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qf-validate-'));
+      try {
+        for (const [f, txt] of Object.entries({ ...base, ...over })) fs.writeFileSync(path.join(dir, f), txt);
+        return validate(dir, files);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    const missed = Object.keys(bad).filter(n => !run(n, bad[n]).length);
+    const wrong = Object.keys(good).map(n => [n, run(n, good[n])]).filter(([, p]) => p.length);
+    assert(!missed.length, 'not caught: ' + missed.join(', '));
+    assert(!wrong.length, 'false alarm: ' + wrong.map(([n, p]) => `${n} (${p[0]})`).join(', '));
+    return `${Object.keys(bad).length} broken references caught, ${Object.keys(good).length} good ones accepted`;
+  });
+
+  await rep.step('1c. The CLI also runs when started through a symlinked path', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qf-link-'));
+    const link = path.join(dir, 'game');
+    const out = path.join(dir, 'via-link.zip');
+    try {
+      fs.symlinkSync(ROOT, link, 'dir');
+      const r = spawnSync(process.execPath, [path.join(link, 'tools', 'pacote.mjs'), '--out', out], { cwd: dir, encoding: 'utf8' });
+      assert(r.status === 0, 'exit ' + r.status + ': ' + (r.stderr || '').trim().split('\n')[0]);
+      assert(fs.existsSync(out), 'no ZIP written (the CLI did not run)');
+      assert(fs.readFileSync(out).equals(fs.readFileSync(ZIP)), 'the ZIP differs from the one built in step 1');
+      return `${fs.statSync(out).size} bytes, same as step 1`;
+    } finally {
+      fs.rmSync(link, { force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   await rep.step('2. The ZIP holds exactly the game files, index.html at the root, intact', async () => {

@@ -7,10 +7,11 @@
 //   npm run pacote                       (= node tools/pacote.mjs)
 //   node tools/pacote.mjs --out /tmp/x.zip
 //
-// Before writing, it validates the game: every src/href/url() in index.html and style.css must be relative and point
-// to a file that goes into the ZIP, and the shipped HTML/CSS/JS must not reference http:, https: or // resources
-// (comments are ignored). After writing, it reads the ZIP back and checks every entry byte for byte.
-import { fileURLToPath, pathToFileURL } from 'node:url';
+// Before writing, it validates the game: every src/href/url()/image-set() in index.html and style.css, and every
+// asset-like path string in game.js, must be relative and point to a file that goes into the ZIP, and the shipped
+// HTML/CSS/JS must not reference http:, https:, ws:, wss:, ftp: or // resources (comments are ignored). After writing,
+// it reads the ZIP back and checks every entry byte for byte.
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
@@ -174,7 +175,7 @@ function lineOf(src, index) {
 function refsInHtml(code) {
   const refs = [];
   const attr = /\s(src|href|srcset|poster|data|action|formaction|background|manifest|xlink:href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
-  for (const tag of code.matchAll(/<[a-z][^>]*>/gi)) {
+  for (const tag of code.matchAll(/<[a-z](?:[^>"']|"[^"]*"|'[^']*')*>/gi)) { // a > inside a quoted value does not end the tag
     for (const m of tag[0].matchAll(attr)) {
       const value = (m[2] ?? m[3] ?? m[4] ?? '').trim();
       const list = m[1].toLowerCase() === 'srcset' ? value.split(',').map(s => s.trim().split(/\s+/)[0]) : [value];
@@ -192,6 +193,32 @@ function refsInCss(code) {
   for (const m of code.matchAll(/@import\s+(?:"([^"]*)"|'([^']*)')/gi)) {
     refs.push({ value: (m[1] ?? m[2]).trim(), index: m.index });
   }
+  // image-set("a.png" 1x, url(b.png) 2x): the url() ones are found above, the bare strings here
+  for (const m of code.matchAll(/(?:-webkit-)?image-set\(/gi)) {
+    const start = m.index + m[0].length;
+    let depth = 1, j = start;
+    while (j < code.length && depth > 0) {
+      const c = code[j];
+      if (c === '"' || c === "'") { j = scanQuoted(code, j); continue; }
+      if (c === '(') depth++;
+      else if (c === ')') depth--;
+      j++;
+    }
+    const body = code.slice(start, j - 1).replace(/url\((?:"[^"]*"|'[^']*'|[^)]*)\)/gi, blank);
+    for (const q of body.matchAll(/"([^"]*)"|'([^']*)'/g)) {
+      refs.push({ value: (q[1] ?? q[2] ?? '').trim(), index: start + q.index });
+    }
+  }
+  return refs;
+}
+
+// String literals in JS that look like asset paths ('img/x.png', "/data.json"). Other strings are not paths.
+const JS_ASSET = /^[\w.\/-]+\.(?:png|jpe?g|webp|gif|svg|mp3|ogg|wav|m4a|json|woff2?|css|m?js)$/i;
+function refsInJs(code) {
+  const refs = [];
+  for (const m of code.matchAll(/(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g)) {
+    if (JS_ASSET.test(m[2])) refs.push({ value: m[2], index: m.index });
+  }
   return refs;
 }
 
@@ -207,30 +234,34 @@ export function validate(root, files) {
     const kind = /\.html?$/i.test(file) ? 'html' : /\.css$/i.test(file) ? 'css' : 'js';
     const code = kind === 'html' ? stripHtmlComments(src) : kind === 'css' ? stripCssComments(src) : stripJsComments(src);
 
-    // 1) local references must be relative and inside the package (index.html and style.css, plus any shipped CSS)
-    if (kind !== 'js') {
-      for (const { value, index } of kind === 'html' ? refsInHtml(code) : refsInCss(code)) {
-        const where = `${file}:${lineOf(src, index)}`;
-        if (value.startsWith('#') || /^data:/i.test(value)) continue; // in-page anchor / inline data: no request
-        if (/^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith('//')) {
-          problems.push(`${where}: external reference "${value}"`); continue;
-        }
-        if (value.startsWith('/') || value.startsWith('\\')) {
-          problems.push(`${where}: absolute path "${value}" (must be relative)`); continue;
-        }
-        let rel;
-        try { rel = decodeURI(value.replace(/[?#].*$/, '')); } catch { rel = value; }
-        const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), rel));
-        if (target.startsWith('../') || target === '..') {
-          problems.push(`${where}: "${value}" points outside the package`); continue;
-        }
-        if (!inZip.has(target)) problems.push(`${where}: "${value}" -> ${target} is not in the package`);
+    // 1) local references must be relative and inside the package (index.html and style.css, plus any shipped CSS;
+    //    asset paths in JS resolve against the page, index.html at the root)
+    const refs = kind === 'html' ? refsInHtml(code) : kind === 'css' ? refsInCss(code) : refsInJs(code);
+    const base = kind === 'js' ? '.' : path.posix.dirname(file);
+    for (const { value, index } of refs) {
+      const where = `${file}:${lineOf(src, index)}`;
+      if (value.startsWith('#') || /^data:/i.test(value)) continue; // in-page anchor / inline data: no request
+      if (/^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith('//')) {
+        problems.push(`${where}: external reference "${value}"`); continue;
       }
+      if (value.startsWith('/') || value.startsWith('\\')) {
+        problems.push(`${where}: absolute path "${value}" (must be relative)`); continue;
+      }
+      let rel;
+      try { rel = decodeURI(value.replace(/[?#].*$/, '')); } catch { rel = value; }
+      const target = path.posix.normalize(path.posix.join(base, rel));
+      if (target.startsWith('../') || target === '..') {
+        problems.push(`${where}: "${value}" points outside the package`); continue;
+      }
+      if (!inZip.has(target)) problems.push(`${where}: "${value}" -> ${target} is not in the package`);
     }
 
-    // 2) no http(s) URLs anywhere outside comments (XML namespace names excepted)
+    // 2) no http(s) URLs anywhere outside comments (XML namespace names excepted), nor ws(s)/ftp ones
     for (const m of code.matchAll(/\bhttps?:\/*[^\s"'`<>()]*/gi)) {
       if (NAMESPACES.includes(m[0].replace(/[.,;]+$/, ''))) continue;
+      problems.push(`${file}:${lineOf(src, m.index)}: network URL "${m[0].slice(0, 80)}"`);
+    }
+    for (const m of code.matchAll(/\b(?:wss?|ftp):\/\/[^\s"'`<>()]*/gi)) {
       problems.push(`${file}:${lineOf(src, m.index)}: network URL "${m[0].slice(0, 80)}"`);
     }
     // 3) protocol-relative URLs ("//host/…") in JS strings
@@ -415,7 +446,9 @@ function fail(msg) {
 
 const fmt = n => n.toLocaleString('en-US');
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+// Node runs the real file (symlinks resolved), so compare real paths: a symlinked checkout must still run the CLI.
+const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; } })();
+if (isMain) {
   let r;
   try {
     r = pacote(parseArgs(process.argv.slice(2)));

@@ -404,6 +404,8 @@
 
       'banner.night': 'Noite {n}',
       'banner.of': 'de {total}',
+      'banner.controlsKeys': 'WASD ou setas para mover',
+      'banner.controlsTouch': 'Arraste em qualquer lugar para mover',
       'banner.last': 'A última noite da quinzena',
       'banner.bossNight': 'Algo enorme se move sob as ondas…',
       'boss.crabKing': 'Caranguejo-Rei',
@@ -574,13 +576,15 @@
 
       'banner.night': 'Night {n}',
       'banner.of': 'of {total}',
+      'banner.controlsKeys': 'WASD or arrow keys to move',
+      'banner.controlsTouch': 'Drag anywhere to move',
       'banner.last': 'The last of the fourteen nights',
       'banner.bossNight': 'Something huge stirs beneath the waves…',
       'boss.crabKing': 'Crab King',
-      'boss.crabKing.banner': 'The Crab King emerges!',
+      'boss.crabKing.banner': 'The Crab King Emerges!',
       'boss.crabKing.sub': 'Lord of the sands of the Lost Isle',
       'boss.leviathan': 'Tide Leviathan',
-      'boss.leviathan.banner': 'The Tide Leviathan awakens!',
+      'boss.leviathan.banner': 'The Tide Leviathan Awakens!',
       'boss.leviathan.sub': 'The final tide',
       'toast.enraged': 'The Leviathan is enraged!',
 
@@ -611,7 +615,7 @@
         : 'Stronger flame: ' + fmtNum(WEAPONS.aura.dmg + WEAPONS.aura.dmgPerLevel * (v.L - 1)) + ' damage per pulse and ' + pct(WEAPONS.aura.radiusPerLevel) + ' more reach.'),
       'up.anchors': 'Spinning Anchors',
       'up.anchors.desc': v => (v.L === 1
-        ? 'An anchor circles you: it hurts and knocks back creatures and blocks ink and orbs.'
+        ? 'An anchor circles you: it damages and knocks back creatures, and blocks ink and orbs.'
         : ['', '', 'Two', 'Three', 'Four', 'Five'][v.L] + ' spinning anchors, each with +' + fmtNum(WEAPONS.anchors.dmgPerLevel) + ' damage.'),
       'up.harpoon': 'Harpoon',
       'up.harpoon.desc': v => [
@@ -624,7 +628,7 @@
       'up.boots': 'Sailor’s Boots',
       'up.boots.desc': () => 'You run ' + pct(PASSIVES.boots) + ' faster.',
       'up.hull': 'Reinforced Hull',
-      'up.hull.desc': () => '+' + fmtNum(PASSIVES.hull) + ' max health and restores ' + fmtNum(PASSIVES.hullHeal) + ' health.',
+      'up.hull.desc': () => 'Raises max health by ' + fmtNum(PASSIVES.hull) + ' and restores ' + fmtNum(PASSIVES.hullHeal) + ' health.',
       'up.regen': 'Keeper’s Lungs',
       'up.regen.desc': () => '+' + fmtNum(PASSIVES.regen) + ' health regenerated per second.',
       'up.magnet': 'Ember Magnet',
@@ -641,7 +645,7 @@
       'up.coin.desc': () => 'Worth ' + fmtNum(ITEMS.coinScore) + ' points.',
 
       'dawn.title': 'Dawn',
-      'dawn.survived': 'Day {n} survived',
+      'dawn.survived': 'Night {n} survived',
       'dawn.left': { one: '{n} night to go', other: '{n} nights to go' },
       'dawn.healed': 'Health restored',
       'dawn.hp': 'Health',
@@ -653,14 +657,14 @@
       'stat.level': 'Level',
       'stat.score': 'Score',
       'stat.bosses': 'Bosses defeated',
-      'hint.2': 'Jellyfish start washing up on the beach tonight.',
+      'hint.2': 'Jellyfish start coming ashore tonight.',
       'hint.3': 'The sea is restless. More creatures are coming.',
       'hint.4': 'Fast moray eels prowl the shore. Keep an eye on them.',
       'hint.5': 'Spiny pufferfish are closing in — they puff up when they get near.',
       'hint.6': 'Ink squids spit ink from a distance. Keep moving.',
       'hint.7': 'The Crab King leaves its lair tonight. Watch out for its charges.',
       'hint.8': 'The ink squids are creeping back, more of them each night. Keep moving.',
-      'hint.9': 'Halfway through the fourteen nights. The lighthouse still burns.',
+      'hint.9': 'Halfway through the fourteen nights. The light still burns.',
       'hint.10': 'Golden creatures, far tougher than the rest, emerge from the dark.',
       'hint.11': 'The nights are growing longer. Every point of health counts.',
       'hint.12': 'The final stretch. The sea shows no mercy.',
@@ -2422,8 +2426,14 @@
     if (dbg.tel) dbg.tel.nightStart();
     setScreen('playing');
     showOverlay(null);
-    const sub = n === NIGHTS.total ? 'banner.last' : state.isBossNight ? 'banner.bossNight' : 'banner.of';
-    showBanner(() => [t('banner.night', { n }), t(sub, { total: NIGHTS.total })], state.isBossNight ? 1.15 : 2.0, false);
+    // the first night of a run says how to move, for players who skipped How to Play
+    const sub = n === NIGHTS.total ? 'banner.last' : state.isBossNight ? 'banner.bossNight' : n === 1 ? controlsHintKey() : 'banner.of';
+    showBanner(() => [t('banner.night', { n }), t(sub, { total: NIGHTS.total })], state.isBossNight ? 1.15 : n === 1 ? 4 : 2.0, false);
+  }
+  function controlsHintKey() {
+    let touch = false;
+    try { touch = window.matchMedia('(hover: none) and (pointer: coarse)').matches; } catch (e) { /* keyboard hint */ }
+    return touch ? 'banner.controlsTouch' : 'banner.controlsKeys';
   }
 
   function endNight() {
@@ -5169,12 +5179,17 @@
       return;
     }
     const space = e.key === ' ' || e.key === 'Spacebar' || code === 'Space';
-    if ((SCROLL_KEYS[e.key] || space) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+    // Modified keys that scroll too: Ctrl+Home/End, and Option/Cmd+Up/Down on macOS. Other modified keys
+    // (Ctrl+PageUp/PageDown, Alt+Home, Alt+Left/Right…) are browser shortcuts and stay with the browser.
+    const modScroll = (e.ctrlKey && (e.key === 'Home' || e.key === 'End')) ||
+      ((e.altKey || e.metaKey) && (e.key === 'ArrowUp' || e.key === 'ArrowDown'));
+    if ((SCROLL_KEYS[e.key] || space) && (plain || modScroll)) {
       const t = e.target;
       // Space on a focused button presses it: that default stays. Every other scroll stays inside the game.
       if (!(space && t && t.tagName === 'BUTTON')) {
         e.preventDefault();
-        if (!space && !(state.screen === 'levelup' && e.key.indexOf('Arrow') === 0)) keyScrollOverlay(e.key);
+        if (plain && !space && !(state.screen === 'levelup' && e.key.indexOf('Arrow') === 0)) keyScrollOverlay(e.key);
       }
     }
     if (MOVE_KEYS[code]) {
@@ -5309,13 +5324,18 @@
     canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
     canvas.addEventListener('lostpointercapture', onPointerUp);
-    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    // no browser menu on a right-click or long-press anywhere: the menus and the HUD sit above the canvas, not in it
+    window.addEventListener('contextmenu', e => e.preventDefault());
     window.addEventListener('pointerdown', () => {
       Sound.init();
       // in a portal's iframe a click or tap gives the game the keyboard (the canvas cancels its pointerdown, and with
       // it the browser's own focusing of the frame)
       if (!document.hasFocus()) { try { window.focus(); } catch (err) { /* ignore */ } }
     }, true);
+    // a touch pointerdown is not a user gesture everywhere (iOS unlocks audio on touchend): resume there and on click too
+    const unlockAudio = () => Sound.init();
+    window.addEventListener('touchend', unlockAudio, { capture: true, passive: true });
+    window.addEventListener('click', unlockAudio, true);
     // no drag or wheel scrolls anything but an overlay taller than the screen: not the canvas, and not the page
     // around an iframe (a browser hands it any scroll the game does not use)
     document.addEventListener('touchmove', e => {
@@ -5402,19 +5422,24 @@
     Sound.setMuted(prefs.muted);
     lang = prefs.lang || browserLang();
 
-    canvas = $('game');
-    ctx = canvas.getContext('2d');
-    dark = document.createElement('canvas');
-    dctx = dark.getContext('2d');
-    cacheDom();
-    bindUi();
-    bindInput();
-    resize();
-    initRenderAssets();
-    setupAttract();
-    applyLanguage();
-    // the markup is hidden until its text is in the right language (no flash of Portuguese for English players)
-    $('app').removeAttribute('data-i18n-pending');
+    try {
+      canvas = $('game');
+      ctx = canvas.getContext('2d');
+      dark = document.createElement('canvas');
+      dctx = dark.getContext('2d');
+      cacheDom();
+      bindUi();
+      bindInput();
+      resize();
+      initRenderAssets();
+      setupAttract();
+      applyLanguage();
+    } finally {
+      // the markup is hidden until its text is in the right language (no flash of Portuguese for English players);
+      // if the set-up above fails, it is shown anyway rather than leaving a blank screen
+      const app = $('app');
+      if (app) app.removeAttribute('data-i18n-pending');
+    }
     showOverlay('ov-title');
 
     try {

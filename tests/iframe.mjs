@@ -16,7 +16,12 @@ const HOST_Y = 60; // the host page is scrolled here before each check, so it co
 
 const DESKTOP = [{ w: 960, h: 540 }, { w: 1280, h: 720 }, { w: 1920, h: 1080 }];
 const PHONES = [{ w: 390, h: 844, mobile: true, name: 'portrait' }, { w: 844, h: 390, mobile: true, name: 'landscape' }];
-const SCROLL_KEYS = ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'End', 'Home', 'ArrowLeft', 'ArrowRight'];
+// CrazyGames' desktop iframe sizes, itch.io's default 960×540 embed, and a phone in landscape
+const PORTAL_SIZES = [[800, 450], [821, 462], [907, 510], [960, 540], [1077, 606], [1080, 607], [1216, 684], [1280, 720],
+  [1366, 768], [1536, 864], [1920, 1080], [844, 390]];
+// plus the modified keys that scroll as well: Ctrl+Home/End, and Option/Cmd+Up/Down on macOS
+const SCROLL_KEYS = ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'End', 'Home', 'ArrowLeft', 'ArrowRight',
+  'Control+End', 'Control+Home', 'Alt+ArrowDown', 'Alt+ArrowUp'];
 
 const hostHtml = (w, h) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -282,7 +287,8 @@ try {
   });
 
   await rep.step('4. A tall overlay scrolls by keys and wheel inside the frame, the host does not', async () => {
-    const { context, page, frame } = await openHost({ w: 960, h: 400 });
+    // narrower than the two-column how-to (760 px), so the overlay is taller than the frame
+    const { context, page, frame } = await openHost({ w: 700, h: 400 });
     try {
       const b = await frameBox(page);
       await page.mouse.click(b.x + 8, b.y + b.height - 8);
@@ -291,7 +297,7 @@ try {
       await frame.evaluate(() => document.activeElement.blur());
       const top = () => frame.evaluate(() => { const o = document.getElementById('ov-howto'); return [o.scrollTop, o.scrollHeight - o.clientHeight]; });
       const [, max] = await top();
-      assert(max > 40, 'how-to does not overflow at 960×400 (max ' + max + ')');
+      assert(max > 40, 'how-to does not overflow at 700×400 (max ' + max + ')');
       await setHostY(page);
       const seen = [];
       for (const k of ['ArrowDown', 'End', 'PageUp', 'Home', 'PageDown']) { await page.keyboard.press(k); await sleep(80); seen.push((await top())[0]); }
@@ -308,6 +314,43 @@ try {
     } finally {
       await context.close();
     }
+  });
+
+  await rep.step('4b. Title, How to Play and pause fit the frame without scrolling at the portal sizes (EN and PT)', async () => {
+    const over = [];
+    let checks = 0;
+    for (const lang of ['en', 'pt']) {
+      const { context, page, frame } = await openHost({ w: 1920, h: 1080 });
+      try {
+        await frame.evaluate(() => document.fonts.ready.then(() => true));
+        await D(frame, 'setLang', lang);
+        const measure = async id => {
+          for (const [w, h] of PORTAL_SIZES) {
+            await page.evaluate(([w, h]) => { const f = document.getElementById('game'); f.style.width = w + 'px'; f.style.height = h + 'px'; }, [w, h]);
+            await frame.waitForFunction(([w, h]) => innerWidth === w && innerHeight === h, [w, h]);
+            await sleep(50);
+            const hidden = await frame.evaluate(id => { const o = document.getElementById(id); return o.scrollHeight - o.clientHeight; }, id);
+            if (hidden > 1) over.push(`${lang} ${id} ${w}×${h}: ${hidden}px below the fold`);
+            checks++;
+          }
+        };
+        await measure('ov-title');
+        await frame.evaluate(() => document.getElementById('btn-howto').click());
+        await until(frame, 'howto');
+        await measure('ov-howto');
+        await frame.evaluate(() => document.getElementById('btn-howto-back').click());
+        await frame.evaluate(() => document.getElementById('btn-start').click());
+        await until(frame, 'playing');
+        await D(frame, 'godMode', true);
+        await frame.evaluate(() => document.getElementById('btn-pause').click());
+        await until(frame, 'paused');
+        await measure('ov-pause');
+      } finally {
+        await context.close();
+      }
+    }
+    assert(!over.length, over.length + ' overflow(s): ' + over.slice(0, 6).join(' | '));
+    return `${checks} screen/size/language checks, nothing below the fold`;
   });
 
   for (const size of PHONES) {

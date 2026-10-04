@@ -109,6 +109,10 @@ try {
     const s = await getState(page);
     assert(s.screen === 'title', 'screen is ' + s.screen);
     assert(await visible(page, '#ov-title'), 'title overlay not visible');
+    // no browser context menu anywhere: the overlays and the HUD sit above the canvas, not inside it
+    const menus = await page.evaluate(() => ['#btn-start', '.story', '#ov-title', '#btn-pause', '#game'].filter(sel =>
+      document.querySelector(sel).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))));
+    assert(!menus.length, 'the context menu opens on ' + menus.join(', '));
     await shot(page, 'desktop-01-title');
   });
 
@@ -116,6 +120,9 @@ try {
     await page.getByRole('button', { name: 'Começar' }).click();
     await waitState(page, "s.screen === 'playing'", 1000);
     assert(await visible(page, '#hud'), 'HUD not visible');
+    // the first night's banner says how to move (keyboard here)
+    const sub = await page.evaluate(() => document.getElementById('banner-sub').textContent);
+    assert(sub === 'WASD ou setas para mover', 'night 1 banner subtitle: "' + sub + '"');
   });
 
   await step('3. Holding "d" for 800 ms moves the player right', async () => {
@@ -256,6 +263,8 @@ try {
     await pp.tap('#btn-start');
     await waitState(pp, "s.screen === 'playing'", 1500);
     assert(await noHorizontalOverflow(pp), 'overflow while playing');
+    const sub = await pp.evaluate(() => document.getElementById('banner-sub').textContent);
+    assert(['Drag anywhere to move', 'Arraste em qualquer lugar para mover'].includes(sub), 'night 1 banner subtitle on touch: "' + sub + '"');
     await pp.evaluate(() => window.QF.debug.godMode(true));
     const before = (await getState(pp)).player;
     // real touch events through CDP (Chrome derives pointer events from them)
