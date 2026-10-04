@@ -19,17 +19,17 @@ export const AI_PROFILES = {
   },
   dificil: {
     id: 'dificil', name: 'Difícil',
-    thinkInterval: 5, scoreNoise: 0.08, randomTargetProb: 0,
-    abilityDelayTicks: 2, abilityMiscastProb: 0, abilityNoise: 0.05,
+    thinkInterval: 5, scoreNoise: 0.12, randomTargetProb: 0.03,
+    abilityDelayTicks: 2, abilityMiscastProb: 0.05, abilityNoise: 0.05,
     teamWeight: 1, overkillAvoid: true, retreat: true, formation: true, kiting: true,
-    budgetMul: 1.15, builder: 'counter',
+    budgetMul: 1.05, builder: 'counter',
   },
   especialista: {
     id: 'especialista', name: 'Especialista',
     thinkInterval: 4, scoreNoise: 0, randomTargetProb: 0,
     abilityDelayTicks: 0, abilityMiscastProb: 0, abilityNoise: 0,
     teamWeight: 1, overkillAvoid: true, retreat: true, formation: true, kiting: true,
-    budgetMul: 1.3, builder: 'counter',
+    budgetMul: 1.2, builder: 'counter',
   },
 };
 

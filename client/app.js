@@ -159,7 +159,7 @@ async function getNet() {
       if (e.rid === undefined) toast(errorMessage(e.code, e.detail), 'error');
     });
     // chat history lives on the app state so it survives screen changes (lobby ↔ fleet builder ↔ results)
-    state.mpChat = [];
+    if (!state.mpChat) state.mpChat = [];
     state.net.onChat((m) => { state.mpChat.push(m); if (state.mpChat.length > 80) state.mpChat.shift(); });
     state.net.onLeft(() => { state.mpChat.length = 0; });
   }
