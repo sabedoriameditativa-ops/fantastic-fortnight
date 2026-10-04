@@ -68,6 +68,9 @@ const D = (frame, fn, ...args) => frame.evaluate(([f, a]) => window.QF.debug[f](
 async function resizeFrame(page, frame, w, h) {
   await page.evaluate(([w, h]) => { const f = document.getElementById('game'); f.style.width = w + 'px'; f.style.height = h + 'px'; }, [w, h]);
   await frame.waitForFunction(([w, h]) => innerWidth === w && innerHeight === h, [w, h]);
+  // the frame reports its new size before its next rendering update runs the game's resize handlers and
+  // observers (late under load): wait for two of them
+  await frame.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true)))));
   await sleep(60);
 }
 
@@ -382,8 +385,9 @@ try {
     const touchSmall = SMALL_SIZES.filter(s => s.touch).map(s => [s.w, s.h]);
     const mouseSmall = SMALL_SIZES.filter(s => !s.touch).map(s => [s.w, s.h]);
     const runs = [
-      // [pointer, sizes for the fit checks, sizes for the HUD checks]
-      ['mouse', [...PORTAL_SIZES, ...mouseSmall], [...PORTAL_SIZES, ...mouseSmall, ...touchSmall]],
+      // [pointer, sizes for the fit checks, sizes for the HUD checks]; 600×800: How to Play in one column, just
+      // taller than where the narrow frames switch to two
+      ['mouse', [...PORTAL_SIZES, ...mouseSmall, [600, 800]], [...PORTAL_SIZES, ...mouseSmall, ...touchSmall]],
       ['touch', [...touchSmall, [844, 390], [390, 844]], [...touchSmall, [844, 390], [390, 844]]],
     ];
     for (const [pointer, fitSizes, hudSizes] of runs) {

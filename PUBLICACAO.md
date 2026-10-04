@@ -40,14 +40,14 @@ npm run pacote    # gera dist/quinzena-fantastica.zip
 O mesmo ZIP serve para os dois portais. Saída de `npm run pacote` em 4/10/2026:
 
 ```text
-dist/quinzena-fantastica.zip: 227,544 bytes (222.2 KB), 10 files (431,260 bytes uncompressed)
+dist/quinzena-fantastica.zip: 228,488 bytes (223.1 KB), 10 files (434,082 bytes uncompressed)
 ```
 
 | Arquivo no ZIP | Tamanho | Compactado | Método |
 |---|---:|---:|---|
 | `index.html` (na raiz) | 13.200 | 3.228 | deflate |
-| `style.css` | 33.046 | 8.440 | deflate |
-| `game.js` | 227.929 | 62.440 | deflate |
+| `style.css` | 34.574 | 8.949 | deflate |
+| `game.js` | 229.223 | 62.875 | deflate |
 | `fonts/alegreya-sans-500-latin.woff2` | 23.928 | 23.928 | stored |
 | `fonts/alegreya-sans-500-latin-ext.woff2` | 21.500 | 21.500 | stored |
 | `fonts/alegreya-sans-700-latin.woff2` | 23.976 | 23.976 | stored |
@@ -489,7 +489,7 @@ documentação **[NÃO OFICIAL]**. Os rótulos reais só aparecem com login.
 | Funcionar em Chrome e Edge; jogos ruins no Safari são desligados nesse navegador | testado só em Chromium; Safari na seção 6 |
 | Física igual a 144/165 Hz | passo fixo de 1/60 s com acumulador |
 | `user-select: none` no `body`; áreas seguras no app da CrazyGames | já no `style.css` (`env(safe-area-inset-*)`, `viewport-fit=cover`) |
-| Legível com devicePixelRatio 1 nos quadros 907×510, 1216×684, 1077×606, 821×462, 1366×768, 1920×1080, 1536×864, 1280×720, 800×450 e 1080×607 | `tests/iframe.mjs` confere que título, Como jogar e pausa cabem sem rolagem nesses tamanhos; a legibilidade em 800×450 e 821×462 é para olhar à mão |
+| Legível com devicePixelRatio 1 nos quadros 907×510, 1216×684, 1077×606, 821×462, 1366×768, 1920×1080, 1536×864, 1280×720, 800×450 e 1080×607 | `tests/iframe.mjs` confere que título, Como jogar e pausa cabem sem rolagem nesses tamanhos e também em quadros pequenos (640×360 e 360×640 com toque, 390×844 e 500×700 com mouse), e que o HUD nunca aparece meio coberto pela pausa ou pela melhoria (noites 1, 7 e 14); a legibilidade em 800×450 e 821×462 é para olhar à mão |
 | “Show the user how to control the game with a keyboard overlay or mouse gestures” | tela Como jogar e a dica da noite 1 (“WASD or arrow keys to move” / “Drag anywhere to move”) |
 
 ### 4.7 Full Launch depois (trabalho futuro, não feito)

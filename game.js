@@ -4901,10 +4901,26 @@
     syncHowtoHint();
   }
   // On frames too small for the whole How to Play screen, Back stays pinned to the bottom (style.css) and
-  // the text fades out under it while there is more below.
+  // the text fades out under it while there is more below: only while text really lies under Back or past the
+  // frame's edge, not when what is left to scroll is just the panel's and the overlay's bottom padding.
   function syncHowtoHint() {
     const ov = $('ov-howto');
-    if (ov) ov.classList.toggle('has-more', !ov.hidden && ov.scrollHeight - ov.clientHeight - ov.scrollTop > 2);
+    if (!ov) return;
+    let more = false;
+    if (!ov.hidden && ov.scrollHeight - ov.clientHeight - ov.scrollTop > 2) {
+      // the lowest line of text: the last item of each column, its text nodes (not their boxes' leading)
+      const range = document.createRange();
+      let low = -Infinity;
+      for (const li of ov.querySelectorAll('.howto li:last-child')) {
+        const walk = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+        for (let n; (n = walk.nextNode());) {
+          range.selectNodeContents(n);
+          low = Math.max(low, range.getBoundingClientRect().bottom);
+        }
+      }
+      more = low > ov.querySelector('.actions').getBoundingClientRect().top + 1;
+    }
+    ov.classList.toggle('has-more', more);
   }
   function closeHowto() {
     if (state.screen !== 'howto') return;
@@ -5392,11 +5408,19 @@
     window.addEventListener('resize', syncHowtoHint);
     $('ov-howto').addEventListener('scroll', syncHowtoHint, { passive: true });
     window.addEventListener('resize', syncHudCover);
-    for (const id of ['ov-pause', 'ov-levelup']) {
-      $(id).addEventListener('scroll', syncHudCover, { passive: true });
-      // the panel changes size with the restart/quit confirmation, the cards and the language
-      try { if (window.ResizeObserver) new ResizeObserver(() => syncHudCover()).observe($(id).querySelector('.panel')); } catch (e) { /* ignore */ }
-    }
+    for (const id of ['ov-pause', 'ov-levelup']) $(id).addEventListener('scroll', syncHudCover, { passive: true });
+    // Resize observers run after layout and before paint, so these classes are right in the very frame that
+    // changes the size: the panel's (restart/quit confirmation, cards, language) and the overlay's, which follows
+    // the frame (inside an iframe, 'resize' arrives a frame after the new layout is painted).
+    try {
+      if (window.ResizeObserver) {
+        const hudRo = new ResizeObserver(() => syncHudCover());
+        const howtoRo = new ResizeObserver(() => syncHowtoHint());
+        for (const id of ['ov-pause', 'ov-levelup']) { hudRo.observe($(id)); hudRo.observe($(id).querySelector('.panel')); }
+        howtoRo.observe($('ov-howto'));
+        howtoRo.observe($('ov-howto').querySelector('.panel'));
+      }
+    } catch (e) { /* ignore */ }
     try {
       if (window.ResizeObserver) new ResizeObserver(() => resize()).observe(canvas);
     } catch (e) { /* ignore */ }

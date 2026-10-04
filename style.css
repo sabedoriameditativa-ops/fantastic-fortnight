@@ -630,17 +630,16 @@ kbd {
   font-weight: 700;
   text-align: center;
 }
-.rules li {
-  position: relative;
-  padding: 5px 0 5px 20px;
-}
+.rules li { padding: 5px 0 5px 20px; }
 .rules li::before {
+  /* in the first line, centred on its lowercase letters whatever the item's padding and line height;
+     it hangs in the item's left padding (net advance 0) */
   content: "";
-  position: absolute;
-  left: 3px;
-  top: 0.85em;
+  display: inline-block;
   width: 7px;
   height: 7px;
+  margin: 0 10px 0 -17px;
+  vertical-align: middle;
   transform: rotate(45deg);
   background: var(--ember);
   box-shadow: 0 0 8px var(--ember);
@@ -883,7 +882,8 @@ kbd {
 /* ---------------------------------------------------------------- How to Play: fit the frame */
 /* Portals show the game in small iframes, so this screen, Back included, must fit without scrolling:
    - narrow frames: one compact column;
-   - frames 560 px wide or more but short: controls and rules side by side, tighter as the height drops;
+   - frames 560 px wide or more but short: controls and rules side by side, tighter as the height drops
+     (up to 860 px tall from 760 px wide; below 760 px wide only up to 780 px, as one column fits above that);
    - anything smaller still: Back stays pinned to the bottom edge and the text fades out under it
      (#ov-howto.has-more, set by game.js), so the screen shows there is more to scroll instead of cutting
      text at the edge of the frame. */
@@ -899,6 +899,10 @@ kbd {
   /* the sticky edge sits at the overlay's padding: cover the strip below it down to the frame edge */
   box-shadow: 0 48px 0 0 rgba(7, 20, 31, 0.97);
 }
+/* ...but never past the panel's own rounded border when the panel ends inside the frame (clip, unlike
+   hidden, leaves the overlay as the sticky bar's scroll container; only while fading, so Back's glow
+   otherwise spills past the panel as on every other screen) */
+#ov-howto.has-more .panel { overflow: clip; }
 
 @media (max-width: 559px) {
   #ov-howto .panel { padding: 16px 16px 10px; }
@@ -910,11 +914,19 @@ kbd {
   .keys { grid-template-columns: minmax(4.5rem, 7.2rem) minmax(0, 1fr); column-gap: 10px; }
   .keys li { grid-template-columns: minmax(4.5rem, 7.2rem) minmax(0, 1fr); grid-template-columns: subgrid; gap: 0 10px; padding: 4px 0; }
   .keyset { white-space: normal; }
+  .keyset > span { white-space: nowrap; } /* "or arrow keys" wraps as one piece, under the keys */
   .howto kbd { min-width: 1.45em; margin-right: 2px; padding: 0 4px; font-size: 0.82rem; }
   .rules li { padding: 3px 0 3px 18px; }
 }
 
-@media (min-width: 560px) and (max-height: 860px) {
+/* 560–759 px wide and 781–860 px tall: one column, its rows a little tighter so that it fits (763 px in English
+   with a mouse); the two-column rules below override these up to 780 px */
+@media (min-width: 560px) and (max-width: 759px) and (max-height: 860px) {
+  .howto h3 { margin: 12px 0 6px; }
+  .keys li { padding: 5px 0; }
+  .rules li { padding: 4px 0 4px 20px; }
+}
+@media (min-width: 760px) and (max-height: 860px), (min-width: 560px) and (max-height: 780px) {
   #ov-howto .panel { max-width: 60rem; padding: 14px 24px 10px; }
   #ov-howto .panel-title { font-size: clamp(1.6rem, 6vh, 2.4rem); }
   .howto {
@@ -930,7 +942,8 @@ kbd {
   .keys li { padding: 5px 0; }
   .rules li { padding: 3px 0 3px 20px; }
 }
-@media (min-width: 560px) and (max-height: 560px) {
+/* compact type on short frames: from 760 px wide only at 520 px tall or less (960×540, itch.io's default embed, fits at full size) */
+@media (min-width: 760px) and (max-height: 520px), (min-width: 560px) and (max-width: 759px) and (max-height: 560px) {
   #ov-howto .panel { padding: 12px 20px 8px; }
   .howto { font-size: 0.94rem; line-height: 1.28; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); column-gap: 22px; }
   .howto h3 { font-size: 1.15rem; margin: 2px 0; }
@@ -944,14 +957,16 @@ kbd {
   .howto h3 { font-size: 1.08rem; }
 }
 /* touch screens hide the keyboard rows, so the rules get the wider column */
-@media (hover: none) and (pointer: coarse) and (min-width: 560px) and (max-height: 860px) {
+@media (hover: none) and (pointer: coarse) and (min-width: 760px) and (max-height: 860px),
+  (hover: none) and (pointer: coarse) and (min-width: 560px) and (max-height: 780px) {
   .howto { grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr); }
 }
 /* the narrower two-column frames: the key column wraps like on phones */
-@media (min-width: 560px) and (max-width: 759px) and (max-height: 860px) {
+@media (min-width: 560px) and (max-width: 759px) and (max-height: 780px) {
   .keys { grid-template-columns: minmax(4.5rem, 7.2rem) minmax(0, 1fr); column-gap: 10px; }
   .keys li { gap: 0 10px; }
   .keyset { white-space: normal; }
+  .keyset > span { white-space: nowrap; }
   .howto kbd { min-width: 1.45em; margin-right: 2px; padding: 0 4px; }
 }
 /* short narrow frames (small phones, 480×640 iframes) */
@@ -964,7 +979,8 @@ kbd {
   .rules li { padding: 2px 0 2px 18px; }
 }
 /* touch, two columns: the two remaining controls read as label over text instead of a cramped table */
-@media (hover: none) and (pointer: coarse) and (min-width: 560px) and (max-height: 860px) {
+@media (hover: none) and (pointer: coarse) and (min-width: 760px) and (max-height: 860px),
+  (hover: none) and (pointer: coarse) and (min-width: 560px) and (max-height: 780px) {
   .howto .keys { display: block; }
   .howto .keys li:not(.kb) { display: block; }
   .howto .keyset { display: block; white-space: normal; }
