@@ -1,0 +1,10 @@
+{
+  "name": "quinzena-fantastica",
+  "private": true,
+  "scripts": {
+    "test": "node tests/run-all.mjs",
+    "start": "npx --yes serve .",
+    "pacote": "node tools/pacote.mjs",
+    "midia": "node tools/midia.mjs"
+  }
+}
