@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createBattle } from '../../shared/sim/battle.js';
 import { hitChance, weaponRange } from '../../shared/sim/weapons.js';
 import { getTables, CLASS_INDEX } from '../../shared/sim/tables.js';
-import { ACCURACY, COMBAT, SHIP_LIST } from '../../shared/catalog.js';
+import { ACCURACY, COMBAT, SHIP_LIST, SHIPS, DAMAGE_MULT } from '../../shared/catalog.js';
 import { config1v1 } from './helpers.js';
 
 function pair(clsA, clsB) {
@@ -40,8 +40,9 @@ test('hitChance: range falloff 1.0 → 0.6, fast target −0.05, clamps to [0.05
   const [r, larva] = pair('fer_sentinela', 'vor_larva');
   larva.vx = 200;
   const wr = r.weapons[0];
-  // base 0.25 + 0.10 ferrix − 0.05 fast = 0.30, ×0.6 at max range = 0.18
-  assert.ok(Math.abs(hitChance(r, wr, larva, weaponRange(r, wr)) - 0.18) < 1e-9);
+  // base railgun-vs-tiny + ferrix bonus − fast penalty, × rangeFalloffMin at max range
+  const expected = (ACCURACY.railgun[0] + COMBAT.ferrixNeuralAccuracy - COMBAT.fastTargetPenalty) * COMBAT.rangeFalloffMin;
+  assert.ok(Math.abs(hitChance(r, wr, larva, weaponRange(r, wr)) - expected) < 1e-9);
   larva.mod.evasion = 1;
   assert.equal(hitChance(r, wr, larva, 10), COMBAT.minHitChance);
 });
@@ -64,9 +65,12 @@ test('precomputed tables: hull/shield weighting and DR included', () => {
   // laser vs Serafim: shield 700 of 1200 ehp → 0.583×1.2 + 0.417×0.6 ≈ 0.95
   const harm = CLASS_INDEX.lum_harmonico;
   assert.ok(Math.abs(T.frac[harm][0][serafim] - (700 / 1200 * 1.2 + 500 / 1200 * 0.6)) < 1e-9);
-  // kinetic 32 vs Hércules hull (armored 0.8, dr 6): shield part 200/1000 × 0.6, hull part 0.8 × (25.6−6)/32
+  // heavy cannon vs Hércules: shield part (cap/ehp) × kinetic.shield, hull part × max(armorFloor, (dmg·armored − dr)/dmg)
+  const H = SHIPS.ter_hercules, km = DAMAGE_MULT.kinetic, dmg = H.weapons[0].damage;
+  const sf = H.shield.cap / (H.shield.cap + H.hp);
+  const hullFrac = Math.max(dmg * km.armored * COMBAT.armorFloor, dmg * km.armored - H.dr) / dmg;
   const f = T.frac[herc][0][herc];
-  assert.ok(Math.abs(f - (0.2 * 0.6 + 0.8 * ((32 * 0.8 - 6) / 32))) < 1e-9);
+  assert.ok(Math.abs(f - (sf * km.shield + (1 - sf) * hullFrac)) < 1e-9);
   // larva has no shield: frac = hull mult only
   assert.ok(Math.abs(T.frac[herc][0][larva] - 1.0) < 1e-9);
   assert.ok(T.maxRange[herc] === 550 && T.rawDps[larva] > 0);

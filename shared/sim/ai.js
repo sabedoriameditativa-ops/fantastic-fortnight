@@ -43,6 +43,7 @@ export function makeTeamState(team) {
   return {
     team, phase: 'advance', cx: 0, cy: 0, enemyCx: 0, enemyCy: 0, anchorId: 0, anchorX: 0, anchorY: 0,
     leash: 350, groupSpeed: 30, hasSupport: false, aliveCost: 0, nonCarriers: 0, lineEngaged: false, order: [],
+    lineCx: 0, lineCy: 0, // cost-weighted centroid of the purchased non-carrier ships (the fighting line); carriers hold behind it
   };
 }
 
@@ -124,6 +125,7 @@ export function teamThink(state, team) {
   const ours = state.alive[team], theirs = state.alive[1 - team];
   // centroids (cost-weighted; spawned units weigh 10)
   let cx = 0, cy = 0, wsum = 0, cost = 0;
+  let lx = 0, ly = 0, lw = 0;
   let anchor = null, anchorRank = -1;
   let groupSpeed = Infinity, hasSupport = false, nonCarriers = 0;
   for (let i = 0; i < ours.length; i++) {
@@ -134,9 +136,11 @@ export function teamThink(state, team) {
     if (rank > 0 && (rank > anchorRank || (rank === anchorRank && s.cost > anchor.cost))) { anchor = s; anchorRank = rank; }
     if (s.role !== 'diver' && s.purchased && s.speed < groupSpeed) groupSpeed = s.speed;
     if (s.role === 'support' || s.role === 'carrier') hasSupport = true;
-    if (s.role !== 'carrier' && s.purchased) nonCarriers++;
+    if (s.role !== 'carrier' && s.purchased) { nonCarriers++; lx += s.x * w; ly += s.y * w; lw += w; }
   }
   if (wsum > 0) { cx /= wsum; cy /= wsum; }
+  // the fighting line excludes carriers: a carrier measuring its backline from a centroid it dominates would retreat without end
+  if (lw > 0) { lx /= lw; ly /= lw; } else { lx = cx; ly = cy; }
   if (groupSpeed === Infinity) {
     for (let i = 0; i < ours.length; i++) groupSpeed = Math.min(groupSpeed, ships[ours[i] - 1].speed);
     if (groupSpeed === Infinity) groupSpeed = 30;
@@ -148,7 +152,7 @@ export function teamThink(state, team) {
     ex += s.x * w; ey += s.y * w; ew += w;
   }
   if (ew > 0) { ex /= ew; ey /= ew; } else { ex = team === 0 ? state.world.w : 0; ey = state.world.h / 2; }
-  T.cx = cx; T.cy = cy; T.enemyCx = ex; T.enemyCy = ey; T.aliveCost = cost; T.hasSupport = hasSupport; T.nonCarriers = nonCarriers;
+  T.cx = cx; T.cy = cy; T.lineCx = lx; T.lineCy = ly; T.enemyCx = ex; T.enemyCy = ey; T.aliveCost = cost; T.hasSupport = hasSupport; T.nonCarriers = nonCarriers;
   T.groupSpeed = groupSpeed;
   // phase
   if (!state.engaged && tick >= ADVANCE_MAX_TICKS) engage(state);
@@ -539,9 +543,9 @@ export function computeDesired(state, s, out) {
     case 'backline': {
       const th = nearestEnemy(state, s, 200);
       if (th) { dx = s.x - th.x; dy = s.y - th.y; speed = cap; break; }
-      let ex = T.enemyCx - T.cx, ey = T.enemyCy - T.cy;
+      let ex = T.enemyCx - T.lineCx, ey = T.enemyCy - T.lineCy;
       const ed = Math.sqrt(ex * ex + ey * ey) || 1;
-      const px = T.cx - (ex / ed) * 250, py = T.cy - (ey / ed) * 250;
+      const px = T.lineCx - (ex / ed) * 250, py = T.lineCy - (ey / ed) * 250; // 250 u behind the fighting line (SPEC §3.1)
       dx = px - s.x; dy = py - s.y;
       const d = Math.sqrt(dx * dx + dy * dy);
       speed = Math.min(cap, d * 2);

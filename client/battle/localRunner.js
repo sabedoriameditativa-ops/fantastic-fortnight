@@ -71,7 +71,10 @@ export function createLocalRunner(config, opts = {}) {
     });
     if (fastForwardTo > 0) loop.fastForward(fastForwardTo);
     loop.setPaused(hidden);
-    loop.start();
+    // Defer the first tick so subscribers registered synchronously after
+    // createLocalRunner() receive the k=0 frame (same ordering as the worker path).
+    const l = loop;
+    setTimeout(() => { if (!disposed && loop === l) l.start(); }, 0);
   }
 
   function fallbackToMain(reason) {

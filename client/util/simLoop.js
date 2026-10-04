@@ -77,7 +77,9 @@ export function createSimLoop(o) {
       if (state.tick % snapshotEvery === 0 || state.ended) emitFrame();
       if (state.ended) { finish(); return; }
     }
-    if (acc > tickMs * maxTicks) acc = tickMs * maxTicks; // the machine cannot keep up: drop time instead of spiraling
+    // Hit the catch-up limit (long stall or a machine that cannot keep up): drop the
+    // remaining backlog instead of spiraling.
+    if (n >= maxTicks) acc = 0;
     const wait = Math.max(0, (tickMs - acc) / eff);
     timer = schedule(wake, Math.min(wait, 50));
   }

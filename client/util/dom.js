@@ -46,6 +46,11 @@ export function append(el, children) {
   return el;
 }
 
+/** Null-safe variadic append (the DOM's own append() would print "null"). */
+export function add(el, ...children) {
+  return append(el, children);
+}
+
 /** Remove all children. */
 export function clear(el) {
   while (el.firstChild) el.removeChild(el.firstChild);

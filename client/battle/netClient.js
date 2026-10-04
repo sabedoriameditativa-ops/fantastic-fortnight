@@ -198,8 +198,12 @@ export function createNetClient(url, opts = {}) {
       if (!msg || typeof msg.t !== 'string') return;
       try { handle(msg); } catch (err) { if (typeof console !== 'undefined') console.error('[net] handler error', err); }
     };
-    sock.onerror = () => { /* close follows */ };
-    sock.onclose = () => { if (sock === ws) onClosed(); };
+    // A refused connection fires 'error' (and, in browsers, 'close'); Node's
+    // WebSocket may fire only 'error'. Settle exactly once either way.
+    let settled = false;
+    const failed = () => { if (settled) return; settled = true; if (sock === ws) onClosed(); };
+    sock.onerror = () => { if (sock.readyState !== 1) failed(); };
+    sock.onclose = () => failed();
   }
 
   function onClosed() {

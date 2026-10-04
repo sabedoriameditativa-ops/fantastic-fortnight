@@ -436,10 +436,14 @@ export function errorMessage(code, detail) {
 function missingLabel(m) {
   if (typeof m === 'string') return m;
   if (m && typeof m === 'object') {
-    const name = m.name || m.playerId || m.id || '?';
-    if (m.reason === 'fleet' || m.hasFleet === false) return fmt(T.lobby.missingFleet, { name });
-    if (m.reason === 'ready' || m.ready === false) return fmt(T.lobby.missingReady, { name });
-    if (m.reason === 'slots' || m.empty) return T.lobby.missingSlots;
+    // the server reports { team, slot, reason } (reason: empty | disconnected | no_fleet | not_ready)
+    const name = m.name || m.playerId || m.id || (Number.isInteger(m.team) && Number.isInteger(m.slot)
+      ? `${T.app.teamShort[m.team] || m.team} · vaga ${m.slot + 1}` : '?');
+    const reason = m.reason;
+    if (reason === 'no_fleet' || reason === 'fleet' || m.hasFleet === false) return fmt(T.lobby.missingFleet, { name });
+    if (reason === 'not_ready' || reason === 'ready' || m.ready === false) return fmt(T.lobby.missingReady, { name });
+    if (reason === 'empty' || reason === 'slots' || m.empty) return `${name} (${T.lobby.slotEmpty.toLowerCase()})`;
+    if (reason === 'disconnected') return `${name} (${T.lobby.disconnected})`;
     return name;
   }
   return String(m);

@@ -30,6 +30,7 @@ const PREFERRED_OPPONENT = { countermeasures: 'terran', flak_curtain: 'terran', 
  * ticks while the ability was ready and the cast never happened.
  */
 const OPPORTUNITY = {
+  countermeasures: (state, s) => s.incomingInterceptables >= 1,
   molt: (state, s) => s.hp < 0.4 * s.hpMax,
   reconstruction: (state, s) => state.ships.filter((a) => a.alive && a.team === s.team && a.hp < 0.6 * a.hpMax && Math.hypot(a.x - s.x, a.y - s.y) <= 400).length >= 3,
   emp_pulse: (state, s) => state.ships.some((e) => e.alive && e.team !== s.team && e.untargetableUntil <= state.tick && Math.hypot(e.x - s.x, e.y - s.y) <= 150

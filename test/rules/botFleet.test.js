@@ -130,15 +130,16 @@ describe('counter builder', () => {
 
   test('enemyComposition computes cost shares', () => {
     const comp = enemyComposition([{ faction: 'vorrax', ships: [{ cls: 'vor_larva', count: 10 }, { cls: 'vor_rainha', count: 1 }] }]);
-    assert.equal(comp.total, 100 + 320);
-    assert.ok(Math.abs(comp.swarm - 100 / 420) < 1e-9);
-    assert.ok(Math.abs(comp.heavy - 320 / 420) < 1e-9);
+    const larvae = 10 * SHIPS.vor_larva.cost, rainha = SHIPS.vor_rainha.cost;
+    assert.equal(comp.total, larvae + rainha);
+    assert.ok(Math.abs(comp.swarm - larvae / (larvae + rainha)) < 1e-9);
+    assert.ok(Math.abs(comp.heavy - rainha / (larvae + rainha)) < 1e-9);
     assert.equal(comp.organic, 1);
     assert.equal(comp.shield, 0);
     assert.equal(comp.nanite, 0);
     assert.equal(comp.line + comp.mothership, 0);
     const shieldy = enemyComposition([{ faction: 'terran', ships: [{ cls: 'ter_hercules', count: 1 }, { cls: 'ter_vespa', count: 1 }] }]);
-    assert.ok(Math.abs(shieldy.shield - 240 / 260) < 1e-9);
+    assert.ok(Math.abs(shieldy.shield - SHIPS.ter_hercules.cost / (SHIPS.ter_hercules.cost + SHIPS.ter_vespa.cost)) < 1e-9);
     assert.equal(enemyComposition([]).total, 0);
     assert.equal(enemyComposition(null).total, 0);
     assert.equal(enemyComposition([{ faction: 'x', ships: [{ cls: 'nope', count: 3 }] }]).total, 0);

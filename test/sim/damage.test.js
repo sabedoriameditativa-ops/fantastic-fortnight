@@ -32,32 +32,40 @@ test('shield absorbs with the shield multiplier and overflow continues to hull',
   assert.ok(t.untargetableUntil >= state.tick + TICK_RATE);
 });
 
-test('flat DR applies after multipliers with the 20% floor; railgun ignores DR', () => {
+test('flat DR applies after multipliers with the armor floor; railgun ignores DR', () => {
   const state = setup();
-  const h = state.ships[0]; // Hércules: hp 800, shield 200, armored, dr 6
+  const h = state.ships[0]; // Hércules: armored, dr 6
   h.shield = 0;
-  // kinetic 10 vs armored: 10 × 0.8 = 8, minus dr 6 → 2 (floor 1.6) → 2
+  const floor = COMBAT.armorFloor, dr = h.dr, km = DAMAGE_MULT.kinetic.armored;
+  let hp = h.hpMax;
+  // kinetic 10 vs armored: 10 × 0.8 = 8, minus dr 6 → 2, but never below the floor fraction
   applyDamage(state, 2, 1, 10, 'kinetic', null);
-  assert.ok(Math.abs(h.hp - 798) < 1e-9);
-  // kinetic 5: 4 − 6 → floor 0.8 → max(minHullDamage 1, 0.8) = 1
+  hp -= Math.max(10 * km * floor, 10 * km - dr);
+  assert.ok(Math.abs(h.hp - hp) < 1e-9);
+  // kinetic 5: 4 − 6 < 0 → floor, then at least minHullDamage
   applyDamage(state, 2, 1, 5, 'kinetic', null);
-  assert.ok(Math.abs(h.hp - 797) < 1e-9);
+  hp -= Math.max(COMBAT.minHullDamage, Math.max(5 * km * floor, 5 * km - dr));
+  assert.ok(Math.abs(h.hp - hp) < 1e-9);
   // railgun 10 vs armored 1.2 → 12, DR ignored
   applyDamage(state, 2, 1, 10, 'railgun', null);
-  assert.ok(Math.abs(h.hp - 785) < 1e-9);
+  hp -= 10 * DAMAGE_MULT.railgun.armored;
+  assert.ok(Math.abs(h.hp - hp) < 1e-9);
   // temporary DR from buffs stacks
   h.mod.drAdd = 10;
   applyDamage(state, 2, 1, 100, 'kinetic', null); // 80 − 16 = 64
-  assert.ok(Math.abs(h.hp - 721) < 1e-9);
+  hp -= Math.max(100 * km * floor, 100 * km - dr - 10);
+  assert.ok(Math.abs(h.hp - hp) < 1e-9);
 });
 
 test('DoT ticks every 0.5 s and ignores DR', () => {
   const state = setup();
   const h = state.ships[0];
   h.shield = 0;
-  // bio hit with dot {dps 3, duration 4}: bio vs armored 1.1 → 11 − 6 = 5
+  // bio hit with dot {dps 3, duration 4}: bio vs armored, minus dr 6 (floor applies)
+  const bm = DAMAGE_MULT.bio.armored;
+  const hp0 = h.hpMax - Math.max(10 * bm * COMBAT.armorFloor, 10 * bm - h.dr);
   applyDamage(state, 2, 1, 10, 'bio', { dot: { dps: 3, duration: 4 } });
-  assert.ok(Math.abs(h.hp - 795) < 1e-9);
+  assert.ok(Math.abs(h.hp - hp0) < 1e-9);
   assert.equal(h.dots.length, 1);
   let total = 0;
   for (let i = 0; i < 4 * TICK_RATE + 5; i++) {
@@ -65,9 +73,9 @@ test('DoT ticks every 0.5 s and ignores DR', () => {
     tickDots(state);
     applyDamageQueue(state);
   }
-  // 8 ticks of 1.5 raw: bio ×1.1 → 1.65 each (no DR) = 13.2
-  total = 795 - h.hp;
-  assert.ok(Math.abs(total - 13.2) < 1e-6, `dot total ${total}`);
+  // 8 ticks of 1.5 raw × bio.armored each (no DR)
+  total = hp0 - h.hp;
+  assert.ok(Math.abs(total - 8 * 1.5 * bm) < 1e-6, `dot total ${total}`);
   assert.equal(h.dots.length, 0);
 });
 

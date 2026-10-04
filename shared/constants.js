@@ -39,7 +39,7 @@ export function worldSize(playersPerSide) {
   return { w, h: Math.round((w * 9) / 16) };
 }
 
-export const SPAWN_X_FRACTION = 0.10;     // team 0 spawns around x = 10% of W, team 1 mirrored
+export const SPAWN_X_FRACTION = 0.18;     // team 0 spawns around x = 18% of W, team 1 mirrored
 export const LANE_HEIGHT_MIN = 300;       // vertical space reserved per player in the deployment
 
 export const TEAM_COLORS = [

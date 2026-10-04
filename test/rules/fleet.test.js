@@ -36,7 +36,7 @@ function assertWithinRules(fleet, budget, label) {
 describe('fleetCost / fleetShipCount / normalizeFleet', () => {
   test('cost and count sum over entries, ignoring junk', () => {
     const fleet = { faction: 'terran', ships: [{ cls: 'ter_vespa', count: 3 }, { cls: 'ter_orion', count: 2 }, null, { cls: 'nope', count: 5 }] };
-    assert.equal(fleetCost(fleet), 3 * 20 + 2 * 130);
+    assert.equal(fleetCost(fleet), 3 * SHIPS.ter_vespa.cost + 2 * SHIPS.ter_orion.cost);
     assert.equal(fleetShipCount(fleet), 10); // unknown class still counts as ships (validation catches it)
     assert.equal(fleetCost(null), 0);
     assert.equal(fleetShipCount({ faction: 'x' }), 0);
@@ -224,10 +224,10 @@ describe('autoComplete', () => {
 describe('fleetSummary / fleetToArray', () => {
   test('summary counts by size and sums cost/ehp/dps', () => {
     const s = fleetSummary({ faction: 'lumen', ships: [{ cls: 'lum_prisma', count: 2 }, { cls: 'lum_catedral', count: 1 }] });
-    assert.equal(s.cost, 120 + 340);
+    assert.equal(s.cost, 2 * SHIPS.lum_prisma.cost + SHIPS.lum_catedral.cost);
     assert.equal(s.count, 3);
     assert.deepEqual(s.bySize, { tiny: 0, small: 2, medium: 0, large: 0, capital: 1, mothership: 0 });
-    assert.equal(s.ehp, 2 * (70 + 100) + (1000 + 1500));
+    assert.equal(s.ehp, 2 * (SHIPS.lum_prisma.hp + SHIPS.lum_prisma.shield.cap) + (SHIPS.lum_catedral.hp + SHIPS.lum_catedral.shield.cap));
     assert.ok(s.dps > 0);
   });
 
