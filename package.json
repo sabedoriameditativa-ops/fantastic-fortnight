@@ -2,7 +2,8 @@
   "name": "quinzena-fantastica",
   "private": true,
   "scripts": {
-    "test": "node tests/smoke.mjs",
-    "start": "npx --yes serve ."
+    "test": "node tests/run-all.mjs",
+    "start": "npx --yes serve .",
+    "pacote": "node tools/pacote.mjs"
   }
 }

@@ -6,6 +6,7 @@
  *   1. Config / tuning tables
  *   2. Utils
  *   3. Storage
+ *   3b. Text & language (pt-BR / en: STRINGS, t())
  *   4. Audio (Web Audio, synthesized)
  *   5. Input (keyboard + floating virtual joystick)
  *   6. State & entities
@@ -124,13 +125,13 @@
   const LIMITS = { particles: 450, texts: 60, embers: 350, smallLights: 170 };
 
   const ENEMIES = {
-    crab: { name: 'Caranguejo', from: 1, hp: 18, speed: 72, dmg: 8, ember: 1, r: 14, glow: '#5fe0cf', body: '#a8503a', shell: '#7a3326' },
-    jelly: { name: 'Água-viva', from: 2, hp: 12, speed: 95, dmg: 6, ember: 1, r: 13, glow: '#d68cff', body: '#5b3f86', shell: '#3a2860' },
-    eel: { name: 'Moreia', from: 4, hp: 14, speed: 155, dmg: 10, ember: 2, r: 11, glow: '#8dffa4', body: '#3e5d3c', shell: '#283d27', turn: 2.3 },
-    puffer: { name: 'Baiacu', from: 5, hp: 75, speed: 46, dmg: 14, ember: 4, r: 20, glow: '#ff9fd2', body: '#8a7444', shell: '#5e4d2a', inflateDist: 165, inflateScale: 1.4 },
+    crab: { from: 1, hp: 18, speed: 72, dmg: 8, ember: 1, r: 14, glow: '#5fe0cf', body: '#a8503a', shell: '#7a3326' },
+    jelly: { from: 2, hp: 12, speed: 95, dmg: 6, ember: 1, r: 13, glow: '#d68cff', body: '#5b3f86', shell: '#3a2860' },
+    eel: { from: 4, hp: 14, speed: 155, dmg: 10, ember: 2, r: 11, glow: '#8dffa4', body: '#3e5d3c', shell: '#283d27', turn: 2.3 },
+    puffer: { from: 5, hp: 75, speed: 46, dmg: 14, ember: 4, r: 20, glow: '#ff9fd2', body: '#8a7444', shell: '#5e4d2a', inflateDist: 165, inflateScale: 1.4 },
     // from 8 → 6, hp 30 → 20, shotEvery 2.6 → 3 s, shotDmg 8 → 6: ink is what reaches a keeper on the move, so it now
     // starts earlier and grows night by night, from fragile squids that do not pile up
-    squid: { name: 'Lula-tinteira', from: 6, hp: 20, speed: 85, dmg: 6, ember: 3, r: 15, glow: '#82b4ff', body: '#3f4f86', shell: '#2a355e', keep: 300, shotEvery: 3, shotDmg: 6, shotSpeed: 240, shotRange: 560 },
+    squid: { from: 6, hp: 20, speed: 85, dmg: 6, ember: 3, r: 15, glow: '#82b4ff', body: '#3f4f86', shell: '#2a355e', keep: 300, shotEvery: 3, shotDmg: 6, shotSpeed: 240, shotRange: 560 },
   };
 
   // Spawn weights shift toward newer creatures as nights go by. A creature joins on its debut night
@@ -156,13 +157,11 @@
 
   const BOSSES = {
     crabKing: {
-      name: 'Caranguejo-Rei', banner: 'O Caranguejo-Rei emerge!', bannerSub: 'Senhor das areias da Ilha Perdida',
       hp: 1500, r: 60, speed: 62, dmg: 22, glow: '#ff9b5c',
       dashEvery: 5, telegraph: 0.8, dashDist: 520, dashSpeed: 640, recover: 0.45,
       summonEvery: 8, summonCount: 4, emberTotal: 60,
     },
     leviathan: {
-      name: 'Leviatã das Marés', banner: 'O Leviatã das Marés desperta!', bannerSub: 'A última maré da quinzena',
       hp: 5200, r: 80, speed: 48, dmg: 30, glow: '#7ff3ff', keep: 180,
       ringEvery: 3.2, ringCount: 16, ringCountEnraged: 24, orbDmg: 8, orbSpeed: 210, orbLife: 6,
       // slamEvery 6 → 7 s, slamWarn 1 → 1.4 s, the 2nd slam's lead 0.9 → 0.6 s of keeper motion, slamDmg 25 → 16 and
@@ -198,6 +197,8 @@
 
   // regen 0.8 → 1 hp/s per level: the ink nights wear a keeper down over several nights
   const PASSIVES = { boots: 0.1, hull: 20, hullHeal: 20, regen: 1, magnet: 0.35, wick: 0.15, powder: 0.12, hourglass: 0.08 };
+  // the cards offered when every upgrade is maxed out
+  const ITEMS = { teaHeal: 40, coinScore: 300 };
 
   const MAX_LEVEL = 5;
   const MAX_WEAPONS = 4;
@@ -239,8 +240,6 @@
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
   }
-  // Brazilian thousands separator: 12.840
-  const fmtInt = n => String(Math.max(0, Math.floor(n))).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   function fmtTime(s) {
     s = Math.max(0, Math.ceil(s));
     const m = Math.floor(s / 60), r = s % 60;
@@ -280,7 +279,8 @@
   // 3. STORAGE (every access guarded — the game works without it)
   // =========================================================================
 
-  const prefs = { bestScore: 0, bestNight: 0, muted: false };
+  // lang: the language the player picked with the toggle ('pt' | 'en'); null = follow the browser
+  const prefs = { bestScore: 0, bestNight: 0, muted: false, lang: null };
 
   function loadPrefs() {
     try {
@@ -291,6 +291,7 @@
       prefs.bestScore = Math.max(0, Number(d.bestScore) || 0);
       prefs.bestNight = clamp(Number(d.bestNight) || 0, 0, NIGHTS.total);
       prefs.muted = !!d.muted;
+      prefs.lang = isLang(d.lang) ? d.lang : null;
       return true;
     } catch (e) {
       return false;
@@ -298,10 +299,409 @@
   }
   function savePrefs() {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        bestScore: prefs.bestScore, bestNight: prefs.bestNight, muted: prefs.muted,
-      }));
+      const d = { bestScore: prefs.bestScore, bestNight: prefs.bestNight, muted: prefs.muted };
+      if (prefs.lang) d.lang = prefs.lang;
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
     } catch (e) { /* storage unavailable — ignore */ }
+  }
+
+  // =========================================================================
+  // 3b. TEXT & LANGUAGE (Brazilian Portuguese and English)
+  // =========================================================================
+  // Every word the player sees or hears described lives in STRINGS. t(key, vars) reads the current language; a
+  // value is a string with {name} slots (numbers formatted for the language), a { one, other } plural pair picked by
+  // vars.n, or a function of vars for text built from the tuning tables. index.html names its strings with
+  // data-i18n (text) and data-i18n-attr ("attr:key; attr:key"); applyLanguage() (section 12) puts them all in place.
+  // The English title is not final: it lives only in STRINGS.en.gameTitle / gameSubtitle, and everything that shows
+  // the title (title screen, <title>, meta description) reads it from there.
+
+  const LANG_TAGS = { pt: 'pt-BR', en: 'en' }; // BCP 47 tag for <html lang> and Intl
+  const isLang = l => l === 'pt' || l === 'en';
+  let lang = 'pt';
+
+  // saved choice first, then the browser: Portuguese for pt*, English for everything else
+  function browserLang() {
+    let tag = '';
+    try {
+      const nav = window.navigator;
+      tag = String((nav.languages && nav.languages[0]) || nav.language || '');
+    } catch (e) { tag = ''; }
+    return /^pt(?:[-_]|$)/i.test(tag) ? 'pt' : 'en';
+  }
+
+  // Numbers in the current language: pt-BR 12.840 and 0,8 — en 12,840 and 0.8 (hand-made if Intl is missing)
+  const numberFormats = {};
+  function fmtNum(v) {
+    if (!(lang in numberFormats)) {
+      try { numberFormats[lang] = new Intl.NumberFormat(LANG_TAGS[lang], { maximumFractionDigits: 2 }); } catch (e) { numberFormats[lang] = null; }
+    }
+    const f = numberFormats[lang];
+    if (f) return f.format(v);
+    const sep = lang === 'pt' ? ['.', ','] : [',', '.'];
+    const parts = String(Math.round(Math.abs(v) * 100) / 100).split('.');
+    return (v < 0 ? '-' : '') + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, sep[0]) + (parts[1] ? sep[1] + parts[1] : '');
+  }
+  const fmtInt = v => fmtNum(Math.max(0, Math.floor(v)));
+  // card numbers come from the tuning tables, so a tuned value never leaves a card out of date
+  const pct = f => fmtNum(Math.round(f * 100)) + '%'; // round: (1 - 0.9) × 100 is 9.999…
+  const pluralOf = { pt: n => (n === 1 ? 'one' : 'other'), en: n => (n === 1 ? 'one' : 'other') };
+
+  const STRINGS = {
+    pt: {
+      gameTitle: 'Quinzena Fantástica',
+      gameSubtitle: 'Catorze noites no farol da Ilha Perdida',
+      metaDescription: '{title}: sobreviva a catorze noites no farol da Ilha Perdida.',
+      // the language toggle shows the OTHER language, in that language
+      langOtherName: 'English',
+      langOtherTag: 'en',
+      langSwitch: 'Mudar o idioma para inglês',
+      canvasLabel: 'Ilha Perdida — área de jogo',
+
+      'hud.hp': 'Vida',
+      'hud.xp': 'Experiência',
+      'hud.level': 'Nív. {n}',
+      'hud.kills': 'abates',
+      'hud.points': 'pts',
+      'hud.night': 'Noite {n}/{total}',
+      'hud.boss': 'Chefe',
+      'hud.bossHp': 'Vida do chefe',
+      'hud.pause': 'Pausar',
+      'hud.mute': 'Desligar som',
+      'hud.unmute': 'Ligar som',
+
+      logbook: 'Diário do farol',
+      'title.story1': 'Toda noite, criaturas luminosas sobem do mar e rastejam até o farol.',
+      'title.story2': 'Mantenha a lanterna acesa e resista até o fim da quinzena.',
+      'title.start': 'Começar',
+      'record.label': 'Recorde:',
+      'record.none': 'Nenhum recorde ainda',
+      'record.night': 'noite {n}',
+      'record.new': 'Novo recorde!',
+      points: '{n} pontos',
+      'sound.on': 'Som: ligado',
+      'sound.off': 'Som: desligado',
+
+      'howto.title': 'Como jogar',
+      'howto.controls': 'Controles',
+      'howto.orArrows': ' ou setas',
+      'howto.move': 'mover',
+      'howto.or': ' ou ',
+      'howto.pause': 'pausar e continuar',
+      'howto.sound': 'ligar ou desligar o som',
+      'howto.pick': 'escolher a melhoria (ou setas e Enter)',
+      'howto.next': 'começar a próxima noite (ou Espaço)',
+      'howto.touch': 'Toque ou mouse',
+      'howto.drag': 'arraste em qualquer lugar da tela para mover — surge um joystick virtual',
+      'howto.langKey': 'Idioma',
+      'howto.lang': 'botão “{other}” na tela inicial e na pausa',
+      'howto.rules': 'Regras',
+      'howto.rule1': 'Suas armas disparam sozinhas: você só precisa se mover.',
+      'howto.rule2': 'Criaturas derrotadas deixam brasas. Recolha-as para subir de nível e escolher melhorias.',
+      'howto.rule3': 'O facho do farol desacelera as criaturas que ilumina.',
+      'howto.rule4': 'Sobreviva às 14 noites. Nas noites 7 e 14, um chefe sobe do mar.',
+      'howto.rule5': 'A cada amanhecer você recupera parte da vida.',
+      back: 'Voltar',
+
+      'banner.night': 'Noite {n}',
+      'banner.of': 'de {total}',
+      'banner.last': 'A última noite da quinzena',
+      'banner.bossNight': 'Algo enorme se move sob as ondas…',
+      'boss.crabKing': 'Caranguejo-Rei',
+      'boss.crabKing.banner': 'O Caranguejo-Rei emerge!',
+      'boss.crabKing.sub': 'Senhor das areias da Ilha Perdida',
+      'boss.leviathan': 'Leviatã das Marés',
+      'boss.leviathan.banner': 'O Leviatã das Marés desperta!',
+      'boss.leviathan.sub': 'A última maré da quinzena',
+      'toast.enraged': 'O Leviatã se enfurece!',
+
+      'levelup.title': 'Subiu para o nível {n}',
+      'levelup.sub': 'Escolha uma melhoria',
+      'levelup.more': 'mais {n} a seguir',
+      'card.new': 'Novo!',
+      'card.level': 'Nív. {n} → {next}',
+      'kind.weapon': 'Arma',
+      'kind.passive': 'Passiva',
+      'kind.item': 'Item',
+
+      'up.spark': 'Faísca',
+      'up.spark.desc': v => [
+        'Dispara faíscas na criatura mais próxima ou no chefe.',
+        'Mais uma faísca por disparo, em leque.',
+        'Faíscas ' + pct(WEAPONS.spark.dmgL3 - 1) + ' mais fortes.',
+        'Cada faísca atravessa mais uma criatura.',
+        'Mais uma faísca e recarga ' + pct(1 - WEAPONS.spark.cdL5) + ' mais rápida.',
+      ][v.L - 1],
+      'up.beam': 'Lente de Fresnel',
+      'up.beam.desc': v => (v.L === 1
+        ? 'O facho do farol passa a queimar: até ' + fmtNum(WEAPONS.beam.dps) + ' de dano por segundo perto da torre; o calor some com a distância.'
+        : 'Facho mais largo e mais rápido: até ' + fmtNum(WEAPONS.beam.dps + WEAPONS.beam.dpsPerLevel * (v.L - 1)) + ' de dano por segundo.'),
+      'up.aura': 'Lanterna Ardente',
+      'up.aura.desc': v => (v.L === 1
+        ? 'Sua lanterna queima quem chega perto: ' + fmtNum(WEAPONS.aura.dmg) + ' de dano a cada meio segundo.'
+        : 'Chama mais forte: ' + fmtNum(WEAPONS.aura.dmg + WEAPONS.aura.dmgPerLevel * (v.L - 1)) + ' de dano por pulso e ' + pct(WEAPONS.aura.radiusPerLevel) + ' mais alcance.'),
+      'up.anchors': 'Âncoras Giratórias',
+      'up.anchors.desc': v => (v.L === 1
+        ? 'Uma âncora gira ao seu redor: fere e empurra as criaturas e bloqueia a tinta e os orbes.'
+        : ['', '', 'Duas', 'Três', 'Quatro', 'Cinco'][v.L] + ' âncoras girando, cada uma com +' + fmtNum(WEAPONS.anchors.dmgPerLevel) + ' de dano.'),
+      'up.harpoon': 'Arpão',
+      'up.harpoon.desc': v => [
+        'Lança um arpão pesado na criatura mais próxima ou no chefe; ele atravessa todas no caminho.',
+        'Arpão mais pesado: +' + fmtNum(WEAPONS.harpoon.dmgL2) + ' de dano.',
+        'Recarga ' + pct(1 - WEAPONS.harpoon.cdL3) + ' mais rápida.',
+        'Lança dois arpões: um no alvo e outro na direção oposta.',
+        'Ponta de ferro forjado: +' + pct(WEAPONS.harpoon.dmgL5 - 1) + ' de dano.',
+      ][v.L - 1],
+      'up.boots': 'Botas de Marinheiro',
+      'up.boots.desc': () => 'Você corre ' + pct(PASSIVES.boots) + ' mais rápido.',
+      'up.hull': 'Casco Reforçado',
+      'up.hull.desc': () => '+' + fmtNum(PASSIVES.hull) + ' de vida máxima e recupera ' + fmtNum(PASSIVES.hullHeal) + ' de vida.',
+      'up.regen': 'Pulmões de Faroleiro',
+      'up.regen.desc': () => '+' + fmtNum(PASSIVES.regen) + ' de vida recuperada por segundo.',
+      'up.magnet': 'Ímã de Brasas',
+      'up.magnet.desc': () => 'Atrai brasas de ' + pct(PASSIVES.magnet) + ' mais longe.',
+      'up.wick': 'Pavio Longo',
+      'up.wick.desc': () => 'A lanterna ilumina ' + pct(PASSIVES.wick) + ' mais longe — e a ' + t('up.aura') + ' também.',
+      'up.powder': 'Pólvora Seca',
+      'up.powder.desc': () => 'Todas as armas causam ' + pct(PASSIVES.powder) + ' mais dano.',
+      'up.hourglass': 'Ampulheta',
+      'up.hourglass.desc': () => t('up.spark') + ', ' + t('up.harpoon') + ' e ' + t('up.aura') + ' recarregam ' + pct(PASSIVES.hourglass) + ' mais rápido.',
+      'up.tea': 'Chá quente',
+      'up.tea.desc': () => 'Recupera ' + fmtNum(ITEMS.teaHeal) + ' de vida.',
+      'up.coin': 'Moeda antiga',
+      'up.coin.desc': () => 'Vale ' + fmtNum(ITEMS.coinScore) + ' pontos.',
+
+      'dawn.title': 'Amanhecer',
+      'dawn.survived': 'Dia {n} sobrevivido',
+      'dawn.left': { one: 'falta {n} noite', other: 'faltam {n} noites' },
+      'dawn.healed': 'Vida recuperada',
+      'dawn.hp': 'Vida',
+      'dawn.full': 'Cheia',
+      'dawn.next': 'Começar a noite {n}',
+      'stat.kills': 'Criaturas derrotadas',
+      'stat.embers': 'Brasas recolhidas',
+      'stat.nightReached': 'Noite alcançada',
+      'stat.level': 'Nível',
+      'stat.score': 'Pontuação',
+      'stat.bosses': 'Chefes derrotados',
+      'hint.2': 'Águas-vivas começam a subir à praia esta noite.',
+      'hint.3': 'O mar está agitado. Mais criaturas virão.',
+      'hint.4': 'Moreias velozes rondam a costa. Fique de olho nelas.',
+      'hint.5': 'Baiacus espinhosos se aproximam — eles incham quando chegam perto.',
+      'hint.6': 'Lulas-tinteiras cospem tinta de longe. Continue em movimento.',
+      'hint.7': 'O Caranguejo-Rei sai da toca esta noite. Cuidado com as investidas.',
+      'hint.8': 'As lulas-tinteiras voltam aos poucos, e a cada noite são mais. Continue em movimento.',
+      'hint.9': 'Metade da quinzena já passou. O farol continua aceso.',
+      'hint.10': 'Criaturas douradas, bem mais resistentes, surgem na escuridão.',
+      'hint.11': 'As noites estão mais longas. Cada ponto de vida conta.',
+      'hint.12': 'Reta final da quinzena. O mar não dá trégua.',
+      'hint.13': 'A penúltima noite. Um canto grave ecoa sob as ondas.',
+      'hint.14': 'A última noite: o Leviatã das Marés virá atrás do farol.',
+
+      'pause.title': 'Pausado',
+      'pause.level': 'Nív. {n}',
+      'pause.resume': 'Continuar',
+      'pause.restart': 'Recomeçar',
+      'pause.quit': 'Sair para o menu',
+      'confirm.restart': 'Recomeçar perde o progresso desta quinzena.',
+      'confirm.quit': 'Sair para o menu encerra esta quinzena.',
+      'confirm.yesRestart': 'Sim, recomeçar',
+      'confirm.yesQuit': 'Sim, sair',
+      'confirm.cancel': 'Cancelar',
+
+      'over.title': 'A luz se apagou',
+      'over.sub': 'As criaturas tomaram a ilha na noite {n}.',
+      'over.retry': 'Tentar de novo',
+      menu: 'Menu',
+      'win.eyebrow': 'Fim da quinzena',
+      'win.title': 'O farol resistiu à quinzena',
+      'win.sub': 'Catorze noites, e a luz nunca se apagou.',
+      'win.again': 'Jogar de novo',
+    },
+
+    en: {
+      gameTitle: 'Fourteen Tides', // English title, chosen by the author; the only place it lives
+      gameSubtitle: 'Fourteen nights at the lighthouse of the Lost Isle',
+      metaDescription: '{title}: survive fourteen nights at the lighthouse of the Lost Isle.',
+      langOtherName: 'Português',
+      langOtherTag: 'pt-BR',
+      langSwitch: 'Switch language to Portuguese',
+      canvasLabel: 'The Lost Isle — play area',
+
+      'hud.hp': 'Health',
+      'hud.xp': 'Experience',
+      'hud.level': 'Lv. {n}',
+      'hud.kills': { one: 'kill', other: 'kills' },
+      'hud.points': 'pts',
+      'hud.night': 'Night {n}/{total}',
+      'hud.boss': 'Boss',
+      'hud.bossHp': 'Boss health',
+      'hud.pause': 'Pause',
+      'hud.mute': 'Turn sound off',
+      'hud.unmute': 'Turn sound on',
+
+      logbook: 'Lighthouse Log',
+      'title.story1': 'Every night, glowing creatures rise from the sea and crawl toward the lighthouse.',
+      'title.story2': 'Keep your lantern lit and hold out until the fourteenth dawn.',
+      'title.start': 'Start',
+      'record.label': 'High score:',
+      'record.none': 'No high score yet',
+      'record.night': 'night {n}',
+      'record.new': 'New high score!',
+      points: { one: '{n} point', other: '{n} points' },
+      'sound.on': 'Sound: On',
+      'sound.off': 'Sound: Off',
+
+      'howto.title': 'How to Play',
+      'howto.controls': 'Controls',
+      'howto.orArrows': ' or arrow keys',
+      'howto.move': 'move',
+      'howto.or': ' or ',
+      'howto.pause': 'pause and resume',
+      'howto.sound': 'turn sound on or off',
+      'howto.pick': 'pick an upgrade (or arrow keys and Enter)',
+      'howto.next': 'start the next night (or Space)',
+      'howto.touch': 'Touch or mouse',
+      'howto.drag': 'drag anywhere on the screen to move — a virtual joystick appears',
+      'howto.langKey': 'Language',
+      'howto.lang': 'the “{other}” button on the title screen and in the pause menu',
+      'howto.rules': 'Rules',
+      'howto.rule1': 'Your weapons fire on their own: all you have to do is move.',
+      'howto.rule2': 'Defeated creatures drop embers. Collect them to level up and choose upgrades.',
+      'howto.rule3': 'The lighthouse beam slows down the creatures it lights up.',
+      'howto.rule4': 'Survive all 14 nights. On nights 7 and 14, a boss rises from the sea.',
+      'howto.rule5': 'Each dawn restores some of your health.',
+      back: 'Back',
+
+      'banner.night': 'Night {n}',
+      'banner.of': 'of {total}',
+      'banner.last': 'The last of the fourteen nights',
+      'banner.bossNight': 'Something huge stirs beneath the waves…',
+      'boss.crabKing': 'Crab King',
+      'boss.crabKing.banner': 'The Crab King emerges!',
+      'boss.crabKing.sub': 'Lord of the sands of the Lost Isle',
+      'boss.leviathan': 'Tide Leviathan',
+      'boss.leviathan.banner': 'The Tide Leviathan awakens!',
+      'boss.leviathan.sub': 'The final tide',
+      'toast.enraged': 'The Leviathan is enraged!',
+
+      'levelup.title': 'Reached Level {n}',
+      'levelup.sub': 'Choose an upgrade',
+      'levelup.more': '{n} more to come',
+      'card.new': 'New!',
+      'card.level': 'Lv. {n} → {next}',
+      'kind.weapon': 'Weapon',
+      'kind.passive': 'Passive',
+      'kind.item': 'Item',
+
+      'up.spark': 'Spark',
+      'up.spark.desc': v => [
+        'Shoots sparks at the nearest creature or the boss.',
+        'One more spark per shot, fanned out.',
+        'Sparks hit ' + pct(WEAPONS.spark.dmgL3 - 1) + ' harder.',
+        'Each spark pierces one more creature.',
+        'One more spark and a ' + pct(1 - WEAPONS.spark.cdL5) + ' faster cooldown.',
+      ][v.L - 1],
+      'up.beam': 'Fresnel Lens',
+      'up.beam.desc': v => (v.L === 1
+        ? 'The lighthouse beam starts to burn: up to ' + fmtNum(WEAPONS.beam.dps) + ' damage per second near the tower, fading with distance.'
+        : 'Wider, faster beam: up to ' + fmtNum(WEAPONS.beam.dps + WEAPONS.beam.dpsPerLevel * (v.L - 1)) + ' damage per second.'),
+      'up.aura': 'Burning Lantern',
+      'up.aura.desc': v => (v.L === 1
+        ? 'Your lantern burns anything that comes close: ' + fmtNum(WEAPONS.aura.dmg) + ' damage every half second.'
+        : 'Stronger flame: ' + fmtNum(WEAPONS.aura.dmg + WEAPONS.aura.dmgPerLevel * (v.L - 1)) + ' damage per pulse and ' + pct(WEAPONS.aura.radiusPerLevel) + ' more reach.'),
+      'up.anchors': 'Spinning Anchors',
+      'up.anchors.desc': v => (v.L === 1
+        ? 'An anchor circles you: it hurts and knocks back creatures and blocks ink and orbs.'
+        : ['', '', 'Two', 'Three', 'Four', 'Five'][v.L] + ' spinning anchors, each with +' + fmtNum(WEAPONS.anchors.dmgPerLevel) + ' damage.'),
+      'up.harpoon': 'Harpoon',
+      'up.harpoon.desc': v => [
+        'Throws a heavy harpoon at the nearest creature or the boss, piercing everything in its path.',
+        'Heavier harpoon: +' + fmtNum(WEAPONS.harpoon.dmgL2) + ' damage.',
+        pct(1 - WEAPONS.harpoon.cdL3) + ' faster cooldown.',
+        'Throws two harpoons: one at the target and one in the opposite direction.',
+        'Forged iron tip: +' + pct(WEAPONS.harpoon.dmgL5 - 1) + ' damage.',
+      ][v.L - 1],
+      'up.boots': 'Sailor’s Boots',
+      'up.boots.desc': () => 'You run ' + pct(PASSIVES.boots) + ' faster.',
+      'up.hull': 'Reinforced Hull',
+      'up.hull.desc': () => '+' + fmtNum(PASSIVES.hull) + ' max health and restores ' + fmtNum(PASSIVES.hullHeal) + ' health.',
+      'up.regen': 'Keeper’s Lungs',
+      'up.regen.desc': () => '+' + fmtNum(PASSIVES.regen) + ' health regenerated per second.',
+      'up.magnet': 'Ember Magnet',
+      'up.magnet.desc': () => 'Pulls in embers from ' + pct(PASSIVES.magnet) + ' farther away.',
+      'up.wick': 'Long Wick',
+      'up.wick.desc': () => 'Your lantern shines ' + pct(PASSIVES.wick) + ' farther — and so does the ' + t('up.aura') + '.',
+      'up.powder': 'Dry Powder',
+      'up.powder.desc': () => 'All weapons deal ' + pct(PASSIVES.powder) + ' more damage.',
+      'up.hourglass': 'Hourglass',
+      'up.hourglass.desc': () => t('up.spark') + ', ' + t('up.harpoon') + ', and ' + t('up.aura') + ' recharge ' + pct(PASSIVES.hourglass) + ' faster.',
+      'up.tea': 'Hot Tea',
+      'up.tea.desc': () => 'Restores ' + fmtNum(ITEMS.teaHeal) + ' health.',
+      'up.coin': 'Old Coin',
+      'up.coin.desc': () => 'Worth ' + fmtNum(ITEMS.coinScore) + ' points.',
+
+      'dawn.title': 'Dawn',
+      'dawn.survived': 'Day {n} survived',
+      'dawn.left': { one: '{n} night to go', other: '{n} nights to go' },
+      'dawn.healed': 'Health restored',
+      'dawn.hp': 'Health',
+      'dawn.full': 'Full',
+      'dawn.next': 'Start Night {n}',
+      'stat.kills': 'Creatures defeated',
+      'stat.embers': 'Embers collected',
+      'stat.nightReached': 'Night reached',
+      'stat.level': 'Level',
+      'stat.score': 'Score',
+      'stat.bosses': 'Bosses defeated',
+      'hint.2': 'Jellyfish start washing up on the beach tonight.',
+      'hint.3': 'The sea is restless. More creatures are coming.',
+      'hint.4': 'Fast moray eels prowl the shore. Keep an eye on them.',
+      'hint.5': 'Spiny pufferfish are closing in — they puff up when they get near.',
+      'hint.6': 'Ink squids spit ink from a distance. Keep moving.',
+      'hint.7': 'The Crab King leaves its lair tonight. Watch out for its charges.',
+      'hint.8': 'The ink squids are creeping back, more of them each night. Keep moving.',
+      'hint.9': 'Halfway through the fourteen nights. The lighthouse still burns.',
+      'hint.10': 'Golden creatures, far tougher than the rest, emerge from the dark.',
+      'hint.11': 'The nights are growing longer. Every point of health counts.',
+      'hint.12': 'The final stretch. The sea shows no mercy.',
+      'hint.13': 'The second-to-last night. A deep song echoes beneath the waves.',
+      'hint.14': 'The last night: the Tide Leviathan is coming for the lighthouse.',
+
+      'pause.title': 'Paused',
+      'pause.level': 'Lv. {n}',
+      'pause.resume': 'Resume',
+      'pause.restart': 'Restart',
+      'pause.quit': 'Quit to Menu',
+      'confirm.restart': 'Restarting loses all progress in this run.',
+      'confirm.quit': 'Quitting to the menu ends this run.',
+      'confirm.yesRestart': 'Yes, Restart',
+      'confirm.yesQuit': 'Yes, Quit',
+      'confirm.cancel': 'Cancel',
+
+      'over.title': 'The Light Went Out',
+      'over.sub': 'The creatures overran the island on night {n}.',
+      'over.retry': 'Try Again',
+      menu: 'Menu',
+      'win.eyebrow': 'The fourteenth dawn',
+      'win.title': 'The Lighthouse Held',
+      'win.sub': 'Fourteen nights, and the light never went out.',
+      'win.again': 'Play Again',
+    },
+  };
+
+  // t('hud.night', { n: 3, total: 14 }) → "Noite 3/14" | "Night 3/14". A key missing in English falls back to Portuguese.
+  function t(key, vars) {
+    let s = STRINGS[lang][key];
+    if (s === undefined) s = STRINGS.pt[key];
+    if (s === undefined) return key;
+    vars = vars || {};
+    if (typeof s === 'function') return s(vars);
+    if (typeof s === 'object') s = s[pluralOf[lang](Number(vars.n))] || s.other;
+    return s.indexOf('{') < 0 ? s : s.replace(/\{(\w+)\}/g, (m, k) => {
+      if (k === 'title') return t('gameTitle');
+      if (!(k in vars)) return m;
+      return typeof vars[k] === 'number' ? fmtNum(vars[k]) : String(vars[k]);
+    });
   }
 
   // =========================================================================
@@ -569,6 +969,9 @@
     KeyD: [1, 0], ArrowRight: [1, 0],
   };
   const KEY_FALLBACK = { w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD', p: 'KeyP', m: 'KeyM', ' ': 'Space', enter: 'Enter', escape: 'Escape', esc: 'Escape', arrowup: 'ArrowUp', arrowdown: 'ArrowDown', arrowleft: 'ArrowLeft', arrowright: 'ArrowRight', 1: 'Digit1', 2: 'Digit2', 3: 'Digit3' };
+  // Keys whose default action scrolls, by e.key (what the browser goes by). The game's page never scrolls, and in an
+  // iframe the browser hands an unused scroll to the page around it: on a portal they would scroll the portal's page.
+  const SCROLL_KEYS = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, PageUp: 1, PageDown: 1, Home: 1, End: 1, ' ': 1, Spacebar: 1 };
   const JOY = { max: 60, dead: 8, knob: 24 };
 
   const Input = {
@@ -784,58 +1187,24 @@
   // 7. UPGRADES & WEAPONS
   // =========================================================================
 
-  // card numbers come from the tables above, so a tuned value never leaves a card out of date
-  const pct = f => Math.round(f * 100) + '%'; // round: (1 - 0.9) × 100 is 9.999…
+  // names and card text: STRINGS 'up.<id>' / 'up.<id>.desc' (section 3b)
   const UPGRADES = [
-    {
-      id: 'spark', kind: 'weapon', name: 'Faísca',
-      desc: L => [
-        'Dispara faíscas na criatura mais próxima ou no chefe.',
-        'Mais uma faísca por disparo, em leque.',
-        'Faíscas ' + pct(WEAPONS.spark.dmgL3 - 1) + ' mais fortes.',
-        'Cada faísca atravessa mais uma criatura.',
-        'Mais uma faísca e recarga ' + pct(1 - WEAPONS.spark.cdL5) + ' mais rápida.',
-      ][L - 1],
-    },
-    {
-      id: 'beam', kind: 'weapon', name: 'Lente de Fresnel',
-      desc: L => L === 1
-        ? 'O facho do farol passa a queimar: até ' + WEAPONS.beam.dps + ' de dano por segundo perto da torre; o calor some com a distância.'
-        : 'Facho mais largo e mais rápido: até ' + (WEAPONS.beam.dps + WEAPONS.beam.dpsPerLevel * (L - 1)) + ' de dano por segundo.',
-    },
-    {
-      id: 'aura', kind: 'weapon', name: 'Lanterna Ardente',
-      desc: L => L === 1
-        ? 'Sua lanterna queima quem chega perto: ' + WEAPONS.aura.dmg + ' de dano a cada meio segundo.'
-        : 'Chama mais forte: ' + (WEAPONS.aura.dmg + WEAPONS.aura.dmgPerLevel * (L - 1)) + ' de dano por pulso e ' + pct(WEAPONS.aura.radiusPerLevel) + ' mais alcance.',
-    },
-    {
-      id: 'anchors', kind: 'weapon', name: 'Âncoras Giratórias',
-      desc: L => L === 1
-        ? 'Uma âncora gira ao seu redor: fere e empurra as criaturas e bloqueia a tinta e os orbes.'
-        : ['', '', 'Duas', 'Três', 'Quatro', 'Cinco'][L] + ' âncoras girando, cada uma com +' + WEAPONS.anchors.dmgPerLevel + ' de dano.',
-    },
-    {
-      id: 'harpoon', kind: 'weapon', name: 'Arpão',
-      desc: L => [
-        'Lança um arpão pesado na criatura mais próxima ou no chefe; ele atravessa todas no caminho.',
-        'Arpão mais pesado: +' + WEAPONS.harpoon.dmgL2 + ' de dano.',
-        'Recarga ' + pct(1 - WEAPONS.harpoon.cdL3) + ' mais rápida.',
-        'Lança dois arpões: um no alvo e outro na direção oposta.',
-        'Ponta de ferro forjado: +' + pct(WEAPONS.harpoon.dmgL5 - 1) + ' de dano.',
-      ][L - 1],
-    },
-    { id: 'boots', kind: 'passive', name: 'Botas de Marinheiro', desc: () => 'Você corre ' + pct(PASSIVES.boots) + ' mais rápido.' },
-    { id: 'hull', kind: 'passive', name: 'Casco Reforçado', desc: () => '+' + PASSIVES.hull + ' de vida máxima e recupera ' + PASSIVES.hullHeal + ' de vida.' },
-    { id: 'regen', kind: 'passive', name: 'Pulmões de Faroleiro', desc: () => '+' + String(PASSIVES.regen).replace('.', ',') + ' de vida recuperada por segundo.' },
-    { id: 'magnet', kind: 'passive', name: 'Ímã de Brasas', desc: () => 'Atrai brasas de ' + pct(PASSIVES.magnet) + ' mais longe.' },
-    { id: 'wick', kind: 'passive', name: 'Pavio Longo', desc: () => 'A lanterna ilumina ' + pct(PASSIVES.wick) + ' mais longe — e a Lanterna Ardente também.' },
-    { id: 'powder', kind: 'passive', name: 'Pólvora Seca', desc: () => 'Todas as armas causam ' + pct(PASSIVES.powder) + ' mais dano.' },
-    { id: 'hourglass', kind: 'passive', name: 'Ampulheta', desc: () => 'Faísca, Arpão e Lanterna Ardente recarregam ' + pct(PASSIVES.hourglass) + ' mais rápido.' },
+    { id: 'spark', kind: 'weapon' },
+    { id: 'beam', kind: 'weapon' },
+    { id: 'aura', kind: 'weapon' },
+    { id: 'anchors', kind: 'weapon' },
+    { id: 'harpoon', kind: 'weapon' },
+    { id: 'boots', kind: 'passive' },
+    { id: 'hull', kind: 'passive' },
+    { id: 'regen', kind: 'passive' },
+    { id: 'magnet', kind: 'passive' },
+    { id: 'wick', kind: 'passive' },
+    { id: 'powder', kind: 'passive' },
+    { id: 'hourglass', kind: 'passive' },
   ];
   const FALLBACKS = [
-    { id: 'tea', kind: 'item', name: 'Chá quente', desc: () => 'Recupera 40 de vida.' },
-    { id: 'coin', kind: 'item', name: 'Moeda antiga', desc: () => 'Vale 300 pontos.' },
+    { id: 'tea', kind: 'item' },
+    { id: 'coin', kind: 'item' },
   ];
   const UPGRADE_BY_ID = {};
   for (const u of UPGRADES.concat(FALLBACKS)) UPGRADE_BY_ID[u.id] = u;
@@ -889,8 +1258,8 @@
   }
 
   function applyUpgrade(id) {
-    if (id === 'tea') { heal(40); return; }
-    if (id === 'coin') { state.bonusScore += 300; addText(state.player.x, state.player.y - 26, '+300', COLORS.gold, 16); return; }
+    if (id === 'tea') { heal(ITEMS.teaHeal); return; }
+    if (id === 'coin') { state.bonusScore += ITEMS.coinScore; addText(state.player.x, state.player.y - 26, '+' + ITEMS.coinScore, COLORS.gold, 16); return; }
     if (!UPGRADE_BY_ID[id] || UPGRADE_BY_ID[id].kind === 'item') return;
     state.upgrades[id] = Math.min(MAX_LEVEL, lv(id) + 1);
     recomputeStats();
@@ -1459,7 +1828,7 @@
     if (dbg.tel) dbg.tel.boss('spawn');
     addRing(b.x, b.y, 20, b.r * 3, 1.2, def.glow);
     addRing(b.x, b.y, 10, b.r * 2, 0.9, COLORS.parchment);
-    showBanner(def.banner, def.bannerSub, 2.8, true);
+    showBanner(() => [t('boss.' + type + '.banner'), t('boss.' + type + '.sub')], 2.8, true);
     Sound.play('roar', null, true);
     addShake(0.5);
   }
@@ -1473,7 +1842,7 @@
     if (b.type === 'leviathan' && !b.enraged && b.hp < b.maxHp * 0.5 && b.hp > 0) {
       b.enraged = true;
       b.summonT = 1.5;
-      showToast('O Leviatã se enfurece!');
+      showToast(() => t('toast.enraged'));
       Sound.play('roar', null, true);
       addShake(0.35);
     }
@@ -1933,7 +2302,7 @@
 
     if (!state.recordToastShown && prefs.bestScore > 0 && currentScore() > prefs.bestScore) {
       state.recordToastShown = true;
-      showToast('Novo recorde!');
+      showToast(() => t('record.new'));
     }
 
     if (state.phase === 'night') {
@@ -2053,10 +2422,8 @@
     if (dbg.tel) dbg.tel.nightStart();
     setScreen('playing');
     showOverlay(null);
-    const sub = n === NIGHTS.total ? 'A última noite da quinzena'
-      : state.isBossNight ? 'Algo enorme se move sob as ondas…'
-        : 'de ' + NIGHTS.total;
-    showBanner('Noite ' + n, sub, state.isBossNight ? 1.15 : 2.0, false);
+    const sub = n === NIGHTS.total ? 'banner.last' : state.isBossNight ? 'banner.bossNight' : 'banner.of';
+    showBanner(() => [t('banner.night', { n }), t(sub, { total: NIGHTS.total })], state.isBossNight ? 1.15 : 2.0, false);
   }
 
   function endNight() {
@@ -4166,32 +4533,21 @@
   const $ = id => document.getElementById(id);
   const el = {};
   const OVERLAYS = ['ov-title', 'ov-howto', 'ov-levelup', 'ov-dawn', 'ov-pause', 'ov-gameover', 'ov-victory'];
-  const ui = { lockUntil: 0, bannerT: 0, toastT: 0, cache: {}, confirmKind: null, muteTouched: false };
-
-  const DAWN_HINTS = {
-    2: 'Águas-vivas começam a subir à praia esta noite.',
-    3: 'O mar está agitado. Mais criaturas virão.',
-    4: 'Moreias velozes rondam a costa. Fique de olho nelas.',
-    5: 'Baiacus espinhosos se aproximam — eles incham quando chegam perto.',
-    6: 'Lulas-tinteiras cospem tinta de longe. Continue em movimento.',
-    7: 'O Caranguejo-Rei sai da toca esta noite. Cuidado com as investidas.',
-    8: 'As lulas-tinteiras voltam aos poucos, e a cada noite são mais. Continue em movimento.',
-    9: 'Metade da quinzena já passou. O farol continua aceso.',
-    10: 'Criaturas douradas, bem mais resistentes, surgem na escuridão.',
-    11: 'As noites estão mais longas. Cada ponto de vida conta.',
-    12: 'Reta final da quinzena. O mar não dá trégua.',
-    13: 'A penúltima noite. Um canto grave ecoa sob as ondas.',
-    14: 'A última noite: o Leviatã das Marés virá atrás do farol.',
+  // bannerMsg / toastMsg: functions that build the current text, so a language switch can redo it
+  const ui = {
+    lockUntil: 0, bannerT: 0, toastT: 0, bannerMsg: null, toastMsg: null, cache: {}, confirmKind: null,
+    muteTouched: false, langTouched: false,
   };
+
 
   function cacheDom() {
     const ids = {
       hud: 'hud', hpBar: 'hp-bar', hpFill: 'hp-fill', hpText: 'hp-text', xpBar: 'xp-bar', xpFill: 'xp-fill', xpText: 'xp-text',
-      kills: 'kills', score: 'score', nightLabel: 'night-label', nightTimer: 'night-timer',
+      kills: 'kills', killsUnit: 'kills-unit', score: 'score', nightLabel: 'night-label', nightTimer: 'night-timer',
       btnPause: 'btn-pause', btnMute: 'btn-mute', bossBar: 'boss-bar', bossName: 'boss-name', bossFill: 'boss-fill', bossMeter: 'boss-meter',
       banner: 'banner', bannerTitle: 'banner-title', bannerSub: 'banner-sub', toast: 'toast',
       btnStart: 'btn-start', btnHowto: 'btn-howto', titleRecord: 'title-record', btnSoundTitle: 'btn-sound-title',
-      btnHowtoBack: 'btn-howto-back',
+      btnLangTitle: 'btn-lang-title', btnLangPause: 'btn-lang-pause', btnHowtoBack: 'btn-howto-back',
       luH: 'lu-h', luSub: 'lu-sub', luCards: 'lu-cards',
       dawnSub: 'dawn-sub', dawnPips: 'dawn-pips', dawnStats: 'dawn-stats', dawnHint: 'dawn-hint', btnNextNight: 'btn-next-night',
       pauseSub: 'pause-sub', pauseActions: 'pause-actions', btnResume: 'btn-resume', btnRestart: 'btn-restart', btnSoundPause: 'btn-sound-pause', btnQuit: 'btn-quit',
@@ -4258,8 +4614,9 @@
     }
   }
 
-  function updateHud() {
-    if (el.hud.hidden) return;
+  // force: also while the HUD is hidden (a language switch keeps it current for the next time it shows)
+  function updateHud(force) {
+    if (el.hud.hidden && !force) return;
     const p = state.player;
     const frac = p.maxHp > 0 ? p.hp / p.maxHp : 0;
     setText(el.hpText, 'hp', Math.ceil(p.hp) + '/' + Math.round(p.maxHp));
@@ -4271,21 +4628,22 @@
       el.hpBar.classList.toggle('is-low', low);
     }
     const need = xpToNext(state.level);
-    setText(el.xpText, 'lvl', 'Nív. ' + state.level);
+    setText(el.xpText, 'lvl', t('hud.level', { n: state.level }));
     setFill(el.xpFill, 'xpf', state.xp / need);
     setAttr(el.xpBar, 'xpa', 'aria-valuenow', String(Math.round((state.xp / need) * 100)));
     setText(el.kills, 'kills', fmtInt(state.kills));
+    setText(el.killsUnit, 'killsUnit', t('hud.kills', { n: state.kills }));
     setText(el.score, 'score', fmtInt(currentScore()));
-    setText(el.nightLabel, 'night', 'Noite ' + state.night + '/' + NIGHTS.total);
+    setText(el.nightLabel, 'night', t('hud.night', { n: state.night, total: NIGHTS.total }));
     let mode;
     if (state.isBossNight) {
       mode = 'boss';
-      setText(el.nightTimer, 'timer', 'Chefe');
+      setText(el.nightTimer, 'timer', t('hud.boss'));
       const b = state.boss;
       const showBar = !!b && !b.dead && state.phase === 'night';
       if (el.bossBar.hidden === showBar) el.bossBar.hidden = !showBar;
       if (showBar) {
-        setText(el.bossName, 'bossName', b.def.name);
+        setText(el.bossName, 'bossName', t('boss.' + b.type));
         setFill(el.bossFill, 'bossf', b.hp / b.maxHp);
         setAttr(el.bossMeter, 'bossa', 'aria-valuenow', String(Math.round((b.hp / b.maxHp) * 100)));
       }
@@ -4302,14 +4660,20 @@
     }
   }
 
-  function showBanner(title, sub, dur, boss) {
+  // msg() → [title, subtitle] in the current language
+  function showBanner(msg, dur, boss) {
     if (!el.banner) return;
     el.banner.removeAttribute('aria-hidden');
-    el.bannerTitle.textContent = title;
-    el.bannerSub.textContent = sub || '';
+    ui.bannerMsg = msg;
+    renderBannerText();
     el.banner.classList.toggle('is-boss', !!boss);
     el.banner.classList.add('show');
     ui.bannerT = dur || 2;
+  }
+  function renderBannerText() {
+    const m = ui.bannerMsg ? ui.bannerMsg() : ['', ''];
+    el.bannerTitle.textContent = m[0];
+    el.bannerSub.textContent = m[1] || '';
   }
   function hideBanner() {
     ui.bannerT = 0;
@@ -4318,10 +4682,12 @@
       el.banner.setAttribute('aria-hidden', 'true');
     }
   }
-  function showToast(text, dur) {
+  // msg() → the toast text in the current language
+  function showToast(msg, dur) {
     if (!el.toast) return;
     el.toast.removeAttribute('aria-hidden');
-    el.toast.textContent = text;
+    ui.toastMsg = msg;
+    el.toast.textContent = msg();
     el.toast.classList.add('show');
     ui.toastT = dur || 2.4;
   }
@@ -4364,33 +4730,38 @@
     }
   }
 
+  const recordPoints = () => t('points', { n: Math.max(0, Math.floor(prefs.bestScore)) });
+  const recordNight = () => t('record.night', { n: Math.max(1, prefs.bestNight) });
+
   function updateRecordLine() {
     const n = el.titleRecord;
     n.textContent = '';
     if (prefs.bestScore > 0) {
-      n.appendChild(document.createTextNode('Recorde: '));
-      n.appendChild(make('strong', null, fmtInt(prefs.bestScore) + ' pontos'));
-      n.appendChild(document.createTextNode(' · noite ' + Math.max(1, prefs.bestNight)));
+      n.appendChild(document.createTextNode(t('record.label') + ' '));
+      n.appendChild(make('strong', null, recordPoints()));
+      n.appendChild(document.createTextNode(' · ' + recordNight()));
     } else {
-      n.textContent = 'Nenhum recorde ainda';
+      n.textContent = t('record.none');
     }
   }
 
   function syncSoundUi() {
-    const label = prefs.muted ? 'Som: desligado' : 'Som: ligado';
+    const label = t(prefs.muted ? 'sound.off' : 'sound.on');
     el.btnSoundTitle.textContent = label;
     el.btnSoundPause.textContent = label;
     el.btnMute.classList.toggle('is-muted', prefs.muted);
-    el.btnMute.setAttribute('aria-label', prefs.muted ? 'Ligar som' : 'Desligar som');
+    el.btnMute.setAttribute('aria-label', t(prefs.muted ? 'hud.unmute' : 'hud.mute'));
   }
 
   function renderLevelUp() {
     const shown = state.level - state.pendingLevelUps + 1;
-    el.luH.textContent = 'Subiu para o nível ' + shown;
+    el.luH.textContent = t('levelup.title', { n: shown });
     const more = state.pendingLevelUps - 1;
-    el.luSub.textContent = 'Escolha uma melhoria';
-    if (more > 0) appendSubExtra(el.luSub, 'mais\u00a0' + more + '\u00a0a\u00a0seguir');
+    el.luSub.textContent = t('levelup.sub');
+    if (more > 0) appendSubExtra(el.luSub, t('levelup.more', { n: more }));
     const wrap = el.luCards;
+    // a redraw (language switch) keeps keyboard focus on the same card
+    const focused = Array.prototype.indexOf.call(wrap.children, document.activeElement);
     wrap.textContent = '';
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     state.offers.forEach((o, i) => {
@@ -4405,13 +4776,13 @@
       btn.appendChild(cv);
       const body = make('span', 'card-body');
       const top = make('span', 'card-top');
-      top.appendChild(make('span', 'card-name', o.name));
+      top.appendChild(make('span', 'card-name', t('up.' + o.id)));
       if (o.kind !== 'item') {
-        top.appendChild(make('span', 'card-level' + (L === 0 ? ' is-new' : ''), L === 0 ? 'Novo!' : 'Nív. ' + L + ' → ' + (L + 1)));
+        top.appendChild(make('span', 'card-level' + (L === 0 ? ' is-new' : ''), L === 0 ? t('card.new') : t('card.level', { n: L, next: L + 1 })));
       }
       body.appendChild(top);
-      body.appendChild(make('span', 'card-desc', o.desc(L + 1)));
-      body.appendChild(make('span', 'card-kind', o.kind === 'weapon' ? 'Arma' : o.kind === 'passive' ? 'Passiva' : 'Item'));
+      body.appendChild(make('span', 'card-desc', t('up.' + o.id + '.desc', { L: L + 1 })));
+      body.appendChild(make('span', 'card-kind', t('kind.' + o.kind)));
       btn.appendChild(body);
       btn.addEventListener('click', () => {
         if (performance.now() < ui.lockUntil) return; // avoid accidental taps and key mashing
@@ -4419,6 +4790,7 @@
       });
       wrap.appendChild(btn);
     });
+    if (focused >= 0 && wrap.children[focused]) wrap.children[focused].focus();
   }
 
   function moveCardFocus(dir) {
@@ -4429,12 +4801,14 @@
     cards[i].focus();
   }
 
+  function renderConfirm() {
+    const quit = ui.confirmKind === 'quit';
+    el.confirmText.textContent = t(quit ? 'confirm.quit' : 'confirm.restart');
+    el.btnConfirmYes.textContent = t(quit ? 'confirm.yesQuit' : 'confirm.yesRestart');
+  }
   function openConfirm(kind) {
     ui.confirmKind = kind;
-    el.confirmText.textContent = kind === 'quit'
-      ? 'Sair para o menu encerra esta quinzena.'
-      : 'Recomeçar perde o progresso desta quinzena.';
-    el.btnConfirmYes.textContent = kind === 'quit' ? 'Sim, sair' : 'Sim, recomeçar';
+    renderConfirm();
     el.pauseActions.hidden = true;
     el.pauseConfirm.hidden = false;
     el.btnConfirmNo.focus();
@@ -4489,12 +4863,16 @@
     el.btnHowto.focus();
   }
 
+  function renderPause() {
+    el.pauseSub.textContent = t('hud.night', { n: state.night, total: NIGHTS.total }) + ' · ' + t('pause.level', { n: state.level });
+    appendSubExtra(el.pauseSub, t('points', { n: Math.max(0, Math.floor(currentScore())) }));
+    renderConfirm();
+  }
   function pauseGame() {
     if (state.screen !== 'playing') return;
     setScreen('paused');
-    el.pauseSub.textContent = 'Noite ' + state.night + '/' + NIGHTS.total + ' · Nív.\u00a0' + state.level;
-    appendSubExtra(el.pauseSub, fmtInt(currentScore()) + ' pontos');
     ui.confirmKind = null;
+    renderPause();
     el.pauseConfirm.hidden = true;
     el.pauseActions.hidden = false;
     showOverlay('ov-pause');
@@ -4564,19 +4942,25 @@
     state.lastDawnHeal = Math.round(amount);
     setScreen('dawn');
     if (dbg.picker) { startNextNight(); return; } // debug: a picker also skips the Dawn screen
-    const left = NIGHTS.total - state.night;
-    el.dawnSub.textContent = 'Dia ' + state.night + ' sobrevivido · ' + (left === 1 ? 'falta 1 noite' : 'faltam ' + left + ' noites');
-    renderPips(el.dawnPips, state.night, 0);
-    renderStats(el.dawnStats, [
-      ['Criaturas derrotadas', fmtInt(state.nightKills)],
-      ['Brasas recolhidas', fmtInt(state.nightEmbers)],
-      [state.lastDawnHeal > 0 ? 'Vida recuperada' : 'Vida', state.lastDawnHeal > 0 ? '+' + state.lastDawnHeal : 'Cheia', 'is-heal'],
-    ]);
-    el.dawnHint.textContent = DAWN_HINTS[state.night + 1] || '';
-    el.btnNextNight.textContent = 'Começar a noite ' + (state.night + 1);
+    renderDawn();
     showOverlay('ov-dawn');
     ui.lockUntil = performance.now() + 300;
     Sound.play('dawn', null, true);
+  }
+
+  function renderDawn() {
+    const left = NIGHTS.total - state.night;
+    el.dawnSub.textContent = t('dawn.survived', { n: state.night }) + ' · ' + t('dawn.left', { n: left });
+    renderPips(el.dawnPips, state.night, 0);
+    const healed = state.lastDawnHeal > 0;
+    renderStats(el.dawnStats, [
+      [t('stat.kills'), fmtInt(state.nightKills)],
+      [t('stat.embers'), fmtInt(state.nightEmbers)],
+      [t(healed ? 'dawn.healed' : 'dawn.hp'), healed ? '+' + fmtInt(state.lastDawnHeal) : t('dawn.full'), 'is-heal'],
+    ]);
+    const hint = 'hint.' + (state.night + 1);
+    el.dawnHint.textContent = STRINGS.pt[hint] ? t(hint) : '';
+    el.btnNextNight.textContent = t('dawn.next', { n: state.night + 1 });
   }
 
   function startNextNight() {
@@ -4590,33 +4974,28 @@
     if (state.screen === 'gameover') return;
     if (dbg.tel) dbg.tel.result('death');
     setScreen('gameover');
-    const isNew = commitRecord();
-    el.goSub.textContent = 'As criaturas tomaram a ilha na noite\u00a0' + state.night + '.';
-    el.goRecord.hidden = !isNew;
+    el.goRecord.hidden = !commitRecord();
+    renderGameOver();
+    showOverlay('ov-gameover');
+  }
+
+  function renderGameOver() {
+    el.goSub.textContent = t('over.sub', { n: state.night });
     renderPips(el.goPips, state.night - 1, state.night);
     renderStats(el.goStats, [
-      ['Noite alcançada', state.night + '/' + NIGHTS.total],
-      ['Nível', state.level],
-      ['Criaturas derrotadas', fmtInt(state.kills)],
-      ['Pontuação', fmtInt(currentScore())],
+      [t('stat.nightReached'), state.night + '/' + NIGHTS.total],
+      [t('stat.level'), state.level],
+      [t('stat.kills'), fmtInt(state.kills)],
+      [t('stat.score'), fmtInt(currentScore())],
     ]);
-    showOverlay('ov-gameover');
   }
 
   function showVictory() {
     state.pendingLevelUps = 0;
     if (dbg.tel) dbg.tel.result('win');
     setScreen('victory');
-    const isNew = commitRecord();
-    el.winRecord.hidden = !isNew;
-    renderPips(el.winPips, NIGHTS.total, 0);
-    renderStats(el.winStats, [
-      ['Nível', state.level],
-      ['Criaturas derrotadas', fmtInt(state.kills)],
-      ['Chefes derrotados', state.bossKills],
-      ['Pontuação', fmtInt(currentScore())],
-    ]);
-    el.winBest.textContent = 'Recorde: ' + fmtInt(prefs.bestScore) + ' pontos · noite ' + Math.max(1, prefs.bestNight);
+    el.winRecord.hidden = !commitRecord();
+    renderVictory();
     showOverlay('ov-victory');
     Sound.play('victory', null, true);
     const p = state.player;
@@ -4624,6 +5003,17 @@
       const a = (i / 6) * TAU;
       burst(p.x + Math.cos(a) * 120, p.y + Math.sin(a) * 120, 14, i % 2 ? COLORS.gold : COLORS.biolume, 180, 1.4, 4);
     }
+  }
+
+  function renderVictory() {
+    renderPips(el.winPips, NIGHTS.total, 0);
+    renderStats(el.winStats, [
+      [t('stat.level'), state.level],
+      [t('stat.kills'), fmtInt(state.kills)],
+      [t('stat.bosses'), state.bossKills],
+      [t('stat.score'), fmtInt(currentScore())],
+    ]);
+    el.winBest.textContent = t('record.label') + ' ' + recordPoints() + ' · ' + recordNight();
   }
 
   function toggleMute() {
@@ -4638,6 +5028,63 @@
     }
   }
 
+  // ---- Language ----
+
+  // "{other}" in a string stands for the other language's name, marked with its own lang for screen readers
+  function setI18nText(node, text) {
+    const i = text.indexOf('{other}');
+    if (i < 0) { node.textContent = text; return; }
+    const name = make('span', null, t('langOtherName'));
+    name.lang = t('langOtherTag');
+    node.textContent = '';
+    node.append(text.slice(0, i), name, text.slice(i + 7));
+  }
+
+  // Puts the current language everywhere: <html lang>, <title>, meta description, the static markup
+  // (data-i18n = text, data-i18n-attr = "attr:key; attr:key") and everything the game writes itself — HUD, every
+  // overlay (open or not, so none keeps text in the other language), banner and toast.
+  function applyLanguage() {
+    document.documentElement.lang = LANG_TAGS[lang];
+    document.title = t('gameTitle');
+    const meta = document.querySelector('meta[name="description"]');
+    if (meta) meta.setAttribute('content', t('metaDescription'));
+    for (const n of document.querySelectorAll('[data-i18n]')) setI18nText(n, t(n.getAttribute('data-i18n')));
+    for (const n of document.querySelectorAll('[data-i18n-attr]')) {
+      for (const pair of n.getAttribute('data-i18n-attr').split(';')) {
+        const i = pair.indexOf(':');
+        if (i > 0) n.setAttribute(pair.slice(0, i).trim(), t(pair.slice(i + 1).trim()));
+      }
+    }
+    ui.cache = {};
+    updateHud(true);
+    updateRecordLine();
+    syncSoundUi();
+    renderLevelUp();
+    renderDawn();
+    renderPause();
+    renderGameOver();
+    renderVictory();
+    if (ui.bannerMsg) renderBannerText();
+    if (ui.toastMsg) el.toast.textContent = ui.toastMsg();
+  }
+
+  // remember: an explicit choice (the toggle) is saved and wins over the browser language from then on
+  function setLanguage(l, remember) {
+    if (!isLang(l)) return;
+    if (remember) {
+      ui.langTouched = true;
+      prefs.lang = l;
+      savePrefs();
+    }
+    if (l === lang) return;
+    lang = l;
+    applyLanguage(); // the toggle button stays in the DOM, so it keeps keyboard focus
+  }
+  function toggleLanguage() {
+    Sound.play('click', null, true);
+    setLanguage(lang === 'pt' ? 'en' : 'pt', true);
+  }
+
   function bindUi() {
     const on = (node, fn) => node.addEventListener('click', ev => {
       Sound.init();
@@ -4648,6 +5095,8 @@
     on(el.btnHowtoBack, () => { Sound.play('click'); closeHowto(); });
     on(el.btnSoundTitle, toggleMute);
     on(el.btnSoundPause, toggleMute);
+    on(el.btnLangTitle, toggleLanguage);
+    on(el.btnLangPause, toggleLanguage);
     // drop focus after a pointer click so Enter during play cannot toggle it again
     on(el.btnMute, ev => { toggleMute(); if (ev.detail > 0) el.btnMute.blur(); });
     on(el.btnPause, () => pauseGame());
@@ -4674,11 +5123,32 @@
 
   // ---- Input wiring ----
 
+  function openOverlay() {
+    for (const id of OVERLAYS) { const o = $(id); if (!o.hidden) return o; }
+    return null;
+  }
+
+  // True when node sits in the open overlay and that overlay is taller than the screen: the wheel and touch drags
+  // may scroll it (its overscroll-behavior: contain keeps that scroll from reaching the page around an iframe).
+  function inScrollingOverlay(node) {
+    const ov = node && node.closest ? node.closest('.overlay') : null;
+    return !!ov && !ov.hidden && ov.scrollHeight > ov.clientHeight + 1;
+  }
+
+  // The scroll keys' default action is cancelled (see onKeyDown), so an overlay taller than the screen scrolls here.
+  function keyScrollOverlay(key) {
+    const ov = openOverlay();
+    const max = ov ? ov.scrollHeight - ov.clientHeight : 0;
+    if (max <= 0) return;
+    const page = Math.max(40, ov.clientHeight - 40);
+    const by = { ArrowUp: -40, ArrowDown: 40, PageUp: -page, PageDown: page, Home: -max, End: max }[key];
+    if (by) ov.scrollTop = clamp(ov.scrollTop + by, 0, max);
+  }
+
   // Tab cycles through an open modal dialog's buttons instead of leaving the game (matters when it is embedded).
   // The non-modal title screen is not trapped, so keyboard users can Tab back out to the host page.
   function trapTab(e) {
-    let ov = null;
-    for (const id of OVERLAYS) { const o = $(id); if (!o.hidden) { ov = o; break; } }
+    const ov = openOverlay();
     if (!ov || ov.getAttribute('aria-modal') !== 'true') return;
     const btns = Array.prototype.filter.call(ov.querySelectorAll('button'), b => b.offsetParent !== null && !b.disabled);
     if (!btns.length) return;
@@ -4697,6 +5167,15 @@
     if (code === 'Tab') {
       if (state.screen !== 'playing') trapTab(e);
       return;
+    }
+    const space = e.key === ' ' || e.key === 'Spacebar' || code === 'Space';
+    if ((SCROLL_KEYS[e.key] || space) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const t = e.target;
+      // Space on a focused button presses it: that default stays. Every other scroll stays inside the game.
+      if (!(space && t && t.tagName === 'BUTTON')) {
+        e.preventDefault();
+        if (!space && !(state.screen === 'levelup' && e.key.indexOf('Arrow') === 0)) keyScrollOverlay(e.key);
+      }
     }
     if (MOVE_KEYS[code]) {
       Input.keys.add(code);
@@ -4831,9 +5310,19 @@
     canvas.addEventListener('pointercancel', onPointerUp);
     canvas.addEventListener('lostpointercapture', onPointerUp);
     canvas.addEventListener('contextmenu', e => e.preventDefault());
-    window.addEventListener('pointerdown', () => Sound.init(), true);
+    window.addEventListener('pointerdown', () => {
+      Sound.init();
+      // in a portal's iframe a click or tap gives the game the keyboard (the canvas cancels its pointerdown, and with
+      // it the browser's own focusing of the frame)
+      if (!document.hasFocus()) { try { window.focus(); } catch (err) { /* ignore */ } }
+    }, true);
+    // no drag or wheel scrolls anything but an overlay taller than the screen: not the canvas, and not the page
+    // around an iframe (a browser hands it any scroll the game does not use)
     document.addEventListener('touchmove', e => {
-      if (state.screen === 'playing' && e.cancelable) e.preventDefault();
+      if (e.cancelable && !inScrollingOverlay(e.target)) e.preventDefault();
+    }, { passive: false });
+    window.addEventListener('wheel', e => {
+      if (!e.ctrlKey && e.cancelable && !inScrollingOverlay(e.target)) e.preventDefault(); // ctrl+wheel: browser zoom
     }, { passive: false });
     document.addEventListener('gesturestart', e => e.preventDefault());
     window.addEventListener('resize', resize);
@@ -4893,6 +5382,7 @@
       prefs.bestScore = Math.max(prefs.bestScore, best);
     }
     if (typeof data.muted === 'boolean' && !ui.muteTouched) prefs.muted = data.muted;
+    if (isLang(data.lang) && !ui.langTouched) prefs.lang = data.lang;
   }
   function start(data) {
     data = data || {};
@@ -4901,8 +5391,8 @@
       if (!storageLoaded) {
         applyHotData(data);
         Sound.setMuted(prefs.muted);
-        updateRecordLine();
-        syncSoundUi();
+        lang = prefs.lang || browserLang();
+        applyLanguage();
       }
       return;
     }
@@ -4910,6 +5400,7 @@
     storageLoaded = loadPrefs();
     if (!storageLoaded) applyHotData(data);
     Sound.setMuted(prefs.muted);
+    lang = prefs.lang || browserLang();
 
     canvas = $('game');
     ctx = canvas.getContext('2d');
@@ -4921,9 +5412,10 @@
     resize();
     initRenderAssets();
     setupAttract();
+    applyLanguage();
+    // the markup is hidden until its text is in the right language (no flash of Portuguese for English players)
+    $('app').removeAttribute('data-i18n-pending');
     showOverlay('ov-title');
-    updateRecordLine();
-    syncSoundUi();
 
     try {
       if (document.fonts && document.fonts.ready) {
@@ -4934,7 +5426,7 @@
     } catch (e) { /* fonts are optional */ }
 
     try {
-      window.claude?.hot?.snapshot?.(() => ({ best: { score: prefs.bestScore, night: prefs.bestNight }, muted: prefs.muted }));
+      window.claude?.hot?.snapshot?.(() => ({ best: { score: prefs.bestScore, night: prefs.bestNight }, muted: prefs.muted, lang: prefs.lang }));
     } catch (e) { /* not in the artifact viewer */ }
 
     requestAnimationFrame(frame);
@@ -4984,6 +5476,7 @@
       upgrades: Object.assign({}, state.upgrades),
       damageTaken: Object.assign({}, state.damageTaken),
       muted: prefs.muted,
+      lang,
       timeScale,
     };
   }
@@ -5055,7 +5548,7 @@
         night: state.night, level: state.level, hp: state.player.hp, maxHp: state.player.maxHp,
         upgrades: Object.assign({}, state.upgrades), weapons: weaponCount(), maxWeapons: MAX_WEAPONS, maxLevel: MAX_LEVEL,
       };
-      const shown = offers.map(o => ({ id: o.id, kind: o.kind, name: o.name, level: lv(o.id) }));
+      const shown = offers.map(o => ({ id: o.id, kind: o.kind, name: t('up.' + o.id), level: lv(o.id) }));
       const i = clamp(Math.floor(Number(dbg.picker(shown, info)) || 0), 0, offers.length - 1);
       if (dbg.tel) dbg.tel.pick(offers, offers[i]);
       applyUpgrade(offers[i].id);
@@ -5160,7 +5653,7 @@
   // these before startRun(): PLAYER.* and PASSIVES.* fold into the player's stats at each upgrade and at a new
   // run; ENEMIES.* / SCALING.* / BOSSES.*.hp|r are copied into each creature or boss as it spawns.
   // MAX_LEVEL and MAX_WEAPONS are constants (not tunable at runtime).
-  const CONFIG = { SIM, WORLD, PLAYER, NIGHTS, XP, SCORE, SPAWN, SPAWN_WEIGHTS, SCALING, LIMITS, ENEMIES, BOSSES, WEAPONS, PASSIVES };
+  const CONFIG = { SIM, WORLD, PLAYER, NIGHTS, XP, SCORE, SPAWN, SPAWN_WEIGHTS, SCALING, LIMITS, ENEMIES, BOSSES, WEAPONS, PASSIVES, ITEMS };
 
   const QF = { getState };
   window.QF = QF;
@@ -5216,6 +5709,17 @@
         spawnAtRing(type, Math.max(1, Math.min(200, Math.round(Number(count) || 1))));
       },
       setTimeScale(x) { timeScale = clamp(Number(x) || 1, 0.1, 20); },
+      // 'pt' | 'en' without saving it, as if the browser asked for it (the toggle buttons save the choice)
+      setLang(l) { setLanguage(l, false); },
+      // the open level-up screen shows these cards (ids from UPGRADES / FALLBACKS), e.g. to check every card text
+      setOffers(ids) {
+        if (state.screen !== 'levelup') return false;
+        const offers = (Array.isArray(ids) ? ids : []).map(id => UPGRADE_BY_ID[id]).filter(Boolean).slice(0, 3);
+        if (!offers.length) return false;
+        state.offers = offers;
+        renderLevelUp();
+        return true;
+      },
 
       // ---- balance harness (tools/balance.mjs) ----
       // Seeds the gameplay randomness (spawns, offers, enemy quirks, ember scatter); null restores Math.random.

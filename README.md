@@ -11,6 +11,10 @@ algo muito maior emerge das ondas.
 as armas disparam sozinhas, as criaturas derrotadas deixam **brasas** (experiência) e, a cada
 nível, você escolhe uma entre três melhorias.
 
+O jogo está em português e em inglês. Ele abre no idioma do navegador (português quando o navegador está em
+português, inglês nos demais casos), e o botão “English” / “Português”, na tela inicial e no menu de pausa, troca o
+idioma na hora; a escolha fica salva no navegador.
+
 ## Como jogar
 
 | Ação | Teclado | Toque / mouse |
@@ -35,7 +39,7 @@ armas por vez), além de sete melhorias passivas — Botas de Marinheiro, Casco 
 Pulmões de Faroleiro, Ímã de Brasas, Pavio Longo, Pólvora Seca e Ampulheta.
 
 A pontuação soma criaturas derrotadas, brasas recolhidas, noites sobrevividas e chefes vencidos.
-O recorde (pontos e noite alcançada) e a preferência de som ficam salvos no navegador.
+O recorde (pontos e noite alcançada) e as preferências de som e de idioma ficam salvos no navegador.
 
 ## Como rodar
 
@@ -43,8 +47,11 @@ Não há etapa de build nem dependências.
 
 - **Mais simples:** abra o arquivo `index.html` no navegador (funciona direto via `file://`).
 - **Com servidor local:** `npm start` (usa `npx serve .`) e acesse o endereço exibido no terminal.
+- **Pacote para os portais (itch.io, CrazyGames):** `npm run pacote` gera `dist/quinzena-fantastica.zip` só com os arquivos do jogo (`index.html` na raiz, caminhos relativos) e mostra o tamanho e o número de arquivos.
 
-Funciona no computador e no celular, em retrato ou paisagem.
+Funciona no computador e no celular, em retrato ou paisagem. Dentro de um iframe, como nos portais, o jogo ocupa o
+quadro inteiro, e as teclas, a roda do mouse e os toques não rolam a página ao redor; um clique ou toque no jogo
+passa o teclado para ele.
 
 ## Como testar
 
@@ -52,10 +59,20 @@ Funciona no computador e no celular, em retrato ou paisagem.
 npm test
 ```
 
-O teste de fumaça (`tests/smoke.mjs`) usa o Playwright com Chromium (instalação local ou global):
-abre o jogo em modo de depuração (`index.html#debug`), percorre as telas principais — título,
-partida, melhoria, amanhecer, chefes, vitória, fim de jogo, pausa — e confere o layout em
-celular (retrato e paisagem). Para salvar capturas de tela, defina `SHOT_DIR`:
+Os testes usam o Playwright com Chromium (instalação local ou global; nada é baixado) e rodam um arquivo por vez,
+cada um com linhas PASS/FAIL e um resumo no fim. Todos bloqueiam a rede: qualquer requisição que não seja `file:`
+(ou da própria origem, quando o jogo é servido por HTTP) reprova o teste.
+
+| Arquivo | O que confere |
+|---|---|
+| `tests/smoke.mjs` | o jogo em modo de depuração (`index.html#debug`): título, partida, melhoria, amanhecer, chefes, vitória, fim de jogo, pausa, e o layout no celular (retrato e paisagem) |
+| `tests/language.mjs` | idioma do navegador (`pt-BR` → português, os demais → inglês), o botão de idioma no título e na pausa, a escolha salva após recarregar, nenhum texto em português no modo inglês (todas as telas, todas as cartas, `aria-label`) e os textos em português intactos |
+| `tests/iframe.mjs` | uma página hospedeira gerada pelo teste, mais alta que a janela, com o jogo num iframe: o jogo ocupa o quadro em 960×540, 1280×720, 1920×1080, 390×844 e 844×390; setas, espaço, PageUp/PageDown, Home/End, roda do mouse e arrastes não rolam a hospedeira; espaço e Enter ainda acionam botões; um clique dá o teclado ao jogo |
+| `tests/network.mjs` | nenhuma requisição sai da pasta do jogo (aberto como arquivo e servido por HTTP) e as fontes carregam de `fonts/`, inclusive no canvas |
+| `tests/package.mjs` | roda `tools/pacote.mjs`, confere a lista exata de arquivos do ZIP com `index.html` na raiz, descompacta e joga a cópia sem rede |
+
+Para rodar só alguns: `node tests/run-all.mjs language iframe` (ou `node tests/iframe.mjs`). Para salvar capturas de
+tela do teste de fumaça, defina `SHOT_DIR`:
 
 ```bash
 SHOT_DIR=/tmp/capturas npm test
@@ -89,5 +106,6 @@ todas as opções.
 
 ## Créditos
 
-Feito com HTML5 Canvas e Web Audio, sem dependências. Fontes: *IM Fell English SC* e
-*Alegreya Sans* (Google Fonts).
+Feito com HTML5 Canvas e Web Audio, sem dependências. Fontes: *IM Fell English SC* (Igino Marini) e
+*Alegreya Sans* (The Alegreya Sans Project Authors), do Google Fonts, sob a SIL Open Font License 1.1; ficam em
+`fonts/` com as licenças (`fonts/OFL-*.txt`), e o jogo não faz nenhuma requisição externa.

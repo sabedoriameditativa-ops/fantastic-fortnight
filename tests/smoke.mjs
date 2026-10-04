@@ -1,71 +1,26 @@
 // Smoke test for Quinzena Fantástica.
 // Usage: node tests/smoke.mjs   (optional: SHOT_DIR=/some/dir to save screenshots)
-import { createRequire } from 'node:module';
-import { execSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import { ROOT, loadPlaywright, launchChromium, blockNetwork, watchErrors as watch, assert, createReport } from './helpers.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, '..');
 const PLAIN_URL = pathToFileURL(path.join(ROOT, 'index.html')).href; // what players load
 const PAGE_URL = PLAIN_URL + '#debug';
 const SHOT_DIR = process.env.SHOT_DIR || '';
 
-async function loadPlaywright() {
-  try {
-    return await import('playwright');
-  } catch {
-    const req = createRequire(execSync('npm root -g').toString().trim() + '/');
-    return req('playwright');
-  }
-}
-
-async function launch(pw) {
-  const chromium = pw.chromium || (pw.default && pw.default.chromium);
-  try {
-    return await chromium.launch({ headless: true });
-  } catch (err) {
-    if (process.env.CHROMIUM_PATH) {
-      return await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
-    }
-    throw err;
-  }
-}
-
 // ---------------------------------------------------------------- helpers
 
-const results = [];
+const rep = createReport('Smoke');
+const step = rep.step;
+const record = rep.record;
 const errors = [];
+const blocked = []; // requests that tried to leave the file system (every context is guarded)
 
-function record(name, ok, detail) {
-  results.push({ name, ok, detail: detail || '' });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`);
-}
-
-async function step(name, fn) {
-  try {
-    const r = await fn();
-    if (r === false) record(name, false);
-    else record(name, true, typeof r === 'string' ? r : '');
-  } catch (err) {
-    record(name, false, String((err && err.message) || err).split('\n')[0]);
-  }
-}
-
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg);
-}
-
-function watchErrors(page, label) {
-  page.on('console', msg => {
-    if (msg.type() !== 'error') return;
-    const text = msg.text();
-    const loc = (msg.location && msg.location() && msg.location().url) || '';
-    if (/fonts\.(googleapis|gstatic)\.com/.test(text + ' ' + loc)) return; // offline font loads are fine
-    errors.push(`[${label}] console.error: ${text}${loc ? ' @ ' + loc : ''}`);
-  });
-  page.on('pageerror', err => errors.push(`[${label}] pageerror: ${(err && err.stack) || err}`));
+const watchErrors = (page, label) => watch(page, label, errors);
+async function guard(context) {
+  await blockNetwork(context, { blocked });
+  return context;
 }
 
 const getState = page => page.evaluate(() => window.QF.getState());
@@ -138,11 +93,12 @@ async function overlayFits(page, sel) {
 // ---------------------------------------------------------------- run
 
 const pw = await loadPlaywright();
-const browser = await launch(pw);
+const browser = await launchChromium(pw);
 
 try {
   // ======================= desktop =======================
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  // the button names below are the Portuguese ones: the game follows the browser language
+  const ctx = await guard(await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'pt-BR' }));
   const page = await ctx.newPage();
   watchErrors(page, 'desktop');
   await page.goto(PAGE_URL);
@@ -286,7 +242,7 @@ try {
   await ctx.close();
 
   // ======================= phone portrait =======================
-  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+  const phone = await guard(await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }));
   const pp = await phone.newPage();
   watchErrors(pp, 'phone');
   await pp.goto(PAGE_URL);
@@ -357,7 +313,7 @@ try {
   await phone.close();
 
   // ======================= phone landscape =======================
-  const land = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+  const land = await guard(await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }));
   const lp = await land.newPage();
   watchErrors(lp, 'landscape');
   await lp.goto(PAGE_URL);
@@ -381,7 +337,7 @@ try {
   await land.close();
 
   // ======================= no #debug (what players get) =======================
-  const plain = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const plain = await guard(await browser.newContext({ viewport: { width: 1280, height: 800 } }));
   const np = await plain.newPage();
   watchErrors(np, 'no-debug');
   await np.goto(PLAIN_URL);
@@ -409,8 +365,9 @@ try {
   });
   await plain.close();
 
-  await step('14. No console errors or page errors', async () => {
+  await step('14. No console errors, page errors or network requests', async () => {
     assert(errors.length === 0, errors.length + ' error(s): ' + errors.slice(0, 3).join(' | '));
+    assert(blocked.length === 0, 'requests outside file: ' + blocked.slice(0, 3).join(' | '));
   });
 } catch (err) {
   record('Unexpected harness failure', false, String((err && err.message) || err).split('\n')[0]);
@@ -419,16 +376,8 @@ try {
 }
 
 // ---------------------------------------------------------------- summary
-const w = Math.max(...results.map(r => r.name.length), 10);
-console.log('\n' + '─'.repeat(w + 12));
-console.log('Result  | Step');
-console.log('─'.repeat(w + 12));
-for (const r of results) console.log(`${r.ok ? 'PASS  ' : 'FAIL  '}  | ${r.name}`);
-console.log('─'.repeat(w + 12));
-const failed = results.filter(r => !r.ok).length;
-console.log(`${results.length - failed}/${results.length} passed${SHOT_DIR ? ` · screenshots in ${SHOT_DIR}` : ''}`);
 if (errors.length) {
   console.log('\nErrors captured:');
   for (const e of errors) console.log('  ' + e);
 }
-process.exit(failed ? 1 : 0);
+rep.finish(SHOT_DIR ? `screenshots in ${SHOT_DIR}` : '');
