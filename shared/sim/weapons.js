@@ -50,15 +50,23 @@ export function canShoot(s, w, t, tick) {
   return true;
 }
 
-function nearestShootable(state, s, w) {
+/**
+ * Secondary target for a weapon whose ship target is not shootable: the enemy
+ * in range/arc with the best expected effective damage per shot
+ * (min(ehp, damage × fraction) × accuracy), ties broken by distance.
+ */
+function bestShootable(state, s, w) {
   const R = weaponRange(s, w);
+  const T = getTables();
+  const acc = T.acc[s.clsIdx][w.idx], frac = T.frac[s.clsIdx][w.idx];
   queryCircle(state.grid, state.ships, s.x, s.y, R, buf, 1 - s.team);
-  let best = null, bestD = Infinity;
+  let best = null, bestV = -1, bestD = Infinity;
   for (let i = 0; i < buf.length; i++) {
     const t = buf[i];
     if (!canShoot(s, w, t, state.tick)) continue;
+    const v = Math.min(t.hp + t.shield + t.extraShield, w.def.damage * frac[t.clsIdx]) * acc[t.clsIdx];
     const d2 = (t.x - s.x) * (t.x - s.x) + (t.y - s.y) * (t.y - s.y);
-    if (d2 < bestD) { bestD = d2; best = t; }
+    if (v > bestV || (v === bestV && d2 < bestD)) { bestV = v; bestD = d2; best = t; }
   }
   return best;
 }
@@ -77,7 +85,7 @@ export function fireWeapons(state) {
       if (tick < w.readyAt) continue;
       if (w.def.pd && tryPointDefense(state, s, w)) continue;
       let t = target && canShoot(s, w, target, tick) ? target : null;
-      if (!t) t = nearestShootable(state, s, w);
+      if (!t) t = bestShootable(state, s, w);
       if (!t) continue;
       if (w.def.charge) {
         w.charging = t.id;
@@ -134,7 +142,7 @@ export function fireAt(state, s, w, t) {
         ev.push(['shot', s.id, t.id, w.idx, hit ? 1 : 0]);
         if (hit) {
           queueDamage(state, s.id, t.id, dmg, w.def.type, w.def.dot ? { dot: w.def.dot } : null);
-          if (w.def.chain) chainHits(state, s, w, t, dmg);
+          if (w.def.chain) chainHits(state, s, w, t);
         }
       } else {
         spawnProjectile(state, s, w, t, hit, dmg, k);

@@ -3,7 +3,7 @@
 // their chosen point/target on `me.ability` for the cast that follows.
 // Difficulty knobs: thresholds are jittered by P.abilityNoise via th().
 
-import { ABILITIES, SHIPS } from '../catalog.js';
+import { ABILITIES } from '../catalog.js';
 import { TICK_RATE } from '../constants.js';
 import { addEffect } from './ship.js';
 import { heal, queueDamage } from './damage.js';
@@ -507,7 +507,7 @@ export const ABILITY_REGISTRY = {
         if (e.shieldMax > 0) u += Math.min(e.shield + e.extraShield, p.shieldDamage) / p.shieldDamage;
         if (e.hullType === 'organic' && e.sizeIdx >= 2) u += 1;
       }
-      if (u < 1) seekPrey(ctx, 400, (e) => (e.shieldMax > 0 && e.shield + e.extraShield >= p.shieldDamage) || (e.hullType === 'organic' && e.sizeIdx >= 2));
+      if (u < 1) seekPrey(ctx, 300, (e) => (e.shieldMax > 0 && e.shield + e.extraShield >= p.shieldDamage) || (e.hullType === 'organic' && e.sizeIdx >= 2));
       return u;
     },
     cast(ctx) { const p = P('emp_pulse'); shieldPulse(ctx, p.radius, p.shieldDamage, p.disruptSeconds, null); },
@@ -579,8 +579,18 @@ export const ABILITY_REGISTRY = {
     trigger(ctx) {
       const { me, state } = ctx, p = P('emp_storm');
       enemiesWithin(state, me, p.radius, buf);
-      for (let i = 0; i < buf.length; i++) if (buf[i].sizeIdx === 5) return 1;
-      return buf.length >= th(ctx, 5) ? 1 : 0;
+      let u = 0;
+      for (let i = 0; i < buf.length; i++) if (buf[i].sizeIdx === 5) u = 1;
+      if (buf.length >= th(ctx, 5)) u = 1;
+      // worthwhile cluster just out of reach: close in (hold nearer) until the storm can land
+      me.ai.holdOverride = 0;
+      if (u < 1) {
+        enemiesWithin(state, me, p.radius * 1.6, buf);
+        let n = 0, mother = false;
+        for (let i = 0; i < buf.length; i++) { n++; if (buf[i].sizeIdx === 5) mother = true; }
+        if (n >= 5 || mother) me.ai.holdOverride = p.radius * 0.9;
+      }
+      return u;
     },
     cast(ctx) {
       const p = P('emp_storm'), until = ctx.tick + dur('emp_storm');
@@ -604,4 +614,3 @@ export function missingAbilities() {
   return Object.keys(ABILITIES).filter((id) => !ABILITY_REGISTRY[id]);
 }
 
-export { SHIPS };

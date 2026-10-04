@@ -65,9 +65,10 @@ export function makeShip(o) {
     dr: def.dr, regen: def.regen, hullType: def.hullType,
     speed: def.speed, turnRate: def.turnRate * DEG, accel: def.accel,
     maxRange: tables.maxRange[clsIdx],
+    engageRange: tables.engageRange[clsIdx], // dps-weighted range used for positioning
     alive: true, diedTick: 0, killerId: 0,
     weapons,
-    ability: { id: def.ability, readyAt: 0, pendingAt: -1, pendingUntil: 0 },
+    ability: { id: def.ability, readyAt: 0, pendingAt: -1 }, // pendingAt: scheduled cast tick (-1 = none); triggers stash castX/castY/castTarget/castDx/castDy here
     fx: [],
     mod: neutralMods({}),
     // timers (ticks)
@@ -84,7 +85,7 @@ export function makeShip(o) {
       targetId: 0, targetSince: 0, assignedId: 0, assignedScore: 0, protecteeId: 0,
       mode: 'idleAdvance', px: 0, py: 0, retreating: false, nextThink: tick,
       lastJumpTick: -1000, slotDx: 0, slotDy: 0, orbitSign: (o.id & 1) ? 1 : -1,
-      fleeX: 0, fleeY: 0, lastTargetId: 0,
+      fleeX: 0, fleeY: 0, lastTargetId: 0, holdOverride: 0, retreatSince: 0,
     },
     targetedBy: 0, targetedByTerran: 0, allocDps: 0, incoming: 0, incomingInterceptables: 0,
     flags: 0,

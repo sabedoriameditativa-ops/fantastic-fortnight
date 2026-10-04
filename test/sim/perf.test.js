@@ -15,14 +15,19 @@ test('perf: 6v6 full preset fleets (budget 2500), 400 ticks, < 25 ms/tick (repor
   // warm up JIT on a separate battle
   const warm = createBattle({ seed: 'warm', players });
   for (let i = 0; i < 60; i++) stepBattle(warm);
+  // skip the advance phase: measure 400 ticks of actual combat (from first contact)
+  let skipped = 0;
+  while (!state.engaged && !state.ended && skipped < 1500) { stepBattle(state); skipped++; }
   const t0 = performance.now();
-  let ticks = 0, maxAlive = 0;
+  let ticks = 0, maxAlive = 0, maxProj = 0;
   for (; ticks < 400 && !state.ended; ticks++) {
     stepBattle(state);
     maxAlive = Math.max(maxAlive, state.alive[0].length + state.alive[1].length);
+    maxProj = Math.max(maxProj, state.projAlive);
   }
   const ms = (performance.now() - t0) / ticks;
-  console.log(`perf: ${n} purchased ships (max alive ${maxAlive}), ${ticks} ticks, ${ms.toFixed(2)} ms/tick, ${state.projectiles.length} projectile slots`);
+  console.log(`perf: ${n} purchased ships (max alive ${maxAlive}), ${ticks} combat ticks after ${skipped} advance ticks, ${ms.toFixed(2)} ms/tick, max ${maxProj} projectiles in flight`);
   assert.ok(n >= 300, `expected a big battle, got ${n} ships`);
+  assert.ok(maxProj > 0, 'combat should have happened');
   assert.ok(ms < 25, `${ms.toFixed(2)} ms/tick`);
 });

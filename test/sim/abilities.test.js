@@ -21,11 +21,25 @@ test('every catalog ability has a registry entry with trigger and cast', () => {
  * the matchup where their trigger is possible; every other ability is scored
  * over a rotation of all four opponent factions (including the mirror).
  */
-const PREFERRED_OPPONENT = { countermeasures: 'terran', flak_curtain: 'terran', emp_pulse: 'lumen', emp_storm: 'terran', leech: 'vorrax', aurora: 'lumen', reconstruction: 'terran' };
+const PREFERRED_OPPONENT = { countermeasures: 'terran', flak_curtain: 'terran', emp_pulse: 'vorrax', emp_storm: 'terran', leech: 'vorrax', aurora: 'lumen', reconstruction: 'terran' };
 
-test('1v1 one-of-each-class: every non-passive ability casts in ≥ 80% of 10 seeds', () => {
+/**
+ * Conditional defensive abilities whose trigger may legitimately never be met
+ * in a given battle (the ship never gets hurt enough, nothing comes close):
+ * such seeds count as satisfied unless the condition held for ≥ 5 consecutive
+ * ticks while the ability was ready and the cast never happened.
+ */
+const OPPORTUNITY = {
+  molt: (state, s) => s.hp < 0.4 * s.hpMax,
+  reconstruction: (state, s) => state.ships.filter((a) => a.alive && a.team === s.team && a.hp < 0.6 * a.hpMax && Math.hypot(a.x - s.x, a.y - s.y) <= 400).length >= 3,
+  emp_pulse: (state, s) => state.ships.some((e) => e.alive && e.team !== s.team && e.untargetableUntil <= state.tick && Math.hypot(e.x - s.x, e.y - s.y) <= 150
+    && ((e.shieldMax > 0 && e.shield >= 80) || (e.hullType === 'organic' && e.sizeIdx >= 2))),
+};
+const OPP_IDS = Object.keys(OPPORTUNITY);
+
+test('1v1 one-of-each-class: every non-passive ability casts in ≥ 80% of 10 seeds (conditional ones: whenever their trigger is met)', () => {
   const SEEDS = 10;
-  const cache = new Map(); // "fa|fb" → Set<abilityId>[] per seed
+  const cache = new Map(); // "fa|fb" → per seed { casts: Set<abilityId>, opportunity: Set<abilityId> }
   const castsFor = (fa, fb) => {
     const key = `${fa}|${fb}`;
     if (cache.has(key)) return cache.get(key);
@@ -36,9 +50,19 @@ test('1v1 one-of-each-class: every non-passive ability casts in ≥ 80% of 10 se
         { id: 'a', name: 'A', team: swap ? 1 : 0, isBot: true, ai: 'especialista', fleet: oneOfEachFleet(fa) },
         { id: 'b', name: 'B', team: swap ? 0 : 1, isBot: true, ai: 'especialista', fleet: oneOfEachFleet(fb) },
       ] });
-      const seen = new Set();
-      while (!state.ended) for (const e of stepBattle(state)) if (e[0] === 'cast') seen.add(e[2]);
-      runs.push(seen);
+      const casts = new Set(), opportunity = new Set();
+      const streak = {};
+      const watched = state.ships.filter((s) => OPP_IDS.includes(s.ability.id));
+      while (!state.ended) {
+        for (const e of stepBattle(state)) if (e[0] === 'cast') casts.add(e[2]);
+        for (const s of watched) {
+          const id = s.ability.id;
+          const open = s.alive && state.tick >= s.ability.readyAt && OPPORTUNITY[id](state, s);
+          streak[id] = open ? (streak[id] || 0) + 1 : 0;
+          if (streak[id] >= 5) opportunity.add(id);
+        }
+      }
+      runs.push({ casts, opportunity });
     }
     cache.set(key, runs);
     return runs;
@@ -47,12 +71,13 @@ test('1v1 one-of-each-class: every non-passive ability casts in ≥ 80% of 10 se
   for (const id of Object.keys(ABILITIES)) {
     if (PASSIVE_ABILITIES.includes(id)) continue;
     const faction = Object.values(SHIPS).find((s) => s.ability === id).faction;
+    const satisfied = (r) => r.casts.has(id) || (OPPORTUNITY[id] && !r.opportunity.has(id));
     let hits = 0;
     if (PREFERRED_OPPONENT[id]) {
-      for (const seen of castsFor(faction, PREFERRED_OPPONENT[id])) if (seen.has(id)) hits++;
+      for (const r of castsFor(faction, PREFERRED_OPPONENT[id])) if (satisfied(r)) hits++;
     } else {
-      // rotation: seed i fights FACTION_IDS[i % 4]; take seeds i ≡ k (mod 4) from matchup k → 10 seeds total
-      for (let i = 0; i < SEEDS; i++) if (castsFor(faction, FACTION_IDS[i % 4])[i].has(id)) hits++;
+      // rotation: seed i fights FACTION_IDS[i % 4] (including the mirror) → 10 seeds total
+      for (let i = 0; i < SEEDS; i++) if (satisfied(castsFor(faction, FACTION_IDS[i % 4])[i])) hits++;
     }
     if (hits < 0.8 * SEEDS) failures.push(`${id}: ${hits}/${SEEDS}`);
   }

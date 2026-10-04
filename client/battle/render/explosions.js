@@ -26,7 +26,7 @@ export function createExplosions(o) {
   const ghosts = [];
   let trauma = 0;
   const C = {
-    ember: P.color('#ff9a3d'), smoke: P.color('#3a3f48'), white: P.color('#ffffff'),
+    ember: P.color('#ff9a3d'), smoke: P.color('#2a2e36'), white: P.color('#ffffff'),
     drop: P.color('#7dd957'), cube: P.color('#1a2426'),
   };
 
@@ -86,7 +86,8 @@ export function createExplosions(o) {
       const x = ev.x, y = ev.y;
       flash({ x, y, r: 10 * S, col: '#ffffff', t0, dur: 120 });
       flash({ x, y, r: 20 * S, col: pal.teamGlow, t0, dur: 220, a: 0.6 });
-      ring({ x, y, r0: 6 * S, r1: 96 * S, lw: 3 * S, col: '#ffd2b8', t0, dur: 600 * Math.sqrt(S) });
+      ring({ x, y, r0: 6 * S, r1: 96 * S, lw: 1.2 * S, col: '#ffd2b8', t0, dur: 600 * Math.sqrt(S), a0: 0.6 });
+      ring({ x, y, r0: 4 * S, r1: 70 * S, lw: 0.6 * S + 0.5, col: '#ffffff', t0: t0 + 40, dur: 450 * Math.sqrt(S), a0: 0.5 });
       if (S >= 5) {
         ring({ x, y, r0: 4 * S, r1: 110 * S, lw: 1.2, col: '#ffffff', t0: t0 + 150, dur: 700 * Math.sqrt(S), a0: 0.6 });
         flash({ x, y, r: 60 * S, col: '#ffffff', t0, dur: 220, a: 0.18 });

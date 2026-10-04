@@ -30,7 +30,7 @@ export const FACTION_PALETTES = {
     debris: '#d7ccff', spark: '#ffffff', spark2: '#7c5cff', smoke: '#5a4a9a',
   },
   ferrix: {
-    hullDark: '#121a1c', hullMid: '#263538', hullLight: '#4d6a6e', hullEdge: '#7fb3a8',
+    hullDark: '#15201f', hullMid: '#2f4448', hullLight: '#5a7c80', hullEdge: '#8fc4b8',
     accent: '#9bffd6', panelLine: '#0c1213', cellOff: '#1a2426',
     debris: '#263538', spark: '#9bffd6', spark2: '#7fb3a8', smoke: '#3a4a4c',
   },

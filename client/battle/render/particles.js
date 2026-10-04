@@ -15,7 +15,7 @@ const FIRE_STAGES = ['#fff2c0', '#ffb347', '#ff7a3d', '#8a2a10', '#3a1a10'];
 /**
  * @param {number} max pool size
  */
-export function createParticles(max = 6000) {
+export function createParticles(max = 4500) {
   const P = {
     x: new Float32Array(max), y: new Float32Array(max), vx: new Float32Array(max), vy: new Float32Array(max),
     life: new Float32Array(max), max: new Float32Array(max), s0: new Float32Array(max), s1: new Float32Array(max),
@@ -83,7 +83,7 @@ export function createParticles(max = 6000) {
     switch (kind) {
       case KIND.SPARK: case KIND.STREAK: return 1 - u;
       case KIND.FIRE: return u < 0.15 ? 1 : Math.pow(1 - u, 0.7);
-      case KIND.SMOKE: return 0.42 * (u < 0.1 ? u * 10 : 1 - (u - 0.1) / 0.9);
+      case KIND.SMOKE: return 0.32 * (u < 0.1 ? u * 10 : 1 - (u - 0.1) / 0.9);
       case KIND.DEBRIS: case KIND.CUBE: return u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3;
       case KIND.EMBER: return (0.4 + 0.6 * Math.abs(Math.sin(t * 20 + seed))) * (1 - u);
       case KIND.SHARD: return (0.6 + 0.4 * Math.abs(Math.sin(t * 15 + seed))) * (u < 0.6 ? 1 : 1 - (u - 0.6) / 0.4);
@@ -106,7 +106,7 @@ export function createParticles(max = 6000) {
     const vr = cam.visibleRect(40);
     const ox = cam.vx + cam.vw / 2 + cam.shakeX - cam.x * z, oy = cam.vy + cam.vh / 2 + cam.shakeY - cam.y * z;
     for (let pass = 0; pass < 2; pass++) {
-      const additive = pass === 0;
+      const additive = pass === 1;
       ctx.globalCompositeOperation = additive ? 'lighter' : 'source-over';
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       let curCol = -1;
@@ -139,16 +139,18 @@ export function createParticles(max = 6000) {
           case KIND.FIRE: {
             const stage = FIRE_STAGES[Math.min(FIRE_STAGES.length - 1, Math.floor(u * FIRE_STAGES.length))];
             if (size < 0.4) break;
+            if (size < 1.6) { ctx.fillStyle = stage; curCol = -1; ctx.fillRect(sx - size, sy - size, size * 2, size * 2); break; }
             ctx.drawImage(getSoft(stage, u < 0.4 ? 0.3 : 0.1), sx - size, sy - size, size * 2, size * 2);
             break;
           }
           case KIND.SMOKE: {
-            if (size < 0.5) break;
+            if (size < 1.5) break;
             ctx.drawImage(getSoft(colors[P.col[i]], 0.1), sx - size, sy - size, size * 2, size * 2);
             break;
           }
           case KIND.PLASMA: case KIND.GLOW: {
             if (size < 0.4) break;
+            if (size < 1.6) { if (P.col[i] !== curCol) { curCol = P.col[i]; ctx.fillStyle = colors[curCol]; } ctx.fillRect(sx - size, sy - size, size * 2, size * 2); break; }
             ctx.drawImage(getGlow(colors[P.col[i]]), sx - size, sy - size, size * 2, size * 2);
             break;
           }

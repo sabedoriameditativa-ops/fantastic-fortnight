@@ -88,7 +88,7 @@ export function createShields(o) {
     ctx.fillStyle = teamColor; ctx.globalAlpha = 0.05 + 0.05 * pct;
     ctx.beginPath(); ctx.arc(sx, sy, r, 0, TAU); ctx.fill();
     if (lod >= 1) {
-      ctx.strokeStyle = teamColor; ctx.lineWidth = 1; ctx.globalAlpha = 0.12 + 0.3 * pct;
+      ctx.strokeStyle = teamColor; ctx.lineWidth = 1; ctx.globalAlpha = 0.1 + 0.2 * pct;
       ctx.stroke();
     }
     const bk = breaks.get(id);

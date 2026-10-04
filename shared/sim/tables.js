@@ -2,9 +2,7 @@
 // catalog: accuracy, effective damage fraction, dps. Built once per process,
 // deterministic (no RNG), shared by all battles.
 
-import {
-  SHIP_LIST, SIZE_CLASS, DAMAGE_MULT, ACCURACY, COMBAT, FACTIONS,
-} from '../catalog.js';
+import { SHIP_LIST, SIZE_CLASS, DAMAGE_MULT, ACCURACY, COMBAT } from '../catalog.js';
 
 export const CLASS_COUNT = SHIP_LIST.length;
 
@@ -55,6 +53,8 @@ function build() {
   const shipEff = new Array(n);   // shipDps / raw dps
   const maxRange = new Float64Array(n);
   const rawDps = new Float64Array(n);
+  const alpha = new Float64Array(n);  // dps-weighted mean per-shot damage (overkill heuristic)
+  const engageRange = new Float64Array(n); // dps-weighted mean weapon range (movement)
   const sizeIdx = new Int8Array(n);
   const minTargetIdx = new Array(n); // per weapon
   for (let c = 0; c < n; c++) {
@@ -63,10 +63,13 @@ function build() {
     acc[c] = []; frac[c] = []; wdps[c] = []; minTargetIdx[c] = [];
     shipDps[c] = new Float64Array(n);
     shipEff[c] = new Float64Array(n);
-    let raw = 0;
+    let raw = 0, alphaSum = 0, rangeSum = 0;
     for (let w = 0; w < s.weapons.length; w++) {
       const wp = s.weapons[w];
-      raw += (wp.damage * wp.salvo) / wp.cooldown;
+      const wdpsRaw = (wp.damage * wp.salvo) / wp.cooldown;
+      raw += wdpsRaw;
+      alphaSum += wp.damage * wdpsRaw;
+      rangeSum += wp.range * wdpsRaw;
       if (wp.range > maxRange[c]) maxRange[c] = wp.range;
       const minIdx = SIZE_INDEX[wp.minTargetClass] ?? 0;
       minTargetIdx[c][w] = minIdx;
@@ -82,9 +85,11 @@ function build() {
       acc[c][w] = a; frac[c][w] = fr; wdps[c][w] = d;
     }
     rawDps[c] = raw;
+    alpha[c] = raw > 0 ? alphaSum / raw : 0;
+    engageRange[c] = raw > 0 ? rangeSum / raw : maxRange[c];
     for (let t = 0; t < n; t++) shipEff[c][t] = raw > 0 ? shipDps[c][t] / raw : 0;
   }
-  return { acc, frac, wdps, shipDps, shipEff, maxRange, rawDps, sizeIdx, minTargetIdx };
+  return { acc, frac, wdps, shipDps, shipEff, maxRange, engageRange, rawDps, alpha, sizeIdx, minTargetIdx };
 }
 
 let cache = null;
@@ -94,9 +99,4 @@ export function getTables() {
   return cache;
 }
 
-/** Faction id of a class index (helper for passives). */
-export function classFaction(clsIdx) {
-  return SHIP_LIST[clsIdx].faction;
-}
 
-export { FACTIONS };

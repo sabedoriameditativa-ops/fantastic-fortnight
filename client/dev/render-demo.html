@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frota Estelar — demo do renderizador</title>
+<style>
+  :root { --bg: #05070c; --panel: rgba(10,16,30,0.86); --line: #1d3a5c; --text: #d9e6f2; --muted: #7f93a8; --accent: #35c8ff; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px "Exo 2", "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  #arena { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #panel { position: absolute; left: 12px; top: 12px; background: var(--panel); border: 1px solid var(--line); padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; max-width: 92vw;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+  #panel.hidden { display: none; }
+  button, select { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 3px 8px; font: inherit; cursor: pointer; }
+  button:hover { background: rgba(53,200,255,0.12); box-shadow: 0 0 10px rgba(53,200,255,0.35); }
+  button.on { background: var(--accent); color: var(--bg); }
+  label { color: var(--muted); display: inline-flex; gap: 4px; align-items: center; }
+  #stats { position: absolute; left: 12px; bottom: 12px; background: var(--panel); border: 1px solid var(--line); padding: 6px 10px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; max-width: 96vw; overflow: hidden; text-overflow: ellipsis; }
+  #phase { position: absolute; right: 12px; top: 12px; color: var(--accent); font-weight: 600; letter-spacing: .12em; text-shadow: 0 0 12px rgba(53,200,255,.5); }
+  .group { display: inline-flex; gap: 4px; }
+</style>
+</head>
+<body>
+<canvas id="arena"></canvas>
+<div id="panel">
+  <label>Modo <select id="mode"><option value="battle">batalha</option><option value="stress">estresse (500)</option><option value="showcase">vitrine</option></select></label>
+  <span class="group"><button data-speed="0">∥</button><button data-speed="1" class="on">×1</button><button data-speed="2">×2</button><button data-speed="4">×4</button></span>
+  <label>Qualidade <select id="quality"><option value="auto">auto</option><option value="high">alta</option><option value="medium">média</option><option value="low">baixa</option></select></label>
+  <label><input type="checkbox" id="names"> nomes</label>
+  <label><input type="checkbox" id="grid"> grade</label>
+  <label><input type="checkbox" id="motion"> reduzir movimento</label>
+  <button id="explode">Explodir capital</button>
+  <button id="cast">Habilidades</button>
+  <button id="auto">Câmera auto</button>
+  <span class="group" id="factions"></span>
+</div>
+<div id="phase">AVANÇO</div>
+<div id="stats">…</div>
+<script type="module" src="./demo.js"></script>
+<script>
+  // hide the panel for screenshots: ?ui=0
+  if (new URLSearchParams(location.search).get('ui') === '0') { document.getElementById('panel').classList.add('hidden'); document.getElementById('stats').style.display = 'none'; document.getElementById('phase').style.display = 'none'; }
+</script>
+</body>
+</html>

@@ -11,7 +11,8 @@ const NEB_PALETTES = [
 const STAR_COLORS = ['#ffffff', '#cfe8ff', '#ffe9c0', '#ffffff', '#ffd9c0'];
 
 /**
- * @param {{ seed: number|string, world: {w:number,h:number}, dpr?: number }} o
+ * @param {{ seed: number|string, world: {w:number,h:number}, dpr?: number, planet?: boolean }} o
+ *   planet: allow a planet (default true; 55% of seeds get one)
  */
 export function createBackground(o) {
   const seed = hashStr(String(o.seed ?? 1));
@@ -88,20 +89,20 @@ export function createBackground(o) {
 
   // ---- planet ----
   let planet = null;
-  if (rnd() < 0.55) {
+  if (o.planet !== false && rnd() < 0.55) {
     const r = makeRand(seed ^ 0x9e3779b9);
-    const radius = r.range(350, 700);
+    const radius = r.range(320, 560);
     const corner = r.int(0, 3);
     planet = {
       x: (corner & 1 ? 0.9 : 0.1) * world.w + r.range(-150, 150),
       y: (corner & 2 ? 0.88 : 0.12) * world.h + r.range(-100, 100),
       radius, gas: r() < 0.6, ring: r() < 0.4, lightA: r.range(0, TAU),
-      hue: r.pick(['#5a7cc0', '#c08a5a', '#8a5ac0', '#5ac0a0', '#c05a6a', '#a0a0b0']),
+      hue: r.pick(['#4a6cb0', '#b07a4a', '#7a4ab0', '#4aa890', '#b04a5a', '#6a7090']),
       canvas: null,
     };
   }
   function buildPlanet(p) {
-    const S = 512, R = S * 0.4, cx = S / 2, cy = S / 2;
+    const S = 1024, R = S * 0.4, cx = S / 2, cy = S / 2;
     const cv = makeCanvas(S, S);
     const g = cv.getContext('2d');
     const r = makeRand(seed ^ 0x77);
@@ -111,12 +112,14 @@ export function createBackground(o) {
     g.fillStyle = atm; g.beginPath(); g.arc(cx, cy, R * 1.22, 0, TAU); g.fill();
     // body
     g.save(); g.beginPath(); g.arc(cx, cy, R, 0, TAU); g.clip();
+    // soft antialiased limb: drawn below everything inside the clip
+    g.fillStyle = '#03040a'; g.fillRect(0, 0, S, S);
     const lx = cx + Math.cos(p.lightA) * R * 0.6, ly = cy + Math.sin(p.lightA) * R * 0.6;
     const body = g.createRadialGradient(lx, ly, R * 0.1, cx, cy, R * 1.05);
-    body.addColorStop(0, mix(p.hue, '#ffffff', 0.35)); body.addColorStop(0.5, p.hue); body.addColorStop(0.85, mix(p.hue, '#000000', 0.6)); body.addColorStop(1, '#03040a');
+    body.addColorStop(0, mix(p.hue, '#ffffff', 0.15)); body.addColorStop(0.45, mix(p.hue, '#000000', 0.25)); body.addColorStop(0.85, mix(p.hue, '#000000', 0.75)); body.addColorStop(1, '#03040a');
     g.fillStyle = body; g.fillRect(0, 0, S, S);
     if (p.gas) {
-      g.globalAlpha = 0.22;
+      g.globalAlpha = 0.07;
       for (let i = 0; i < 6; i++) {
         const y = cy + (i - 2.5) * R * 0.3 + r.range(-10, 10);
         g.strokeStyle = i % 2 ? '#ffffff' : '#000000'; g.lineWidth = r.range(8, 26);
@@ -139,10 +142,11 @@ export function createBackground(o) {
     term.addColorStop(0, 'rgba(0,0,0,0)'); term.addColorStop(0.6, 'rgba(0,0,0,0.25)'); term.addColorStop(1, 'rgba(0,0,0,0.85)');
     g.fillStyle = term; g.fillRect(0, 0, S, S);
     g.restore();
+    g.strokeStyle = 'rgba(3,4,10,0.9)'; g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, R + 1, 0, TAU); g.stroke();
     if (p.ring) {
-      g.strokeStyle = rgba(mix(p.hue, '#ffffff', 0.5), 0.35); g.lineWidth = 16;
+      g.strokeStyle = rgba(mix(p.hue, '#ffffff', 0.5), 0.22); g.lineWidth = 16;
       g.beginPath(); g.ellipse(cx, cy, R * 1.5, R * 0.42, p.lightA * 0.3, 0, TAU); g.stroke();
-      g.strokeStyle = rgba(mix(p.hue, '#ffffff', 0.7), 0.25); g.lineWidth = 4;
+      g.strokeStyle = rgba(mix(p.hue, '#ffffff', 0.7), 0.16); g.lineWidth = 4;
       g.beginPath(); g.ellipse(cx, cy, R * 1.68, R * 0.47, p.lightA * 0.3, 0, TAU); g.stroke();
     }
     return cv;
@@ -217,9 +221,7 @@ export function createBackground(o) {
       ctx.fillRect(cam.vx, cam.vy, cam.vw, cam.vh);
       // nebula
       if (!nebula) nebula = buildNebula();
-      ctx.globalCompositeOperation = 'lighter';
-      drawTiled(ctx, nebula, NEB_T, 0.15, cam, 0.9);
-      ctx.globalCompositeOperation = 'source-over';
+      drawTiled(ctx, nebula, NEB_T, 0.15, cam, 1);
       // planet (behind stars? no: stars are far; planet is between far and mid)
       // far stars (cached tile, band by zoom)
       const band = z < 0.9 ? 0 : 1;

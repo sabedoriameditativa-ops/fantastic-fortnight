@@ -17,6 +17,7 @@ const COMMIT_TICKS = 2 * TICK_RATE;
 const HYSTERESIS = 1.25;
 const ADVANCE_MAX_TICKS = 45 * TICK_RATE;
 const MAX_RETREAT_TICKS = 10 * TICK_RATE;
+const SHORT_PHASE_TICKS = 1.5 * TICK_RATE; // targets phased out for at most this long are kept
 
 /** Scoring weights per role (design battle-ai §2.3, extended for striker/support/carrier). */
 export const ROLE_WEIGHTS = {
@@ -34,14 +35,14 @@ export const RETREAT_AT = { diver: 0.35, kiter: 0.4, brawler: 0.25, striker: 0.3
 
 const TORPEDO_SHIPS = new Set(['ter_hercules', 'vor_mandibula']);
 /** Ships whose signature ability is a self-centered area: they hold closer than 0.7·range so it can land. */
-const AREA_HOLD = { lum_ressonante: 0.9 * ABILITIES.dissonant_pulse.params.radius, fer_disruptor: 0.9 * ABILITIES.emp_pulse.params.radius, fer_mente: 0.9 * ABILITIES.emp_storm.params.radius };
+const AREA_HOLD = { lum_ressonante: 0.9 * ABILITIES.dissonant_pulse.params.radius, fer_disruptor: 0.9 * ABILITIES.emp_pulse.params.radius };
 const RAILGUN_SHIPS = new Set(['fer_sentinela', 'fer_ariete', 'fer_nucleo']);
 
 /** Create the per-team AI state. */
 export function makeTeamState(team) {
   return {
     team, phase: 'advance', cx: 0, cy: 0, enemyCx: 0, enemyCy: 0, anchorId: 0, anchorX: 0, anchorY: 0,
-    leash: 350, groupSpeed: 30, hasSupport: false, aliveCost: 0, nonCarriers: 0, order: [],
+    leash: 350, groupSpeed: 30, hasSupport: false, aliveCost: 0, nonCarriers: 0, lineEngaged: false, order: [],
   };
 }
 
@@ -65,10 +66,11 @@ export function recomputeTargeting(state) {
     const s = ships[i];
     if (!s.alive) continue;
     let t = s.ai.targetId > 0 ? ships[s.ai.targetId - 1] : null;
-    if (!t || !isTargetable(t, tick) || t.team === s.team) {
+    if (!t || !t.alive || t.team === s.team || (!isTargetable(t, tick) && t.untargetableUntil - tick > SHORT_PHASE_TICKS)) {
       t = ensureTarget(state, s);
     }
     if (!t) continue;
+    if (!isTargetable(t, tick)) continue; // briefly phased: keep the target, weapons pick other enemies meanwhile
     t.targetedBy++;
     if (s.faction === 'terran') t.targetedByTerran++;
     const dx = t.x - s.x, dy = t.y - s.y;
@@ -159,6 +161,16 @@ export function teamThink(state, team) {
   }
   T.phase = state.engaged ? 'engage' : 'advance';
   T.leash = T.phase === 'advance' ? 350 : 900;
+  // is the line (non-divers) actually trading fire? divers hold formation until then
+  let lineEngaged = false;
+  for (let i = 0; i < ours.length && !lineEngaged; i++) {
+    const s = ships[ours[i] - 1];
+    if (s.role === 'diver' || s.ai.targetId <= 0) continue;
+    const t = ships[s.ai.targetId - 1];
+    const dx = t.x - s.x, dy = t.y - s.y;
+    if (dx * dx + dy * dy <= s.maxRange * s.maxRange) lineEngaged = true;
+  }
+  T.lineEngaged = lineEngaged;
   // anchor: real ship or virtual point advancing with the group
   if (anchor) { T.anchorId = anchor.id; T.anchorX = anchor.x; T.anchorY = anchor.y; }
   else {
@@ -209,7 +221,8 @@ export function teamThink(state, team) {
       const ee = Math.max(1, ehp(e));
       const d = Math.sqrt((e.x - s.x) * (e.x - s.x) + (e.y - s.y) * (e.y - s.y));
       const proximity = 1 - clamp(d / R, 0, 0.8);
-      let sc = ((e.cost + 10) / ee) * TB.shipEff[s.clsIdx][e.clsIdx] * proximity;
+      let sc = ((e.cost + 10) / ee) * TB.shipEff[s.clsIdx][e.clsIdx] * Math.min(1, ee / Math.max(1, TB.alpha[s.clsIdx])) * proximity;
+      sc *= 1 + Math.min(2, TB.rawDps[e.clsIdx] / 60); // dangerous enemies first
       sc *= e.allocDps * 3 < ee ? 1 : 0.3;
       const et = e.ai.targetId > 0 ? ships[e.ai.targetId - 1] : null;
       if (et && et.team === team && et.hp < 0.4 * et.hpMax) sc *= 1.5;
@@ -272,9 +285,10 @@ function scoreTarget(state, me, t, W, P, TB) {
   const d = Math.sqrt(dx * dx + dy * dy);
   const R = me.maxRange * me.mod.rangeMul;
   const rangeFit = d <= R ? 1 : Math.max(0, 1 - (d - R) / R);
-  const dmgMult = TB.shipEff[me.clsIdx][t.clsIdx];
-  const myDps = TB.shipDps[me.clsIdx][t.clsIdx];
   const e = Math.max(1, ehp(t));
+  // overkill-aware: a shot bigger than the target's ehp wastes most of its damage
+  const dmgMult = TB.shipEff[me.clsIdx][t.clsIdx] * Math.min(1, e / Math.max(1, TB.alpha[me.clsIdx]));
+  const myDps = TB.shipDps[me.clsIdx][t.clsIdx];
   const killability = clamp(1 - e / (KILL_HORIZON * Math.max(1, myDps)), 0, 1);
   const value = t.cost / 100;
   let threat = TB.shipDps[t.clsIdx][me.clsIdx] / Math.max(1, ehp(me));
@@ -311,7 +325,7 @@ function gatherCandidates(state, me) {
   const a = me.ai.assignedId > 0 ? ships[me.ai.assignedId - 1] : null;
   if (a && isTargetable(a, tick) && a.team !== me.team && cands.indexOf(a) < 0) cands.push(a);
   const c = me.ai.targetId > 0 ? ships[me.ai.targetId - 1] : null;
-  if (c && isTargetable(c, tick) && c.team !== me.team && cands.indexOf(c) < 0) cands.push(c);
+  if (c && c.alive && c.team !== me.team && (isTargetable(c, tick) || c.untargetableUntil - tick <= SHORT_PHASE_TICKS) && cands.indexOf(c) < 0) cands.push(c);
   if (cands.length === 0) { const g = nearestEnemyGlobal(state, me, true); if (g) cands.push(g); }
   return cands;
 }
@@ -326,7 +340,7 @@ export function decide(state, s) {
   const list = gatherCandidates(state, s);
   // ---- target selection ----
   let cur = s.ai.targetId > 0 ? ships[s.ai.targetId - 1] : null;
-  if (cur && (!isTargetable(cur, tick) || cur.team === s.team)) cur = null;
+  if (cur && (!cur.alive || cur.team === s.team || (!isTargetable(cur, tick) && cur.untargetableUntil - tick > SHORT_PHASE_TICKS))) cur = null;
   let curScore = -Infinity, best = cur, bestScore = -Infinity;
   if (cur) { curScore = scoreTarget(state, s, cur, W, P, TB) + noise(rng, P.scoreNoise); bestScore = curScore; }
   for (let i = 0; i < list.length; i++) {
@@ -349,10 +363,8 @@ export function decide(state, s) {
   const canRetreat = P.retreat && s.role !== 'anchor' && !state.suddenDeath && !s.kamikaze && !s.latch && (s.regen > 0 || s.shieldMax > 0);
   if (canRetreat) {
     const frac = s.hp / s.hpMax, th = RETREAT_AT[s.role] || 0.3;
-    let allies = -1;
     if (!s.ai.retreating && frac < th) {
-      allies = alliesWithin(state, s, 600, qbuf).length;
-      if (allies > 0) { s.ai.retreating = true; s.ai.retreatSince = tick; }
+      if (alliesWithin(state, s, 600, qbuf).length > 0) { s.ai.retreating = true; s.ai.retreatSince = tick; } // alone = fight
     } else if (s.ai.retreating) {
       if (frac > th + 0.2 || tick - s.ai.retreatSince > MAX_RETREAT_TICKS) s.ai.retreating = false;
       else if (alliesWithin(state, s, 600, qbuf).length === 0) s.ai.retreating = false;
@@ -367,13 +379,15 @@ export function decide(state, s) {
   const ai = s.ai;
   if (s.kamikaze) ai.mode = 'kamikaze';
   else if (ai.retreating) { ai.mode = 'retreat'; safePoint(state, s, T); }
-  else if (T.phase === 'advance' && P.formation && !(s.role === 'diver' && !s.purchased)) ai.mode = 'formation';
+  else if (T.phase === 'advance' && P.formation) ai.mode = 'formation';
+  else if (s.role === 'diver' && P.formation && !T.lineEngaged && tick - state.engagedTick < 10 * TICK_RATE
+    && !(t && (t.x - s.x) * (t.x - s.x) + (t.y - s.y) * (t.y - s.y) <= 1.3 * 1.3 * s.maxRange * s.maxRange)) ai.mode = 'formation'; // divers wait for the line
   else if (!t) ai.mode = 'idleAdvance';
   else {
     const d = Math.sqrt((t.x - s.x) * (t.x - s.x) + (t.y - s.y) * (t.y - s.y));
     const kiting = P.kiting && !state.suddenDeath;
     switch (s.role) {
-      case 'diver': ai.mode = d > s.maxRange ? 'approach' : 'orbit'; break;
+      case 'diver': ai.mode = d > s.engageRange * s.mod.rangeMul ? 'approach' : 'orbit'; break;
       case 'brawler': ai.mode = 'hold'; break;
       case 'kiter': ai.mode = kiting ? 'kite' : 'hold'; break;
       case 'striker': {
@@ -396,7 +410,7 @@ export function decide(state, s) {
     const u = impl.trigger(ctx);
     if (u >= 1) {
       if (P.abilityMiscastProb > 0 && rng.next() < P.abilityMiscastProb) ab.readyAt = tick + TICK_RATE; // miscast: re-evaluate in 1 s
-      else { ab.pendingAt = tick + P.abilityDelayTicks; ab.pendingUntil = ab.pendingAt + 2 * TICK_RATE; }
+      else ab.pendingAt = tick + P.abilityDelayTicks; // 0 → cast in this tick's cast phase
     }
   }
 }
@@ -463,7 +477,7 @@ export function computeDesired(state, s, out) {
   let mode = ai.mode;
   if (cap <= 0) { if (t) { out.dx = t.x - s.x; out.dy = t.y - s.y; } out.speed = 0; return; }
   if (!t && (mode === 'approach' || mode === 'hold' || mode === 'kite' || mode === 'orbit' || mode === 'kamikaze')) mode = 'idleAdvance';
-  const R = s.maxRange * s.mod.rangeMul;
+  const R = s.engageRange * s.mod.rangeMul; // positioning uses the dps-weighted range
   let dx = 0, dy = 0, speed = 0;
   switch (mode) {
     case 'approach': case 'kamikaze': {
@@ -472,7 +486,8 @@ export function computeDesired(state, s, out) {
     case 'hold': {
       dx = t.x - s.x; dy = t.y - s.y;
       const d = Math.sqrt(dx * dx + dy * dy);
-      const holdAt = AREA_HOLD[s.cls] !== undefined ? Math.min(0.7 * R, AREA_HOLD[s.cls]) : 0.7 * R;
+      let holdAt = AREA_HOLD[s.cls] !== undefined ? Math.min(0.7 * R, AREA_HOLD[s.cls]) : 0.7 * R;
+      if (ai.holdOverride > 0 && ai.holdOverride < holdAt) holdAt = ai.holdOverride; // e.g. closing in for an EMP storm
       if (d > holdAt) {
         speed = cap;
         if (s.role === 'anchor') { // anchors advance with the team toward the enemy mass, slowly
@@ -488,8 +503,12 @@ export function computeDesired(state, s, out) {
       const d = Math.sqrt(tx * tx + ty * ty) || 1;
       const nx = tx / d, ny = ty / d;
       const px = -ny * ai.orbitSign, py = nx * ai.orbitSign;
-      if (d < 0.75 * R) { dx = -nx + px * 0.6; dy = -ny + py * 0.6; speed = cap; }
+      // narrow-arc guns must face the target to fire: such kiters stand in the band and only
+      // back away from threats they can actually outrun
+      const narrow = s.weapons[0].arcRad < Math.PI / 2;
+      if (d < 0.75 * R && (!narrow || t.speed < s.speed * 0.95)) { dx = -nx + px * 0.6; dy = -ny + py * 0.6; speed = cap; }
       else if (d > 0.95 * R) { dx = nx; dy = ny; speed = cap; }
+      else if (narrow) { dx = nx; dy = ny; speed = 0; }
       else { dx = px; dy = py; speed = cap * 0.6; }
       break;
     }
