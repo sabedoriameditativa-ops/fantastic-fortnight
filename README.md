@@ -25,7 +25,8 @@ nível, você escolhe uma entre três melhorias.
 
 - Suas armas disparam sozinhas: você só precisa se mover e sobreviver.
 - Recolha as brasas deixadas pelas criaturas para subir de nível e escolher melhorias.
-- O facho do farol sempre desacelera as criaturas que ilumina — com a *Lente de Fresnel*, ele também queima.
+- O facho do farol sempre desacelera as criaturas que ilumina — com a *Lente de Fresnel*, ele também queima as que
+  estão perto da torre.
 - Cada noite dura um pouco mais que a anterior. Ao amanhecer, você recupera 30% da vida.
 - Nas noites 7 e 14, o amanhecer só chega quando o chefe cai: o **Caranguejo-Rei** e o **Leviatã das Marés**.
 
@@ -62,6 +63,27 @@ SHOT_DIR=/tmp/capturas npm test
 
 Com `#debug` no endereço, o objeto `window.QF.debug` expõe atalhos como `setNight(n)`,
 `skipNight()`, `godMode(true)`, `addXp(n)`, `grantUpgrade(id)` e `setTimeScale(x)`.
+
+## Ferramentas de equilíbrio
+
+Ferramentas de desenvolvimento (o jogo não as carrega). Com `#debug`, o `window.QF.debug` também traz ganchos
+para simular partidas sem desenhar a tela: `seed(n)`, `startRun(seed)`, `runSteps(n)`, `setAutopilot(fn)`,
+`setPicker(fn)`, `getConfig()` (as tabelas de ajuste, ao vivo) e `stats()` (telemetria por noite).
+
+- `tools/balance.mjs` joga dezenas de partidas com robôs (`idle`, `circle`, `kite`, `skilled`, definidos em
+  `tools/balance-bots.js`), poucos segundos cada. As sementes são fixas: o mesmo `game.js` com a mesma semente dá o
+  mesmo resultado. `--picks` escolhe como o robô pega as melhorias (`random`, `beamFirst`…) e `--tune` testa
+  valores novos sem editar o código.
+- `tools/balance-summary.mjs` transforma os resultados em tabelas markdown e confere as metas de equilíbrio.
+
+```bash
+node tools/balance.mjs --bot kite --picks random --runs 40 --concurrency 3 --out /tmp/eq/kite-random.json
+node tools/balance.mjs --bot kite --picks beamFirst --tune '{"WEAPONS.beam.dpsPerLevel": 6}' --runs 40 --out /tmp/eq/lente.json
+node tools/balance-summary.mjs /tmp/eq/*.json --out /tmp/eq/RESUMO.md
+```
+
+Meça com 40 partidas ou mais por configuração: com 20, a taxa de vitória muda bastante de um lote de sementes
+para outro. `--help` lista todas as opções.
 
 ## Créditos
 

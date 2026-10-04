@@ -88,7 +88,9 @@
     dawnAlpha: 0.2,
   };
   const nightDuration = n => NIGHTS.baseDuration + NIGHTS.perNight * (n - 1);
-  const xpToNext = level => Math.round(6 + level * 5 + level * level * 0.6);
+  // xpToNext(level) = round(base + level × perLevel + level² × perLevelSq)
+  const XP = { base: 6, perLevel: 5, perLevelSq: 0.6 };
+  const xpToNext = level => Math.round(XP.base + level * XP.perLevel + level * level * XP.perLevelSq);
 
   const SCORE = { kill: 10, ember: 2, night: 500, boss: 2500 };
 
@@ -100,6 +102,8 @@
     maxAlive: 260,
     ringMargin: 120, // recycling ring: beyond the screen corner distance
     edgeMargin: 120, // new spawns: this far outside the visible rect
+    startAcc: 1, // spawn credit at night start (was 0.6): the first creature surfaces as the night begins
+    firstNightAcc: 2, // new: night 1 opens with two creatures, so the first kill never waits on a far-edge spawn
     groupChance: 0.2,
     groupSize: 3,
     recycleExtra: 900,
@@ -122,17 +126,29 @@
     jelly: { name: 'Água-viva', from: 2, hp: 12, speed: 95, dmg: 6, ember: 1, r: 13, glow: '#d68cff', body: '#5b3f86', shell: '#3a2860' },
     eel: { name: 'Moreia', from: 4, hp: 14, speed: 155, dmg: 10, ember: 2, r: 11, glow: '#8dffa4', body: '#3e5d3c', shell: '#283d27', turn: 2.3 },
     puffer: { name: 'Baiacu', from: 5, hp: 75, speed: 46, dmg: 14, ember: 4, r: 20, glow: '#ff9fd2', body: '#8a7444', shell: '#5e4d2a', inflateDist: 165, inflateScale: 1.4 },
-    squid: { name: 'Lula-tinteira', from: 8, hp: 30, speed: 85, dmg: 6, ember: 3, r: 15, glow: '#82b4ff', body: '#3f4f86', shell: '#2a355e', keep: 300, shotEvery: 2.6, shotDmg: 8, shotSpeed: 240, shotRange: 560 },
+    // from 8 → 6, hp 30 → 20, shotEvery 2.6 → 3 s, shotDmg 8 → 6: ink is what reaches a keeper on the move, so it now
+    // starts earlier and grows night by night, from fragile squids that do not pile up
+    squid: { name: 'Lula-tinteira', from: 6, hp: 20, speed: 85, dmg: 6, ember: 3, r: 15, glow: '#82b4ff', body: '#3f4f86', shell: '#2a355e', keep: 300, shotEvery: 3, shotDmg: 6, shotSpeed: 240, shotRange: 560 },
   };
 
-  // Spawn weights shift toward newer creatures as nights go by (debut nights come from ENEMIES[*].from).
+  // Spawn weights shift toward newer creatures as nights go by. A creature joins on its debut night
+  // (ENEMIES[type].from) with weight max(min, base + perNight × nights since debut), boosted × debut that first night.
+  const SPAWN_WEIGHTS = {
+    crab: { base: 1.1, perNight: -0.07, min: 0.3, debut: 1 },
+    jelly: { base: 0.75, perNight: 0, min: 0, debut: 1.5 },
+    eel: { base: 0.45, perNight: 0.04, min: 0, debut: 1.6 },
+    puffer: { base: 0.22, perNight: 0.025, min: 0, debut: 1.6 },
+    // was 0.28 / 0.03 / ×1.6 from night 8: a wall of ink on that one night. Now a school on its debut night 6
+    // (0.04 × 18), a lull, then a steady climb (0.14 on night 8 → 0.39 on night 13)
+    squid: { base: 0.04, perNight: 0.05, min: 0, debut: 18 },
+  };
   function spawnWeights(n) {
-    const E = ENEMIES;
-    const w = [['crab', Math.max(0.3, 1.1 - 0.07 * (n - E.crab.from))]];
-    if (n >= E.jelly.from) w.push(['jelly', 0.75 * (n === E.jelly.from ? 1.5 : 1)]);
-    if (n >= E.eel.from) w.push(['eel', (0.45 + 0.04 * (n - E.eel.from)) * (n === E.eel.from ? 1.6 : 1)]);
-    if (n >= E.puffer.from) w.push(['puffer', (0.22 + 0.025 * (n - E.puffer.from)) * (n === E.puffer.from ? 1.6 : 1)]);
-    if (n >= E.squid.from) w.push(['squid', (0.28 + 0.03 * (n - E.squid.from)) * (n === E.squid.from ? 1.6 : 1)]);
+    const w = [];
+    for (const type in SPAWN_WEIGHTS) {
+      const from = ENEMIES[type].from, sw = SPAWN_WEIGHTS[type];
+      if (n < from) continue;
+      w.push([type, Math.max(sw.min, sw.base + sw.perNight * (n - from)) * (n === from ? sw.debut : 1)]);
+    }
     return w;
   }
 
@@ -146,24 +162,36 @@
     leviathan: {
       name: 'Leviatã das Marés', banner: 'O Leviatã das Marés desperta!', bannerSub: 'A última maré da quinzena',
       hp: 5200, r: 80, speed: 48, dmg: 30, glow: '#7ff3ff', keep: 180,
-      ringEvery: 3.2, ringCount: 16, ringCountEnraged: 24, orbDmg: 10, orbSpeed: 210, orbLife: 6,
-      slamEvery: 6, slamWarn: 1, slamR: 120, slamDmg: 25,
+      ringEvery: 3.2, ringCount: 16, ringCountEnraged: 24, orbDmg: 8, orbSpeed: 210, orbLife: 6,
+      // slamEvery 6 → 7 s, slamWarn 1 → 1.4 s, the 2nd slam's lead 0.9 → 0.6 s of keeper motion, slamDmg 25 → 16 and
+      // orbDmg 10 → 8: the old pair caught anyone who did not read the telegraph, so only dodgers ever won
+      slamEvery: 7, slamWarn: 1.4, slamR: 120, slamDmg: 16, slamLead: 0.6,
       summonEvery: 7, summonCount: 3, emberTotal: 120,
     },
   };
 
   const WEAPONS = {
     // bossThreatR: aim at the boss unless a creature is this close; fanWidth caps the fan's spread at the target (world units)
-    spark: { range: 460, cooldown: 0.55, dmg: 12, speed: 560, life: 1.1, r: 5, spread: 0.14, fanWidth: 14, knock: 45, bossThreatR: 150 },
+    // range 460 → 560 and dmg 12 → 15 (spec: 10): a keeper who keeps moving still reaches the bosses and the
+    // squids (and night 1's first crab falls sooner)
+    spark: { range: 560, cooldown: 0.55, dmg: 15, speed: 560, life: 1.1, r: 5, spread: 0.14, fanWidth: 14, knock: 45, bossThreatR: 150 },
     // the light burns hottest near the lens: full damage up to falloffStart, fading to falloffMin at falloffEnd
-    beam: { dps: 18, dpsPerLevel: 12, halfPerLevel: 1.5 * DEG, rotPerLevel: 0.1, falloffStart: 380, falloffEnd: 1100, falloffMin: 0.45 },
-    aura: { radiusFactor: 0.42, tick: 0.5, dmg: 6, dmgPerLevel: 4, radiusPerLevel: 0.08, knock: 25 },
-    // dmg/orbit raised from the spec's 14 / 95 u: at 14 the anchors were the weakest pick by far
-    anchors: { orbit: 110, spin: 2.6, dmg: 18, dmgPerLevel: 3, hitCd: 0.4, r: 13, knock: 90 },
-    harpoon: { cooldown: 2.4, dmg: 40, dmgL2: 15, cdL3: 0.9, dmgL5: 1.5, speed: 760, life: 1.5, r: 14, knock: 110 },
+    // dps 18 → 16, dpsPerLevel 12 → 6, and the heat now stays near the tower (full up to 200 u, none past 650 u; was
+    // 380 / 1100 u, 45 %): burning every creature on the island, it out-damaged all the other weapons together
+    beam: { dps: 16, dpsPerLevel: 6, halfPerLevel: 1.5 * DEG, rotPerLevel: 0.1, falloffStart: 200, falloffEnd: 650, falloffMin: 0 },
+    // radiusFactor 0.42 → 0.6, radiusPerLevel 0.08 → 0.12, dmg 6 → 10, dmgPerLevel 4 → 5: at the old reach a keeper on
+    // the move hardly ever touched anything
+    aura: { radiusFactor: 0.6, tick: 0.5, dmg: 10, dmgPerLevel: 5, radiusPerLevel: 0.12, knock: 25 },
+    // dmg/orbit raised from the spec's 14 / 95 u (then 18 / 110 u, +3 per level): still the weakest pick, so 28 / 150 u,
+    // +5 per level, spin 2.6 → 3, and (new) they knock ink and orbs out of the air
+    anchors: { orbit: 150, spin: 3, dmg: 28, dmgPerLevel: 5, hitCd: 0.4, r: 13, knock: 90, blocksInk: true },
+    // reshaped: aims at the nearest creature within `range` (bossThreatR as for the spark); the spec fired it where the
+    // keeper faces, i.e. away from the threats when running from them. cooldown 2.4 → 2 s, dmg 40 → 50
+    harpoon: { cooldown: 2, dmg: 50, dmgL2: 15, cdL3: 0.9, dmgL5: 1.5, speed: 760, life: 1.5, r: 14, knock: 110, range: 800, bossThreatR: 150 },
   };
 
-  const PASSIVES = { boots: 0.1, hull: 20, hullHeal: 20, regen: 0.8, magnet: 0.35, wick: 0.15, powder: 0.12, hourglass: 0.08 };
+  // regen 0.8 → 1 hp/s per level: the ink nights wear a keeper down over several nights
+  const PASSIVES = { boots: 0.1, hull: 20, hullHeal: 20, regen: 1, magnet: 0.35, wick: 0.15, powder: 0.12, hourglass: 0.08 };
 
   const MAX_LEVEL = 5;
   const MAX_WEAPONS = 4;
@@ -174,8 +202,13 @@
 
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const lerp = (a, b, t) => a + (b - a) * t;
-  const rand = (a, b) => a + Math.random() * (b - a);
-  const pick = arr => arr[(Math.random() * arr.length) | 0];
+  // Gameplay randomness (spawns, offers, enemy quirks, ember scatter) goes through gameRandom(): Math.random in
+  // normal play; QF.debug.seed(n) swaps in a seeded PRNG so balance runs reproduce. Cosmetic randomness
+  // (particles, floating text, screen shake) uses fxRand / Math.random and never draws from that stream.
+  let gameRandom = Math.random;
+  const rand = (a, b) => a + gameRandom() * (b - a);
+  const pick = arr => arr[(gameRandom() * arr.length) | 0];
+  const fxRand = (a, b) => a + Math.random() * (b - a);
   const dist2 = (ax, ay, bx, by) => {
     const dx = ax - bx, dy = ay - by;
     return dx * dx + dy * dy;
@@ -220,7 +253,7 @@
     // entries: [[value, weight], ...]
     let total = 0;
     for (const e of entries) total += e[1];
-    let r = Math.random() * total;
+    let r = gameRandom() * total;
     for (const e of entries) {
       r -= e[1];
       if (r <= 0) return e[0];
@@ -646,6 +679,18 @@
   }
   let state = makeState();
 
+  // Debug-only hooks, set through QF.debug (section 15) for the balance harness. They stay null/false in normal
+  // play, so every `if (dbg.x)` below is a no-op there.
+  const dbg = {
+    autopilot: null, // fn(view) → {x, y}: replaces keyboard/joystick movement
+    picker: null, // fn(offers, info) → index: picks level-up cards at once and skips the Dawn screen
+    telemetry: false, // debug pages: each new run gets a telemetry record in `tel`
+    tel: null, // per-run telemetry (damage by source/weapon, levels, boss times)
+    manualClock: false, // the rAF loop stops simulating; only QF.debug.runSteps advances the game
+    noRender: false, // the rAF loop skips drawing and the HUD
+    move: { x: 0, y: 0 },
+  };
+
   const view = { w: 1, h: 1, dpr: 1, zoom: 1, scale: 1, insL: 12, insR: 12, insB: 16 }; // ins*: safe-area insets + margins (CSS px)
   const cam = { x: 0, y: 0 };
   let timeScale = 1;
@@ -743,34 +788,34 @@
     {
       id: 'beam', kind: 'weapon', name: 'Lente de Fresnel',
       desc: L => L === 1
-        ? 'O facho do farol passa a queimar: até 18 de dano por segundo, mais forte perto da torre.'
+        ? 'O facho do farol passa a queimar: até ' + WEAPONS.beam.dps + ' de dano por segundo perto da torre; o calor some com a distância.'
         : 'Facho mais largo e mais rápido: até ' + (WEAPONS.beam.dps + WEAPONS.beam.dpsPerLevel * (L - 1)) + ' de dano por segundo.',
     },
     {
       id: 'aura', kind: 'weapon', name: 'Lanterna Ardente',
       desc: L => L === 1
-        ? 'Sua lanterna queima quem chega perto: 6 de dano a cada meio segundo.'
-        : 'Chama mais forte: ' + (WEAPONS.aura.dmg + WEAPONS.aura.dmgPerLevel * (L - 1)) + ' de dano por pulso e 8% mais alcance.',
+        ? 'Sua lanterna queima quem chega perto: ' + WEAPONS.aura.dmg + ' de dano a cada meio segundo.'
+        : 'Chama mais forte: ' + (WEAPONS.aura.dmg + WEAPONS.aura.dmgPerLevel * (L - 1)) + ' de dano por pulso e ' + Math.round(WEAPONS.aura.radiusPerLevel * 100) + '% mais alcance.',
     },
     {
       id: 'anchors', kind: 'weapon', name: 'Âncoras Giratórias',
       desc: L => L === 1
-        ? 'Uma âncora gira ao seu redor, ferindo e empurrando as criaturas.'
-        : ['', '', 'Duas', 'Três', 'Quatro', 'Cinco'][L] + ' âncoras girando, cada uma com +3 de dano.',
+        ? 'Uma âncora gira ao seu redor: fere e empurra as criaturas e bloqueia a tinta e os orbes.'
+        : ['', '', 'Duas', 'Três', 'Quatro', 'Cinco'][L] + ' âncoras girando, cada uma com +' + WEAPONS.anchors.dmgPerLevel + ' de dano.',
     },
     {
       id: 'harpoon', kind: 'weapon', name: 'Arpão',
       desc: L => [
-        'Lança um arpão pesado que atravessa todas as criaturas no caminho.',
+        'Lança um arpão pesado na criatura mais próxima; ele atravessa todas no caminho.',
         'Arpão mais pesado: +15 de dano.',
         'Recarga 10% mais rápida.',
-        'Lança dois arpões: um para frente e outro para trás.',
+        'Lança dois arpões: um no alvo e outro na direção oposta.',
         'Ponta de ferro forjado: +50% de dano.',
       ][L - 1],
     },
     { id: 'boots', kind: 'passive', name: 'Botas de Marinheiro', desc: () => 'Você corre 10% mais rápido.' },
     { id: 'hull', kind: 'passive', name: 'Casco Reforçado', desc: () => '+20 de vida máxima e recupera 20 de vida.' },
-    { id: 'regen', kind: 'passive', name: 'Pulmões de Faroleiro', desc: () => '+0,8 de vida recuperada por segundo.' },
+    { id: 'regen', kind: 'passive', name: 'Pulmões de Faroleiro', desc: () => '+' + String(PASSIVES.regen).replace('.', ',') + ' de vida recuperada por segundo.' },
     { id: 'magnet', kind: 'passive', name: 'Ímã de Brasas', desc: () => 'Atrai brasas de 35% mais longe.' },
     { id: 'wick', kind: 'passive', name: 'Pavio Longo', desc: () => 'A lanterna ilumina 15% mais longe — e a Lanterna Ardente também.' },
     { id: 'powder', kind: 'passive', name: 'Pólvora Seca', desc: () => 'Todas as armas causam 12% mais dano.' },
@@ -816,7 +861,7 @@
     for (const f of FALLBACKS) if (picks.length < 3) picks.push(f);
     // shuffle so the card position carries no meaning
     for (let i = picks.length - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
+      const j = (gameRandom() * (i + 1)) | 0;
       const t = picks[i]; picks[i] = picks[j]; picks[j] = t;
     }
     return picks;
@@ -906,17 +951,20 @@
     for (const e of state.enemies) {
       if (e.dead) continue;
       e.inBeam = inBeam(e.x, e.y, e.r, a0, bs.half);
-      if (e.inBeam && hurting) {
+      const hit = e.inBeam && hurting ? dmg * beamFalloff(e.x, e.y) : 0;
+      if (hit > 0) { // past falloffEnd the beam still slows but no longer burns
         e.burn = 0.12;
-        e.hp -= dmg * beamFalloff(e.x, e.y);
-        if (e.hp <= 0) killEnemy(e);
-        else if (Math.random() < dt * 6) addParticle(e.x + rand(-e.r, e.r), e.y + rand(-e.r, e.r), rand(-20, 20), rand(-60, -20), 0.5, 3, COLORS.lantern);
+        if (dbg.tel) dbg.tel.dealt('beam', Math.min(hit, e.hp), false);
+        e.hp -= hit;
+        if (e.hp <= 0) killEnemy(e, 'beam');
+        else if (Math.random() < dt * 6) addParticle(e.x + fxRand(-e.r, e.r), e.y + fxRand(-e.r, e.r), fxRand(-20, 20), fxRand(-60, -20), 0.5, 3, COLORS.lantern);
       }
     }
     const b = state.boss;
     if (b && !b.dead) {
       b.inBeam = inBeam(b.x, b.y, b.r, a0, bs.half);
-      if (b.inBeam && hurting && b.emerge >= 1) { b.burn = 0.12; hurtBoss(dmg * beamFalloff(b.x, b.y), true); }
+      const hit = b.inBeam && hurting && b.emerge >= 1 ? dmg * beamFalloff(b.x, b.y) : 0;
+      if (hit > 0) { b.burn = 0.12; hurtBoss(hit, true, 'beam'); }
     }
     // Lighthouse flare when the beam passes over the player
     const p = state.player;
@@ -956,15 +1004,11 @@
     w.harpoonCd -= dt;
     if (w.harpoonCd > 0) return;
     const p = state.player;
-    let a;
-    if (p.moving) a = p.facing;
-    else {
-      const t = nearestTarget(p.x, p.y, 900);
-      if (!t) { w.harpoonCd = 0.15; return; }
-      a = Math.atan2(t.y - p.y, t.x - p.x);
-    }
-    const st = harpoonStats(L);
     const W = WEAPONS.harpoon;
+    const t = nearestTarget(p.x, p.y, W.range, W.bossThreatR);
+    if (!t) { w.harpoonCd = 0.15; return; }
+    const a = Math.atan2(t.y - p.y, t.x - p.x);
+    const st = harpoonStats(L);
     for (let k = 0; k < st.count; k++) {
       const ang = a + k * Math.PI;
       state.shots.push({
@@ -994,13 +1038,13 @@
       const d2 = dist2(p.x, p.y, e.x, e.y);
       if (d2 < rr * rr) {
         const d = Math.sqrt(d2) || 1;
-        damageEnemy(e, dmg, ((e.x - p.x) / d) * WEAPONS.aura.knock, ((e.y - p.y) / d) * WEAPONS.aura.knock, false);
+        damageEnemy(e, dmg, ((e.x - p.x) / d) * WEAPONS.aura.knock, ((e.y - p.y) / d) * WEAPONS.aura.knock, false, 'aura');
       }
     }
     const b = state.boss;
     if (b && !b.dead && b.emerge >= 1) {
       const rr = st.r + b.r * 0.6;
-      if (dist2(p.x, p.y, b.x, b.y) < rr * rr) hurtBoss(dmg, false);
+      if (dist2(p.x, p.y, b.x, b.y) < rr * rr) hurtBoss(dmg, false, 'aura');
     }
     w.auraPulse = 1;
   }
@@ -1036,15 +1080,27 @@
         if (dist2(an.x, an.y, e.x, e.y) > rr * rr) continue;
         e.anchorCd = W.hitCd;
         const d = Math.hypot(e.x - p.x, e.y - p.y) || 1;
-        damageEnemy(e, dmg, ((e.x - p.x) / d) * W.knock, ((e.y - p.y) / d) * W.knock, true);
+        damageEnemy(e, dmg, ((e.x - p.x) / d) * W.knock, ((e.y - p.y) / d) * W.knock, true, 'anchors');
       }
       const b = state.boss;
       if (b && !b.dead && b.emerge >= 1 && b.anchorCd <= 0) {
         const rr = W.r + b.r;
         if (dist2(an.x, an.y, b.x, b.y) < rr * rr) {
           b.anchorCd = W.hitCd;
-          hurtBoss(dmg, false);
+          hurtBoss(dmg, false, 'anchors');
           b.dmgAcc += dmg; // shown as one summed number (updateBoss)
+        }
+      }
+      // the spinning iron knocks ink (and the Leviatã's orbs) out of the air — not in the spec
+      if (W.blocksInk) {
+        const inks = state.inks;
+        for (let i = inks.length - 1; i >= 0; i--) {
+          const s = inks[i];
+          const rr = W.r + s.r;
+          if (dist2(an.x, an.y, s.x, s.y) > rr * rr) continue;
+          burst(s.x, s.y, 6, COLORS.ink, 110, 0.35, 2.5);
+          inks[i] = inks[inks.length - 1];
+          inks.pop();
         }
       }
     }
@@ -1072,7 +1128,7 @@
           const rr = e.r + s.r;
           if (dist2(s.x, s.y, e.x, e.y) > rr * rr) continue;
           const sp = Math.hypot(s.vx, s.vy) || 1;
-          damageEnemy(e, s.dmg, (s.vx / sp) * s.knock, (s.vy / sp) * s.knock, true);
+          damageEnemy(e, s.dmg, (s.vx / sp) * s.knock, (s.vy / sp) * s.knock, true, s.kind);
           if (s.kind === 'spark') burst(s.x, s.y, 3, COLORS.lantern, 90, 0.25, 2.5);
           if (s.pierce > 0) {
             s.pierce--;
@@ -1087,7 +1143,7 @@
         if (s.life > 0 && b && !b.dead && b.emerge >= 1 && !(s.hit && s.hit.has('boss'))) {
           const rr = b.r * 0.9 + s.r;
           if (dist2(s.x, s.y, b.x, b.y) < rr * rr) {
-            hurtBoss(s.dmg, false);
+            hurtBoss(s.dmg, false, s.kind);
             b.dmgAcc += s.dmg;
             burst(s.x, s.y, 4, COLORS.lantern, 120, 0.3, 3);
             if (s.kind === 'harpoon') s.hit.add('boss');
@@ -1120,8 +1176,8 @@
       dmg: def.dmg * (1 + SCALING.dmgPerNight * (n - 1)),
       ember: def.ember * (elite ? SCALING.eliteEmbers : 1),
       elite: !!elite, flash: 0, burn: 0, anchorCd: 0, inBeam: false, dead: false,
-      t: Math.random() * 10, seed: Math.random() * TAU, face, heading: face,
-      inflate: 0, orbitDir: Math.random() < 0.5 ? -1 : 1,
+      t: gameRandom() * 10, seed: gameRandom() * TAU, face, heading: face,
+      inflate: 0, orbitDir: gameRandom() < 0.5 ? -1 : 1,
       shotT: def.shotEvery ? rand(1.2, def.shotEvery) : 0,
       emerge: 1, wx: x, wy: y,
     };
@@ -1142,14 +1198,14 @@
 
   function spawnAtRing(type, count) {
     const p = state.player;
-    const a = Math.random() * TAU;
+    const a = gameRandom() * TAU;
     // just outside the visible rect in this direction (a corner-distance ring left side spawns ~8 s from view)
     const hw = view.w / view.zoom / 2, hh = view.h / view.zoom / 2;
     const R = Math.min(hw / Math.max(1e-4, Math.abs(Math.cos(a))), hh / Math.max(1e-4, Math.abs(Math.sin(a)))) + SPAWN.edgeMargin;
     for (let i = 0; i < count; i++) {
       const aa = a + (count > 1 ? rand(-0.12, 0.12) : 0);
       const rr = R + (count > 1 ? rand(0, 60) : 0);
-      const elite = state.night >= SCALING.eliteFromNight && Math.random() < SCALING.eliteChance;
+      const elite = state.night >= SCALING.eliteFromNight && gameRandom() < SCALING.eliteChance;
       spawnEnemy(type, p.x + Math.cos(aa) * rr, p.y + Math.sin(aa) * rr, elite, false);
     }
   }
@@ -1164,7 +1220,7 @@
     while (state.spawnAcc >= 1 && guard++ < 20) {
       if (state.enemies.length >= SPAWN.maxAlive) { state.spawnAcc = Math.min(state.spawnAcc, 1); break; }
       const type = weightedPick(spawnWeights(n));
-      const group = (type === 'crab' || type === 'jelly') && Math.random() < SPAWN.groupChance ? SPAWN.groupSize : 1;
+      const group = (type === 'crab' || type === 'jelly') && gameRandom() < SPAWN.groupChance ? SPAWN.groupSize : 1;
       spawnAtRing(type, group);
       state.spawnAcc -= group;
     }
@@ -1258,7 +1314,7 @@
       else e.face += angleDiff(e.face, Math.atan2(e.vy, e.vx)) * Math.min(1, dt * 8);
       if (d > recycleR) {
         // creature lost the trail — bring it back from the dark at the edge of view
-        const a = Math.random() * TAU, R = spawnRingRadius();
+        const a = gameRandom() * TAU, R = spawnRingRadius();
         e.x = p.x + Math.cos(a) * R;
         e.y = p.y + Math.sin(a) * R;
         e.kx = e.ky = 0;
@@ -1300,23 +1356,26 @@
     }
   }
 
-  function damageEnemy(e, amount, kx, ky, showNumber) {
+  // src: the weapon id dealing the damage (debug telemetry only)
+  function damageEnemy(e, amount, kx, ky, showNumber, src) {
     if (e.dead) return;
+    if (dbg.tel) dbg.tel.dealt(src, Math.min(amount, e.hp), false);
     e.hp -= amount;
     e.flash = 0.08;
     const kb = e.type === 'puffer' ? 0.4 : 1;
     e.kx += kx * kb;
     e.ky += ky * kb;
-    if (showNumber) addText(e.x + rand(-6, 6), e.y - e.r - 4, Math.round(amount), COLORS.parchment, 13);
-    if (e.hp <= 0) killEnemy(e);
+    if (showNumber) addText(e.x + fxRand(-6, 6), e.y - e.r - 4, Math.round(amount), COLORS.parchment, 13);
+    if (e.hp <= 0) killEnemy(e, src);
     else Sound.play('hit');
   }
 
-  function killEnemy(e) {
+  function killEnemy(e, src) {
     if (e.dead) return;
     e.dead = true;
     state.kills++;
     state.nightKills++;
+    if (dbg.tel) dbg.tel.kill(src);
     const c = e.elite ? COLORS.gold : e.def.glow;
     burst(e.x, e.y, e.elite ? 16 : 9, c, 150, 0.6, 3.2);
     addRing(e.x, e.y, e.r * 0.6, e.r * 2.6, 0.35, c);
@@ -1363,7 +1422,7 @@
     const p = state.player;
     // rise from the sea side of the player, near the edge of the view
     let a = Math.atan2(p.y, p.x);
-    if (p.x * p.x + p.y * p.y < 150 * 150) a = Math.random() * TAU;
+    if (p.x * p.x + p.y * p.y < 150 * 150) a = gameRandom() * TAU;
     a += rand(-0.5, 0.5);
     const R = clamp(Math.min(view.w, view.h) / view.zoom * 0.42, 260, 420);
     const b = {
@@ -1379,6 +1438,7 @@
       for (let i = 0; i < 11; i++) b.segs.push({ x: b.x - Math.cos(b.face) * i * 40, y: b.y - Math.sin(b.face) * i * 40 });
     }
     state.boss = b;
+    if (dbg.tel) dbg.tel.boss('spawn');
     addRing(b.x, b.y, 20, b.r * 3, 1.2, def.glow);
     addRing(b.x, b.y, 10, b.r * 2, 0.9, COLORS.parchment);
     showBanner(def.banner, def.bannerSub, 2.8, true);
@@ -1386,9 +1446,10 @@
     addShake(0.5);
   }
 
-  function hurtBoss(amount, silent) {
+  function hurtBoss(amount, silent, src) {
     const b = state.boss;
     if (!b || b.dead) return;
+    if (dbg.tel) dbg.tel.dealt(src, Math.min(amount, b.hp), true);
     b.hp -= amount;
     if (!silent) { b.flash = 0.07; Sound.play('hit'); }
     if (b.type === 'leviathan' && !b.enraged && b.hp < b.maxHp * 0.5 && b.hp > 0) {
@@ -1407,6 +1468,7 @@
     b.dead = true;
     b.hp = 0;
     state.bossKills++;
+    if (dbg.tel) dbg.tel.boss('killed');
     state.bossDefeated = true;
     const c = b.def.glow;
     burst(b.x, b.y, 60, c, 320, 1.4, 5);
@@ -1435,13 +1497,14 @@
     // simultaneous hits on the boss would stack into unreadable digits: show their sum every 0.25 s
     b.dmgT -= dt;
     if (b.dmgAcc > 0 && b.dmgT <= 0) {
-      addText(b.x + rand(-12, 12), b.y - b.r * 0.7, Math.round(b.dmgAcc), COLORS.parchment, 16);
+      addText(b.x + fxRand(-12, 12), b.y - b.r * 0.7, Math.round(b.dmgAcc), COLORS.parchment, 16);
       b.dmgAcc = 0;
       b.dmgT = 0.25;
     }
     if (b.emerge < 1) {
       b.emerge = Math.min(1, b.emerge + dt / 1.2);
-      if (Math.random() < dt * 30) addParticle(b.x + rand(-b.r, b.r), b.y + rand(-b.r, b.r), rand(-30, 30), rand(-80, -30), 0.8, 4, def.glow);
+      if (b.emerge >= 1 && dbg.tel) dbg.tel.boss('emerged');
+      if (Math.random() < dt * 30) addParticle(b.x + fxRand(-b.r, b.r), b.y + fxRand(-b.r, b.r), fxRand(-30, 30), fxRand(-80, -30), 0.8, 4, def.glow);
       return;
     }
     if (state.phase !== 'night') return;
@@ -1487,7 +1550,7 @@
         b.x += b.dashDx * step;
         b.y += b.dashDy * step;
         b.dashLeft -= step;
-        if (Math.random() < 0.6) addParticle(b.x - b.dashDx * b.r + rand(-20, 20), b.y - b.dashDy * b.r + rand(-20, 20), rand(-30, 30), rand(-30, 30), 0.5, 4, '#c9b48a');
+        if (Math.random() < 0.6) addParticle(b.x - b.dashDx * b.r + fxRand(-20, 20), b.y - b.dashDy * b.r + fxRand(-20, 20), fxRand(-30, 30), fxRand(-30, 30), 0.5, 4, '#c9b48a');
         if (b.dashLeft <= 0.01) {
           b.mode = 'recover';
           b.modeT = 0;
@@ -1514,7 +1577,7 @@
       if (b.ringT <= 0) {
         b.ringT = def.ringEvery;
         const n = b.enraged ? def.ringCountEnraged : def.ringCount;
-        const off = Math.random() * TAU;
+        const off = gameRandom() * TAU;
         for (let i = 0; i < n; i++) {
           const a = off + (i / n) * TAU;
           fireInk(b.x + Math.cos(a) * b.r * 0.7, b.y + Math.sin(a) * b.r * 0.7, a, def.orbSpeed, def.orbDmg, def.orbLife, 9, true);
@@ -1524,7 +1587,7 @@
       }
       if (b.slamT <= 0) {
         b.slamT = def.slamEvery;
-        const lead = p.moving ? 0.9 : 0;
+        const lead = p.moving ? def.slamLead : 0;
         const tx2 = p.x + p.vx * lead + (p.moving ? 0 : rand(-150, 150));
         const ty2 = p.y + p.vy * lead + (p.moving ? 0 : rand(-150, 150));
         addSlam(p.x, p.y, def.slamR, def.slamWarn, def.slamDmg);
@@ -1601,13 +1664,13 @@
         if (o.pull <= 0 && dp > fd) { fd = dp; far = i; }
       }
       if (near) { near.value += value; return; }
-      if (far < 0) { list[(Math.random() * list.length) | 0].value += value; return; }
+      if (far < 0) { list[(gameRandom() * list.length) | 0].value += value; return; }
       value += list[far].value;
       list[far] = list[list.length - 1];
       list.pop();
     }
-    const a = Math.random() * TAU, s = rand(20, speed || 80);
-    list.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, value, t: 0, pull: 0, seed: Math.random() * TAU });
+    const a = gameRandom() * TAU, s = rand(20, speed || 80);
+    list.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, value, t: 0, pull: 0, seed: gameRandom() * TAU });
   }
 
   function collectEmber(m) {
@@ -1675,7 +1738,7 @@
       p.moving = false;
       return;
     }
-    const v = Input.vector();
+    const v = dbg.autopilot ? autopilotMove() : Input.vector();
     const tx = v.x * s.speed, ty = v.y * s.speed;
     const k = Math.min(1, dt * PLAYER.accel);
     p.vx += (tx - p.vx) * k;
@@ -1709,6 +1772,7 @@
     const key = src || 'contact';
     state.damageTaken[key] = (state.damageTaken[key] || 0) + dmg;
     p.hp -= dmg;
+    if (dbg.tel) dbg.tel.hurt(key, dmg);
     p.hurtT = 0.25;
     addShake(Math.min(0.45, 0.12 + dmg / 80));
     burst(p.x, p.y, 8, COLORS.danger, 140, 0.4, 3);
@@ -1765,8 +1829,8 @@
   }
   function burst(x, y, n, color, speed, life, size) {
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * TAU, s = rand(0.25, 1) * speed;
-      addParticle(x, y, Math.cos(a) * s, Math.sin(a) * s, life * rand(0.6, 1.1), size * rand(0.6, 1.2), color);
+      const a = Math.random() * TAU, s = fxRand(0.25, 1) * speed;
+      addParticle(x, y, Math.cos(a) * s, Math.sin(a) * s, life * fxRand(0.6, 1.1), size * fxRand(0.6, 1.2), color);
     }
   }
   function addRing(x, y, r0, r1, life, color) {
@@ -1880,7 +1944,7 @@
   }
 
   function pickWander(e) {
-    const a = Math.random() * TAU, R = rand(380, 1050);
+    const a = Math.random() * TAU, R = fxRand(380, 1050);
     e.wx = Math.cos(a) * R;
     e.wy = Math.sin(a) * R;
   }
@@ -1924,7 +1988,7 @@
     p.x = 0; p.y = 96; p.face = p.facing = Math.PI / 2;
     const types = ['crab', 'crab', 'crab', 'jelly', 'jelly', 'eel', 'puffer', 'squid'];
     for (let i = 0; i < 16; i++) {
-      const a = Math.random() * TAU, R = rand(420, 1000);
+      const a = Math.random() * TAU, R = fxRand(420, 1000);
       const e = makeEnemy(pick(types), Math.cos(a) * R, Math.sin(a) * R, Math.random() < 0.1);
       pickWander(e);
       state.enemies.push(e);
@@ -1938,6 +2002,7 @@
   function newRun() {
     state = makeState();
     state.runActive = true;
+    dbg.tel = dbg.telemetry ? makeTelemetry() : null; // debug pages only (section 15)
     recomputeStats();
     cam.x = state.player.x;
     cam.y = state.player.y;
@@ -1957,7 +2022,7 @@
     state.bossSpawnT = state.isBossNight ? NIGHTS.bossDelay : -1;
     state.nightKills = 0;
     state.nightEmbers = 0;
-    state.spawnAcc = 0.6;
+    state.spawnAcc = n === 1 ? SPAWN.firstNightAcc : SPAWN.startAcc;
     state.enemies.length = 0;
     state.shots.length = 0;
     state.inks.length = 0;
@@ -1967,6 +2032,7 @@
     state.afterLevelUp = 'play';
     if (state.player.hp <= 0) state.player.hp = state.player.maxHp;
     grid.clear();
+    if (dbg.tel) dbg.tel.nightStart();
     setScreen('playing');
     showOverlay(null);
     const sub = n === NIGHTS.total ? 'A última noite da quinzena'
@@ -1980,13 +2046,14 @@
     state.phase = 'sunrise';
     state.phaseT = 0;
     state.nightsSurvived++;
+    if (dbg.tel) dbg.tel.nightEnd('survived');
     state.bossDefeated = true;
     for (const e of state.enemies) {
       if (e.dead) continue;
       e.dead = true; // dissolved: hit checks later in this tick (killBoss → endNight mid-update) must not find it in the grid
       const c = e.elite ? COLORS.gold : e.def.glow;
       for (let i = 0; i < 3; i++) {
-        addParticle(e.x + rand(-e.r, e.r), e.y + rand(-e.r, e.r), rand(-25, 25), rand(-50, -10), rand(0.7, 1.3), rand(2.5, 4.5), c, 'bubble');
+        addParticle(e.x + fxRand(-e.r, e.r), e.y + fxRand(-e.r, e.r), fxRand(-25, 25), fxRand(-50, -10), fxRand(0.7, 1.3), fxRand(2.5, 4.5), c, 'bubble');
       }
     }
     for (const s of state.inks) addParticle(s.x, s.y, 0, -20, 0.6, 3, COLORS.ink, 'bubble');
@@ -1998,6 +2065,7 @@
   }
 
   function finishSunrise() {
+    if (dbg.tel) dbg.tel.dawn();
     if (state.night >= NIGHTS.total) { showVictory(); return; }
     if (state.pendingLevelUps > 0) { openLevelUp('dawn'); return; }
     showDawn();
@@ -2008,6 +2076,7 @@
     state.phase = 'dying';
     state.phaseT = 0;
     state.deathNight = state.night;
+    if (dbg.tel) dbg.tel.nightEnd('died');
     Input.releasePointer();
     const p = state.player;
     burst(p.x, p.y, 24, COLORS.lantern, 160, 1.0, 4);
@@ -2326,8 +2395,8 @@
     let sx = 0, sy = 0;
     if (state.shake > 0 && !reducedMotion) {
       const m = state.shake * state.shake * 16 * view.dpr;
-      sx = rand(-m, m);
-      sy = rand(-m, m);
+      sx = fxRand(-m, m);
+      sy = fxRand(-m, m);
     }
     const ox = W / 2 - cam.x * S + sx, oy = H / 2 - cam.y * S + sy;
     const vb = { x0: -ox / S, y0: -oy / S, x1: (W - ox) / S, y1: (H - oy) / S };
@@ -2870,15 +2939,26 @@
   function drawBeamHaze() {
     const bs = beamStats(lv('beam'));
     const len = WORLD.beamLength;
-    const strength = lv('beam') ? 0.075 : 0.05;
-    if (!darkGrad.haze || darkGrad.hazeStrength !== strength) {
+    const burning = lv('beam') > 0;
+    const strength = burning ? 0.075 : 0.05;
+    const W = WEAPONS.beam;
+    const key = burning ? 'lens:' + W.falloffStart + ':' + W.falloffEnd : 'plain';
+    if (!darkGrad.haze || darkGrad.hazeKey !== key) {
       const g = ctx.createRadialGradient(0, 0, 30, 0, 0, len);
-      const warm = lv('beam') ? '255,190,110' : '255,226,170';
-      g.addColorStop(0, 'rgba(' + warm + ',' + strength * 2 + ')');
-      g.addColorStop(0.4, 'rgba(' + warm + ',' + strength + ')');
-      g.addColorStop(1, 'rgba(' + warm + ',0)');
+      if (burning) {
+        // with the Lente, the warm glow marks where the beam burns: bright up to falloffStart, gone by falloffEnd
+        const at = r => clamp((r - 30) / (len - 30), 0, 1);
+        g.addColorStop(0, 'rgba(255,190,110,' + strength * 3.2 + ')');
+        g.addColorStop(at(W.falloffStart), 'rgba(255,180,100,' + strength * 2.8 + ')');
+        g.addColorStop(at(W.falloffEnd), 'rgba(255,226,170,' + strength * 0.4 + ')');
+        g.addColorStop(1, 'rgba(255,226,170,0)');
+      } else {
+        g.addColorStop(0, 'rgba(255,226,170,' + strength * 2 + ')');
+        g.addColorStop(0.4, 'rgba(255,226,170,' + strength + ')');
+        g.addColorStop(1, 'rgba(255,226,170,0)');
+      }
       darkGrad.haze = g;
-      darkGrad.hazeStrength = strength;
+      darkGrad.hazeKey = key;
     }
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = darkGrad.haze;
@@ -3702,7 +3782,7 @@
     if (b.type === 'leviathan') { drawLeviathan(b, glow, es); return; }
     ctx.save();
     let jx = 0, jy = 0;
-    if (b.mode === 'telegraph' && !reducedMotion) { jx = rand(-2.5, 2.5); jy = rand(-2.5, 2.5); }
+    if (b.mode === 'telegraph' && !reducedMotion) { jx = fxRand(-2.5, 2.5); jy = fxRand(-2.5, 2.5); }
     ctx.translate(b.x + jx, b.y + jy);
     ctx.globalAlpha = es.a;
     if (!glow) {
@@ -4074,9 +4154,9 @@
     3: 'O mar está agitado. Mais criaturas virão.',
     4: 'Moreias velozes rondam a costa. Fique de olho nelas.',
     5: 'Baiacus espinhosos se aproximam — eles incham quando chegam perto.',
-    6: 'A lua está quase cheia. Algo grande se mexe no fundo.',
+    6: 'Lulas-tinteiras cospem tinta de longe. Continue em movimento.',
     7: 'O Caranguejo-Rei sai da toca esta noite. Cuidado com as investidas.',
-    8: 'Lulas-tinteiras cospem tinta de longe. Continue em movimento.',
+    8: 'As lulas-tinteiras voltam, e a cada noite em maior número. Não pare de se mover.',
     9: 'Metade da quinzena já passou. O farol continua aceso.',
     10: 'Criaturas douradas, bem mais resistentes, surgem na escuridão.',
     11: 'As noites estão mais longas. Cada ponto de vida conta.',
@@ -4421,6 +4501,7 @@
 
   function openLevelUp(after) {
     if (state.pendingLevelUps <= 0) return;
+    if (dbg.picker) { autoPickLevelUps(after); return; } // debug: picked at once, no modal (section 15)
     state.afterLevelUp = after || 'play';
     state.offers = rollOffers();
     setScreen('levelup');
@@ -4434,6 +4515,7 @@
     if (state.screen !== 'levelup') return;
     const o = state.offers[i];
     if (!o) return;
+    if (dbg.tel) dbg.tel.pick(state.offers, o);
     applyUpgrade(o.id);
     state.pendingLevelUps = Math.max(0, state.pendingLevelUps - 1);
     Sound.play('pick', null, true);
@@ -4462,6 +4544,7 @@
     p.hp += amount;
     state.lastDawnHeal = Math.round(amount);
     setScreen('dawn');
+    if (dbg.picker) { startNextNight(); return; } // debug: a picker also skips the Dawn screen
     const left = NIGHTS.total - state.night;
     el.dawnSub.textContent = 'Dia ' + state.night + ' sobrevivido · ' + (left === 1 ? 'falta 1 noite' : 'faltam ' + left + ' noites');
     renderPips(el.dawnPips, state.night, 0);
@@ -4486,6 +4569,7 @@
 
   function gameOver() {
     if (state.screen === 'gameover') return;
+    if (dbg.tel) dbg.tel.result('death');
     setScreen('gameover');
     const isNew = commitRecord();
     el.goSub.textContent = 'As criaturas tomaram a ilha na noite\u00a0' + state.night + '.';
@@ -4502,6 +4586,7 @@
 
   function showVictory() {
     state.pendingLevelUps = 0;
+    if (dbg.tel) dbg.tel.result('win');
     setScreen('victory');
     const isNew = commitRecord();
     el.winRecord.hidden = !isNew;
@@ -4753,7 +4838,9 @@
     lastT = now;
     if (!(dt >= 0)) dt = 0;
     dt = Math.min(dt, SIM.maxFrame);
-    if (state.screen === 'playing') {
+    if (dbg.manualClock) {
+      acc = 0; // debug: QF.debug.runSteps drives the simulation
+    } else if (state.screen === 'playing') {
       acc += dt * timeScale;
       const maxSteps = Math.ceil(SIM.maxSteps * Math.max(1, timeScale));
       let steps = 0;
@@ -4769,8 +4856,10 @@
       if (state.screen === 'title' || state.screen === 'howto') updateAttract(dt);
       else if (state.screen === 'dawn' || state.screen === 'victory' || state.screen === 'gameover') updateCosmetic(dt);
     }
-    render(dt);
-    updateHud();
+    if (!dbg.noRender) {
+      render(dt);
+      updateHud();
+    }
     updateBannerToast(dt);
   }
 
@@ -4880,6 +4969,180 @@
     };
   }
 
+  // ---- Balance harness support (debug pages only; see QF.debug below and tools/balance.mjs) ----
+
+  // What a player could see this step, as fresh copies (an autopilot cannot change the game through it).
+  // "Nearby" = inside the visible rect plus a small margin; the boss is always known (HP bar and edge arrow).
+  function autopilotView() {
+    const p = state.player, b = state.boss;
+    const vw = view.w / view.zoom / 2, vh = view.h / view.zoom / 2;
+    const hw = vw + 60, hh = vh + 60;
+    const seen = o => Math.abs(o.x - p.x) < hw && Math.abs(o.y - p.y) < hh;
+    const enemies = [], projectiles = [], telegraphs = [], embers = [];
+    for (const e of state.enemies) {
+      if (e.dead || !seen(e)) continue;
+      enemies.push({
+        id: e.id, type: e.type, x: e.x, y: e.y, vx: e.vx + e.kx, vy: e.vy + e.ky, r: e.r,
+        hp: e.hp, maxHp: e.maxHp, dmg: e.dmg, elite: e.elite, emerging: e.emerge < 1, inBeam: e.inBeam,
+      });
+    }
+    for (const s of state.inks) if (seen(s)) projectiles.push({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, r: s.r, dmg: s.dmg, boss: s.boss });
+    for (const s of state.slams) if (!s.hit) telegraphs.push({ kind: 'slam', x: s.x, y: s.y, r: s.r, timeLeft: s.warn - s.t });
+    if (b && !b.dead && (b.mode === 'telegraph' || b.mode === 'dash')) {
+      // the Caranguejo-Rei's dash lane: from (x, y) along (dx, dy); it still aims at the player during `aiming`
+      const dash = b.mode === 'dash';
+      telegraphs.push({
+        kind: 'dash', x: b.x, y: b.y, dx: b.dashDx, dy: b.dashDy, width: b.r, length: dash ? b.dashLeft : b.def.dashDist,
+        timeLeft: dash ? 0 : b.def.telegraph - b.modeT, aiming: !dash && b.modeT < b.def.telegraph * 0.5,
+      });
+    }
+    for (const m of state.embers) if (seen(m)) embers.push({ x: m.x, y: m.y, value: m.value });
+    return {
+      time: state.time, night: state.night, nightT: state.nightT, nightDur: state.nightDur,
+      isBossNight: state.isBossNight, phase: state.phase,
+      player: {
+        x: p.x, y: p.y, vx: p.vx, vy: p.vy, r: p.r, hp: p.hp, maxHp: p.maxHp, invuln: Math.max(0, p.invuln),
+        speed: state.stats.speed, pickupR: state.stats.pickupR, level: state.level,
+      },
+      enemies, projectiles, telegraphs, embers,
+      boss: b && !b.dead ? {
+        type: b.type, x: b.x, y: b.y, r: b.r, hp: b.hp, maxHp: b.maxHp, dmg: b.def.dmg, mode: b.mode,
+        emerging: b.emerge < 1, enraged: b.enraged,
+      } : null,
+      lighthouse: { x: 0, y: 0, r: WORLD.lighthouseR },
+      islandR: WORLD.islandR,
+      beam: { angle: state.wpn.beamAngle, half: beamStats(lv('beam')).half, length: WORLD.beamLength },
+      viewHalf: { x: vw, y: vh },
+    };
+  }
+
+  // The autopilot's move for this step (replaces Input.vector()), clamped to length 1.
+  function autopilotMove() {
+    const out = dbg.autopilot(autopilotView()) || {};
+    let x = Number(out.x) || 0, y = Number(out.y) || 0;
+    const l = Math.hypot(x, y);
+    if (l > 1) { x /= l; y /= l; }
+    dbg.move.x = x;
+    dbg.move.y = y;
+    return dbg.move;
+  }
+
+  // Resolves every pending level-up through the debug picker at once, with the same offers and upgrades as the
+  // modal (cosmetic pick effects skipped). after === 'dawn' then continues as pickOffer would.
+  function autoPickLevelUps(after) {
+    while (state.pendingLevelUps > 0) {
+      const offers = rollOffers();
+      const info = {
+        night: state.night, level: state.level, hp: state.player.hp, maxHp: state.player.maxHp,
+        upgrades: Object.assign({}, state.upgrades), weapons: weaponCount(), maxWeapons: MAX_WEAPONS, maxLevel: MAX_LEVEL,
+      };
+      const shown = offers.map(o => ({ id: o.id, kind: o.kind, name: o.name, level: lv(o.id) }));
+      const i = clamp(Math.floor(Number(dbg.picker(shown, info)) || 0), 0, offers.length - 1);
+      if (dbg.tel) dbg.tel.pick(offers, offers[i]);
+      applyUpgrade(offers[i].id);
+      state.pendingLevelUps--;
+    }
+    if (after === 'dawn') showDawn();
+  }
+
+  // Per-run balance telemetry. One record per night: damage taken by source, damage dealt by weapon id to
+  // creatures and to the boss (capped at the hp the target had left, so overkill does not count), kills,
+  // levels, hp, duration and boss timings (s of night time); plus every pick and the result.
+  function makeTelemetry() {
+    const run = { result: 'running', endNight: 0, nights: [], picks: [] };
+    let cur = null; // the night being played
+    const add = (o, k, v) => { o[k] = (o[k] || 0) + v; };
+    const open = () => cur && !cur.outcome;
+    return {
+      run,
+      nightStart() {
+        if (open()) cur.outcome = 'restarted'; // QF.debug.setNight cut it short
+        const p = state.player;
+        cur = {
+          night: state.night, outcome: null, duration: 0,
+          startLevel: state.level, endLevel: state.level, startHp: p.hp, maxHp: p.maxHp, minHp: p.hp, endHp: p.hp,
+          kills: 0, embers: 0, firstKillT: null, taken: 0, damageTaken: {}, damageDealt: {}, bossDealt: {}, killsBy: {},
+          boss: null,
+        };
+        run.nights.push(cur);
+      },
+      nightEnd(outcome) {
+        if (!open()) return;
+        cur.outcome = outcome; // 'survived' | 'died'
+        cur.duration = state.nightT;
+        cur.endHp = Math.max(0, state.player.hp);
+        cur.kills = state.nightKills;
+        cur.endLevel = state.level;
+        if (cur.boss && cur.boss.killT == null && state.boss) cur.boss.hpLeft = Math.max(0, state.boss.hp);
+      },
+      // sunrise banked the leftover embers: the night's level and ember count are final
+      dawn() {
+        if (!cur) return;
+        cur.endLevel = state.level;
+        cur.embers = state.nightEmbers;
+      },
+      result(r) {
+        run.result = r; // 'win' | 'death'
+        run.endNight = state.night;
+        Object.assign(run, { level: state.level, kills: state.kills, score: currentScore(), simTime: state.time, upgrades: Object.assign({}, state.upgrades) });
+      },
+      hurt(src, dmg) {
+        if (!open()) return;
+        add(cur.damageTaken, src, dmg);
+        cur.taken += dmg;
+        cur.minHp = Math.min(cur.minHp, Math.max(0, state.player.hp));
+      },
+      dealt(src, amount, boss) {
+        if (open() && amount > 0) add(boss ? cur.bossDealt : cur.damageDealt, src || 'other', amount);
+      },
+      kill(src) {
+        if (!open()) return;
+        add(cur.killsBy, src || 'other', 1);
+        if (cur.firstKillT == null) cur.firstKillT = state.nightT;
+      },
+      boss(evt) {
+        if (!open()) return;
+        const t = state.nightT;
+        if (evt === 'spawn') cur.boss = { type: state.boss.type, spawnT: t, emergedT: null, killT: null, ttk: null, hpLeft: null };
+        else if (cur.boss && evt === 'emerged') cur.boss.emergedT = t;
+        else if (cur.boss && evt === 'killed') {
+          cur.boss.killT = t;
+          cur.boss.hpLeft = 0;
+          // time to kill = from the moment it can be hurt (fully emerged) to its death
+          cur.boss.ttk = t - (cur.boss.emergedT == null ? cur.boss.spawnT : cur.boss.emergedT);
+        }
+      },
+      pick(offers, chosen) {
+        run.picks.push({ night: state.night, level: state.level - state.pendingLevelUps + 1, offers: offers.map(o => o.id), pick: chosen.id });
+      },
+      // the run so far; a night still being played shows its live numbers (outcome stays null)
+      snapshot() {
+        const out = Object.assign({}, run, { nights: run.nights.slice() });
+        if (open()) {
+          const live = Object.assign({}, cur, {
+            duration: state.nightT, endHp: Math.max(0, state.player.hp), kills: state.nightKills, endLevel: state.level, embers: state.nightEmbers,
+          });
+          if (cur.boss && state.boss) live.boss = Object.assign({}, cur.boss, { hpLeft: Math.max(0, state.boss.hp) });
+          out.nights[out.nights.length - 1] = live;
+        }
+        return out;
+      },
+    };
+  }
+
+  function runStatus(steps) {
+    return {
+      steps, screen: state.screen, phase: state.phase, night: state.night, nightT: state.nightT, time: state.time,
+      hp: state.player.hp, level: state.level, ended: state.screen === 'gameover' || state.screen === 'victory',
+    };
+  }
+
+  // The live tuning tables. Values are read when used, except those copied when something is created — set
+  // these before startRun(): PLAYER.* and PASSIVES.* fold into the player's stats at each upgrade and at a new
+  // run; ENEMIES.* / SCALING.* / BOSSES.*.hp|r are copied into each creature or boss as it spawns.
+  // MAX_LEVEL and MAX_WEAPONS are constants (not tunable at runtime).
+  const CONFIG = { SIM, WORLD, PLAYER, NIGHTS, XP, SCORE, SPAWN, SPAWN_WEIGHTS, SCALING, LIMITS, ENEMIES, BOSSES, WEAPONS, PASSIVES };
+
   const QF = { getState };
   window.QF = QF;
 
@@ -4920,21 +5183,73 @@
         if (UPGRADE_BY_ID[id]) applyUpgrade(id);
       },
       killAll() {
-        for (const e of state.enemies) if (!e.dead) killEnemy(e);
+        for (const e of state.enemies) if (!e.dead) killEnemy(e, 'debug');
         compactEnemies();
       },
       damageBoss(n) {
         const b = state.boss;
         if (!b || b.dead) return;
         b.emerge = 1;
-        hurtBoss(Math.max(0, Number(n) || 0), false);
+        hurtBoss(Math.max(0, Number(n) || 0), false, 'debug');
       },
       spawn(type, count) {
         if (!ENEMIES[type]) return;
         spawnAtRing(type, Math.max(1, Math.min(200, Math.round(Number(count) || 1))));
       },
       setTimeScale(x) { timeScale = clamp(Number(x) || 1, 0.1, 20); },
+
+      // ---- balance harness (tools/balance.mjs) ----
+      // Seeds the gameplay randomness (spawns, offers, enemy quirks, ember scatter); null restores Math.random.
+      seed(n) { gameRandom = n == null ? Math.random : mulberry32(Math.floor(Number(n) || 0)); },
+      // A fresh run at once: no title screen, no audio. With a seed, the randomness is seeded first.
+      startRun(seed) {
+        if (seed != null) QF.debug.seed(seed);
+        commitRecord();
+        hideBanner();
+        newRun();
+        return runStatus(0);
+      },
+      // Advances the fixed-step simulation n steps right now through the same update() as real play, without
+      // rendering. Hands the clock to the caller (setManualClock(true)). Stops early when the run ends or waits on
+      // a screen nobody answers (level-up/dawn without a picker). Returns a small status.
+      runSteps(n) {
+        dbg.manualClock = true;
+        const total = Math.max(0, Math.floor(Number(n) || 0));
+        let steps = 0;
+        while (steps < total) {
+          if (state.screen === 'paused') resumeGame(); // a focus loss paused it; the caller owns the clock now
+          else if (state.screen === 'levelup' && dbg.picker) { // the picker arrived after the modal opened
+            const after = state.afterLevelUp;
+            state.afterLevelUp = 'play';
+            setScreen('playing');
+            showOverlay(null);
+            autoPickLevelUps(after);
+          } else if (state.screen === 'dawn' && dbg.picker) startNextNight();
+          if (state.screen !== 'playing') break;
+          update(SIM.step);
+          steps++;
+        }
+        return runStatus(steps);
+      },
+      // fn(view) → {x, y} each simulation step, overriding keyboard and joystick (null = back to the player).
+      // The view holds only what a player could see — see autopilotView().
+      setAutopilot(fn) { dbg.autopilot = typeof fn === 'function' ? fn : null; },
+      // fn(offers, info) → index 0-2: level-ups are picked at once (no modal) and the Dawn screen is skipped.
+      // offers: [{id, kind, name, level}] (level = current level), info: {night, level, hp, maxHp, upgrades, weapons, …}
+      setPicker(fn) { dbg.picker = typeof fn === 'function' ? fn : null; },
+      // true: the rAF loop stops simulating (only runSteps advances the game); false: real time again
+      setManualClock(on) { dbg.manualClock = !!on; },
+      // false: the rAF loop skips drawing and the HUD
+      setRender(on) { dbg.noRender = !on; },
+      getConfig() { return CONFIG; },
+      // telemetry of the current (or last) run as a plain JSON-safe copy, plus where the run stands now
+      stats() {
+        if (!dbg.tel) return null;
+        const out = Object.assign(dbg.tel.snapshot(), { now: runStatus(0) });
+        return JSON.parse(JSON.stringify(out, (k, v) => (typeof v === 'number' ? Math.round(v * 100) / 100 : v)));
+      },
     };
+    dbg.telemetry = true;
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
