@@ -4579,6 +4579,39 @@
       node.scrollTop = 0;
       focusFirst(node);
     }
+    syncHudCover();
+  }
+
+  // The pause and level-up panels are centred, so on short frames they reach the HUD. Each HUD group (health and
+  // score, the night block with the boss bar, the buttons) that the open panel overlaps is hidden whole instead of
+  // showing half covered; groups the panel leaves clear stay visible. Measured from layout offsets, not the
+  // panel's rise animation.
+  const HUD_GROUPS = [['.hud-left'], ['.hud-center', '#boss-bar'], ['.hud-right']];
+  const HUD_CONTENT = '.bar, .hud-stats > span:not(.sep), .night-label, .night-timer, .boss-name, .icon-btn';
+  function syncHudCover() {
+    if (!el.hud) return;
+    const ov = state.screen === 'paused' || state.screen === 'levelup' ? openOverlay() : null;
+    const panel = ov && ov.querySelector('.panel');
+    let box = null;
+    if (panel && panel.offsetParent === ov) {
+      const o = ov.getBoundingClientRect();
+      const top = o.top + panel.offsetTop - ov.scrollTop, left = o.left + panel.offsetLeft - ov.scrollLeft;
+      box = { top, left, bottom: top + panel.offsetHeight, right: left + panel.offsetWidth };
+    }
+    for (const group of HUD_GROUPS) {
+      const nodes = group.map(sel => el.hud.querySelector(sel)).filter(Boolean);
+      let covered = false;
+      if (box) {
+        for (const n of nodes) {
+          if (n.hidden) continue;
+          for (const c of n.querySelectorAll(HUD_CONTENT)) {
+            const r = c.getBoundingClientRect();
+            if (r.width && r.height && r.left < box.right && box.left < r.right && r.top < box.bottom && box.top < r.bottom) covered = true;
+          }
+        }
+      }
+      for (const n of nodes) n.classList.toggle('is-covered', covered);
+    }
   }
 
   function focusFirst(root) {
@@ -4865,6 +4898,13 @@
     if (state.screen !== 'title') return;
     setScreen('howto');
     showOverlay('ov-howto');
+    syncHowtoHint();
+  }
+  // On frames too small for the whole How to Play screen, Back stays pinned to the bottom (style.css) and
+  // the text fades out under it while there is more below.
+  function syncHowtoHint() {
+    const ov = $('ov-howto');
+    if (ov) ov.classList.toggle('has-more', !ov.hidden && ov.scrollHeight - ov.clientHeight - ov.scrollTop > 2);
   }
   function closeHowto() {
     if (state.screen !== 'howto') return;
@@ -5073,6 +5113,8 @@
     renderDawn();
     renderPause();
     renderGameOver();
+    syncHowtoHint();
+    syncHudCover();
     renderVictory();
     if (ui.bannerMsg) renderBannerText();
     if (ui.toastMsg) el.toast.textContent = ui.toastMsg();
@@ -5347,6 +5389,14 @@
     document.addEventListener('gesturestart', e => e.preventDefault());
     window.addEventListener('resize', resize);
     window.addEventListener('orientationchange', resize);
+    window.addEventListener('resize', syncHowtoHint);
+    $('ov-howto').addEventListener('scroll', syncHowtoHint, { passive: true });
+    window.addEventListener('resize', syncHudCover);
+    for (const id of ['ov-pause', 'ov-levelup']) {
+      $(id).addEventListener('scroll', syncHudCover, { passive: true });
+      // the panel changes size with the restart/quit confirmation, the cards and the language
+      try { if (window.ResizeObserver) new ResizeObserver(() => syncHudCover()).observe($(id).querySelector('.panel')); } catch (e) { /* ignore */ }
+    }
     try {
       if (window.ResizeObserver) new ResizeObserver(() => resize()).observe(canvas);
     } catch (e) { /* ignore */ }
@@ -5446,6 +5496,8 @@
       if (document.fonts && document.fonts.ready) {
         document.fonts.ready.then(() => {
           canvasFont = '"Alegreya Sans", system-ui, -apple-system, "Segoe UI", sans-serif';
+          syncHowtoHint();
+          syncHudCover();
         }, () => {});
       }
     } catch (e) { /* fonts are optional */ }

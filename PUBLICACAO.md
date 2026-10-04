@@ -40,14 +40,14 @@ npm run pacote    # gera dist/quinzena-fantastica.zip
 O mesmo ZIP serve para os dois portais. Saída de `npm run pacote` em 4/10/2026:
 
 ```text
-dist/quinzena-fantastica.zip: 225,731 bytes (220.4 KB), 10 files (424,273 bytes uncompressed)
+dist/quinzena-fantastica.zip: 227,544 bytes (222.2 KB), 10 files (431,260 bytes uncompressed)
 ```
 
 | Arquivo no ZIP | Tamanho | Compactado | Método |
 |---|---:|---:|---|
 | `index.html` (na raiz) | 13.200 | 3.228 | deflate |
-| `style.css` | 28.772 | 7.462 | deflate |
-| `game.js` | 225.216 | 61.605 | deflate |
+| `style.css` | 33.046 | 8.440 | deflate |
+| `game.js` | 227.929 | 62.440 | deflate |
 | `fonts/alegreya-sans-500-latin.woff2` | 23.928 | 23.928 | stored |
 | `fonts/alegreya-sans-500-latin-ext.woff2` | 21.500 | 21.500 | stored |
 | `fonts/alegreya-sans-700-latin.woff2` | 23.976 | 23.976 | stored |
@@ -64,7 +64,7 @@ qualquer mudança no jogo muda o ZIP. O caminho mais longo, `fonts/alegreya-sans
 
 | Limite | CrazyGames | itch.io | Este jogo |
 |---|---|---|---|
-| Tamanho total | ≤ 250 MB; sem SDK, o total conta como download inicial: ≤ 50 MB, e ≤ 20 MB para a home de celular ([technical](https://docs.crazygames.com/requirements/technical/)) | ≤ 500 MB descompactado, ≤ 200 MB por arquivo ([html5](https://itch.io/docs/creators/html5)) | 0,42 MB descompactado |
+| Tamanho total | ≤ 250 MB; sem SDK, o total conta como download inicial: ≤ 50 MB, e ≤ 20 MB para a home de celular ([technical](https://docs.crazygames.com/requirements/technical/)) | ≤ 500 MB descompactado, ≤ 200 MB por arquivo ([html5](https://itch.io/docs/creators/html5)) | 0,43 MB descompactado |
 | Arquivos | ≤ 1500 | ≤ 1.000 | 10 |
 | Caminhos | só relativos | relativos, `index.html` na raiz, maiúsculas/minúsculas exatas, nome com caminho ≤ 240 caracteres | ok (validado por `tools/pacote.mjs`) |
 
@@ -404,7 +404,7 @@ feito em https://developer.crazygames.com/ (precisa de login).
 | Referências | “10+ minutes of average play time”; “10-15% Day 1 Retention”; “convert 80%+ of players, load in under 10 seconds, and have a build size below 20 MB”. Conversão = jogar pelo menos 1 minuto depois de começar ([basic-launch-metrics](https://docs.crazygames.com/resources/basic-launch-metrics/)) |
 | Anúncios | nenhum: “Ads are not allowed in Basic Launch” ([technical](https://docs.crazygames.com/requirements/technical/)) |
 
-Este jogo entra assim: **sem SDK**, sem anúncios, com 0,42 MB no total (bem abaixo dos 20 MB da home de celular).
+Este jogo entra assim: **sem SDK**, sem anúncios, com 0,43 MB no total (bem abaixo dos 20 MB da home de celular).
 
 ### 4.2 O que enviar
 
