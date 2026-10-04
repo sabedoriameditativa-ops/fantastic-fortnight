@@ -4,7 +4,7 @@
 // Speed 0/1/2/4; pauses automatically while the tab is hidden.
 
 import { createBattle, stepBattle, makeSnapshot, getResult, getInitialShips, battleWorld } from '/shared/sim/battle.js';
-import { TICK_MS, TICK_RATE, SNAPSHOT_EVERY } from '/shared/constants.js';
+import { TICK_MS, TICK_RATE, SNAPSHOT_EVERY, MAX_TICKS } from '/shared/constants.js';
 import { createFeedBase, nowMs, normalizeSpeed } from './feed.js';
 import { createSimLoop } from '../util/simLoop.js';
 
@@ -26,6 +26,7 @@ export function buildStartInfo(config, state) {
     world: battleWorld(state),
     tickRate: TICK_RATE,
     snapshotEvery: SNAPSHOT_EVERY,
+    maxTicks: config.maxTicks || MAX_TICKS,
     isLocal: true,
   };
 }

@@ -24,7 +24,7 @@ export function mount(root, props, ctx) {
   let countdownEl = null;
   let countdownTimer = null;
   let chatLog = null;
-  const chatMessages = [];
+  const chatMessages = state.mpChat || (state.mpChat = []);  // shared with app.js: survives screen changes
 
   const container = h('div.screen.wide');
   root.appendChild(container);
@@ -68,7 +68,7 @@ export function mount(root, props, ctx) {
       renderEntry();
     }));
     offs.push(net.onCountdown((c) => { if (!disposed) showCountdown(c.seconds); }));
-    offs.push(net.onChat((m) => { chatMessages.push(m); if (chatMessages.length > 80) chatMessages.shift(); renderChat(); }));
+    offs.push(net.onChat(() => renderChat()));  // app.js already stored the message
     offs.push(net.feed.onStart(() => { if (!disposed) { hideCountdown(); ctx.go('battle', { mode: 'mp' }); } }));
     offs.push(net.onStatus((s) => {
       if (disposed) return;
@@ -104,7 +104,7 @@ export function mount(root, props, ctx) {
     async function create() {
       if (!net) { if (!(await ensureNet())) return; }
       createBtn.disabled = true;
-      try { const room = await net.createRoom({ teamSize, budget }); renderRoom(room); }
+      try { const room = await net.createRoom({ teamSize, budget }); chatMessages.length = 0; renderRoom(room); }
       catch (e) { fail(e); createBtn.disabled = false; }
     }
     async function join() {
@@ -112,7 +112,7 @@ export function mount(root, props, ctx) {
       if (!isRoomCode(code)) { ctx.toast(T.mp.codeHint, 'warn'); codeInput.focus(); return; }
       if (!net) { if (!(await ensureNet())) return; }
       joinBtn.disabled = true;
-      try { const room = await net.joinRoom(code); renderRoom(room); }
+      try { const room = await net.joinRoom(code); chatMessages.length = 0; renderRoom(room); }
       catch (e) { fail(e); joinBtn.disabled = false; }
     }
     add(container, 

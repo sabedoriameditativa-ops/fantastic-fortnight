@@ -94,6 +94,7 @@ function persistSettings() {
  */
 function toast(msg, type = 'info', ms = 3200) {
   const el = h('div.toast', { class: type, role: 'status', test: 'toast' }, msg);
+  if (type === 'error') { try { audio.play('ui.error'); } catch { /* ignore */ } }
   toastsEl.appendChild(el);
   while (toastsEl.children.length > 4) toastsEl.removeChild(toastsEl.firstChild);
   setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 260); }, ms);
@@ -132,6 +133,13 @@ document.addEventListener('click', (ev) => {
   const b = ev.target && ev.target.closest ? ev.target.closest('button') : null;
   if (b && !b.disabled) { try { audio.play(b.classList.contains('btn-primary') ? 'ui.confirm' : 'ui.click'); } catch { /* ignore */ } }
 });
+// UI hover ticks (mouse only; one per button entry)
+document.addEventListener('pointerover', (ev) => {
+  if (ev.pointerType && ev.pointerType !== 'mouse') return;
+  const b = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+  if (!b || b.disabled || (ev.relatedTarget && b.contains(ev.relatedTarget))) return;
+  try { audio.play('ui.hover'); } catch { /* ignore */ }
+});
 
 // ---------------------------------------------------------------------------
 // Networking (lazy)
@@ -150,6 +158,10 @@ async function getNet() {
     state.net.onError((e) => {
       if (e.rid === undefined) toast(errorMessage(e.code, e.detail), 'error');
     });
+    // chat history lives on the app state so it survives screen changes (lobby ↔ fleet builder ↔ results)
+    state.mpChat = [];
+    state.net.onChat((m) => { state.mpChat.push(m); if (state.mpChat.length > 80) state.mpChat.shift(); });
+    state.net.onLeft(() => { state.mpChat.length = 0; });
   }
   if (!state.net.connected) await state.net.connect(name);
   return state.net;

@@ -144,6 +144,7 @@ export function createNetClient(url, opts = {}) {
       }
       case S2C.LEFT: {
         room = null;
+        base.resetBattle();
         for (const [id, p] of [...pending]) if (p.t === C2S.LEAVE_ROOM) { pending.delete(id); p.resolve(); }
         ev.left.emit(msg.reason || 'left');
         break;
@@ -264,7 +265,11 @@ export function createNetClient(url, opts = {}) {
     },
     createRoom({ teamSize, budget }) { return request(C2S.CREATE_ROOM, { teamSize, budget }); },
     joinRoom(code) { return request(C2S.JOIN_ROOM, { code: String(code || '').trim().toUpperCase() }); },
-    leaveRoom() { return request(C2S.LEAVE_ROOM, {}).then(() => { room = null; }); },
+    leaveRoom() {
+      // optimistic: a battle we walked out of must not be replayed to the next screen
+      base.resetBattle();
+      return request(C2S.LEAVE_ROOM, {}).then(() => { room = null; });
+    },
     setRoom(o) { const p = {}; if (o.teamSize !== undefined) p.teamSize = o.teamSize; if (o.budget !== undefined) p.budget = o.budget; if (o.botDifficulty !== undefined) p.botDifficulty = o.botDifficulty; return request(C2S.SET_ROOM, p); },
     pickSlot(team, slot) { return request(C2S.PICK_SLOT, { team, slot }); },
     addBot(team, slot, difficulty, faction) { const p = { team, slot, difficulty }; if (faction) p.faction = faction; return request(C2S.ADD_BOT, p); },

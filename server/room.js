@@ -8,7 +8,7 @@
 
 import { randomInt } from 'node:crypto';
 import {
-  COUNTDOWN_SECONDS, RECONNECT_GRACE_MS, TICK_RATE, SNAPSHOT_EVERY, DEFAULT_BUDGET, DIFFICULTIES, TEAM_SIZES, BUDGETS,
+  COUNTDOWN_SECONDS, RECONNECT_GRACE_MS, TICK_RATE, SNAPSHOT_EVERY, MAX_TICKS, DEFAULT_BUDGET, DIFFICULTIES, TEAM_SIZES, BUDGETS,
 } from '../shared/constants.js';
 import { FACTION_IDS } from '../shared/catalog.js';
 import { validateFleet } from '../shared/fleet.js';
@@ -697,6 +697,7 @@ export function createRoom(o) {
       world: battleWorld(state),
       tickRate: TICK_RATE,
       snapshotEvery: SNAPSHOT_EVERY,
+      maxTicks: config.maxTicks || MAX_TICKS,
     };
     phase = 'battle';
     broadcastRaw(battleStartMessage(false));

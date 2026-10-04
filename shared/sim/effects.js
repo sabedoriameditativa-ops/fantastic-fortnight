@@ -83,7 +83,7 @@ export function spawnUnits(state, caster, cls, count, maxAlive, lifetimeSec) {
     y = Math.min(state.world.h - def.radius, Math.max(def.radius, y));
     const id = state.nextId++;
     const s = makeShip({ id, cls, owner: caster.owner, team: caster.team, x, y, heading: caster.heading,
-      source: caster.id, lifetimeEnd: tick + Math.round(lifetimeSec * TICK_RATE), tick });
+      source: caster.id, lifetimeEnd: tick + Math.round(lifetimeSec * TICK_RATE), tick, slot: state.alive[caster.team].length });
     s.ai.targetId = caster.ai.targetId;
     s.ai.targetSince = tick;
     s.ai.nextThink = tick;

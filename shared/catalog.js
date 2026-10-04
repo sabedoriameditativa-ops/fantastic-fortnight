@@ -38,14 +38,14 @@ export const WEAPON_TYPE_NAMES = {
  * Ion hits apply `disrupt` (regen/repair halted) for DISRUPT_SECONDS.
  */
 export const DAMAGE_MULT = {
-  kinetic: { shield: 0.7, armored: 0.8, organic: 1.0, crystalline: 1.3, nanite: 1.0 },
-  railgun: { shield: 0.85, armored: 1.05, organic: 1.1, crystalline: 1.2, nanite: 1.0 },
+  kinetic: { shield: 0.8, armored: 0.8, organic: 1.0, crystalline: 1.3, nanite: 1.0 },
+  railgun: { shield: 0.85, armored: 1.0, organic: 1.0, crystalline: 1.2, nanite: 1.0 },
   flak: { shield: 0.5, armored: 0.6, organic: 1.1, crystalline: 0.9, nanite: 1.0 },
-  laser: { shield: 1.2, armored: 0.85, organic: 1.0, crystalline: 0.6, nanite: 1.2 },
+  laser: { shield: 1.2, armored: 0.8, organic: 1.1, crystalline: 0.6, nanite: 1.2 },
   plasma: { shield: 1.0, armored: 1.0, organic: 0.95, crystalline: 1.2, nanite: 1.0 },
-  missile: { shield: 0.9, armored: 1.0, organic: 1.0, crystalline: 1.0, nanite: 1.0 },
-  torpedo: { shield: 0.8, armored: 1.4, organic: 1.0, crystalline: 1.2, nanite: 1.1 },
-  bio: { shield: 0.75, armored: 1.05, organic: 1.0, crystalline: 1.1, nanite: 0.9 },
+  missile: { shield: 0.9, armored: 1.0, organic: 1.1, crystalline: 1.0, nanite: 1.0 },
+  torpedo: { shield: 0.8, armored: 1.4, organic: 1.0, crystalline: 1.2, nanite: 1.0 },
+  bio: { shield: 0.75, armored: 1.05, organic: 1.0, crystalline: 1.1, nanite: 0.85 },
   ion: { shield: 1.6, armored: 0.75, organic: 0.8, crystalline: 0.8, nanite: 0.9 },
 };
 
@@ -54,7 +54,7 @@ export const ACCURACY = {
   kinetic: [0.75, 0.85, 0.95, 1.0, 1.0, 1.0],
   railgun: [0.3, 0.45, 0.7, 0.9, 1.0, 1.0],
   flak: [0.95, 0.9, 0.7, 0.5, 0.4, 0.3],
-  laser: [0.4, 0.6, 0.85, 1.0, 1.0, 1.0],
+  laser: [0.45, 0.65, 0.85, 1.0, 1.0, 1.0],
   plasma: [0.5, 0.7, 0.9, 1.0, 1.0, 1.0],
   missile: [0.5, 0.7, 0.9, 1.0, 1.0, 1.0],
   torpedo: [0.0, 0.0, 0.5, 0.85, 1.0, 1.0],
@@ -63,7 +63,7 @@ export const ACCURACY = {
 };
 
 export const COMBAT = {
-  armorFloor: 0.3,            // hull damage after DR is never below 30% of the pre-DR amount
+  armorFloor: 0.35,           // hull damage after DR is never below 35% of the pre-DR amount
   minHullDamage: 1,
   disruptSeconds: 2.0,        // ion hit: regen/repair halted
   disruptImmunitySeconds: 2,  // after a disrupt expires, cannot be re-disrupted for this long
@@ -77,7 +77,7 @@ export const COMBAT = {
   aoeEdgeFalloff: 0.5,        // splash damage at the edge of the radius (linear from 1.0 at center)
   pdInterceptChance: 0.6,     // point-defense attempt success chance per shot
   terranCoordinationBonus: 0.1, terranCoordinationShips: 3,
-  vorraxHungerHeal: 0.06,
+  vorraxHungerHeal: 0.05,
   lumenPhaseSeconds: 1.0, lumenPhaseCooldown: 20,
   ferrixNeuralAccuracy: 0.1,
 };
@@ -100,7 +100,7 @@ export const FACTIONS = {
     tagline: 'Cascos vivos que se regeneram. Sem escudos, sem recuo, sem fim.',
     lore: 'Os Vorrax não constroem naves: criam-nas. Cada "nave" é um organismo gestado nas colmeias-mãe, com carapaça de quitina viva que cicatriza em pleno combate. Sua tecnologia é bioquímica: plasma secretado, ácido corrosivo e esporos. Não têm escudos; sua defesa é a regeneração e o número.',
     color: '#9c4d4f', accent: '#7dd957', hull: 'organic',
-    passive: { id: 'hunger', name: 'Fome', desc: 'Uma nave Vorrax que destrói um inimigo recupera 6% do casco máximo.' },
+    passive: { id: 'hunger', name: 'Fome', desc: 'Uma nave Vorrax que destrói um inimigo recupera 5% do casco máximo.' },
     style: 'organic',
   },
   lumen: {
@@ -303,7 +303,7 @@ const TERRAN = [
   S({ id: 'ter_atlas', faction: 'terran', name: 'Porta-Naves Atlas', sizeClass: 'capital', role: 'carrier', cost: 320,
     desc: 'Porta-naves com defesa de ponto. Lança esquadrilhas de Vespas.',
     hp: 1400, dr: 5, shield: { cap: 450, regen: 20, delay: 6 }, speed: 50, turn: 55,
-    weapons: [W('ter_pd', 'Defesa de ponto', 'kinetic', { dmg: 12, salvo: 2, cd: 0.35, range: 300, speed: 650, pd: true })],
+    weapons: [W('ter_pd', 'Defesa de ponto', 'kinetic', { dmg: 10, salvo: 2, cd: 0.35, range: 300, speed: 650, pd: true })],
     ability: 'launch_squadron' }),
   S({ id: 'ter_prometeu', faction: 'terran', name: 'Nave-Mãe Prometeu', sizeClass: 'mothership', role: 'anchor', cost: 500,
     desc: 'Capitânia da Confederação. Canhão magnético, mísseis e protocolo de cerco.',
@@ -329,11 +329,11 @@ const VORRAX = [
   S({ id: 'vor_cuspidor', faction: 'vorrax', name: 'Cuspidor', sizeClass: 'small', role: 'kiter', cost: 40,
     desc: 'Artilharia ácida de longo alcance. Deixa nuvens corrosivas.',
     hp: 100, regen: 2.0, speed: 130, turn: 220,
-    weapons: [W('vor_acid_lob', 'Cuspe ácido', 'bio', { dmg: 18, cd: 2.5, range: 420, speed: 300, arc: 90, dot: { dps: 3, duration: 4 } })],
+    weapons: [W('vor_acid_lob', 'Cuspe ácido', 'bio', { dmg: 18, cd: 2.5, range: 420, speed: 300, arc: 90, dot: { dps: 4, duration: 4 } })],
     ability: 'acid_cloud' }),
   S({ id: 'vor_carrapato', faction: 'vorrax', name: 'Carrapato', sizeClass: 'medium', role: 'diver', cost: 85,
     desc: 'Parasita que se agarra a naves grandes e drena o casco delas.',
-    hp: 380, regen: 5.0, speed: 125, turn: 160,
+    hp: 420, regen: 5.0, speed: 125, turn: 160,
     weapons: [
       W('vor_mandibles', 'Mandíbulas', 'bio', { dmg: 30, cd: 1.0, range: 40, speed: 0, arc: 60, contact: true }),
       W('vor_spit', 'Cuspe', 'bio', { dmg: 5, cd: 0.8, range: 200, speed: 450, arc: 90 }),
@@ -346,7 +346,7 @@ const VORRAX = [
     ability: 'spawn_brood' }),
   S({ id: 'vor_mandibula', faction: 'vorrax', name: 'Mandíbula', sizeClass: 'large', role: 'brawler', cost: 220,
     desc: 'Besta de assalto com plasma e torpedos vivos. Troca de pele quando ferida.',
-    hp: 950, dr: 3, regen: 10, speed: 70, turn: 90,
+    hp: 950, dr: 3, regen: 12, speed: 70, turn: 90,
     weapons: [
       W('vor_plasma_heavy', 'Plasma pesado', 'plasma', { dmg: 28, salvo: 2, cd: 1.2, range: 360, speed: 480 }),
       W('vor_living_torpedo', 'Torpedo vivo', 'torpedo', { dmg: 100, cd: 9.0, range: 500, speed: 200, arc: 90 }),
@@ -354,7 +354,7 @@ const VORRAX = [
     ability: 'molt' }),
   S({ id: 'vor_rainha', faction: 'vorrax', name: 'Rainha-Guerreira', sizeClass: 'capital', role: 'brawler', cost: 320,
     desc: 'Rainha de combate. Espinhos de plasma, artilharia ácida e feromônio de guerra.',
-    hp: 1900, regen: 15, speed: 50, turn: 55,
+    hp: 1900, regen: 18, speed: 50, turn: 55,
     weapons: [
       W('vor_spines', 'Espinhos de plasma', 'plasma', { dmg: 12, salvo: 3, cd: 0.6, range: 380, speed: 500 }),
       W('vor_acid_artillery', 'Artilharia ácida', 'bio', { dmg: 40, cd: 3.0, range: 520, speed: 300, aoe: 60 }),
@@ -362,7 +362,7 @@ const VORRAX = [
     ability: 'war_pheromone' }),
   S({ id: 'vor_colmeia', faction: 'vorrax', name: 'Colmeia-Mãe', sizeClass: 'mothership', role: 'anchor', cost: 520,
     desc: 'Coração do enxame. Vomita plasma e gera prole sem fim.',
-    hp: 3800, dr: 4, regen: 20, speed: 38, turn: 35,
+    hp: 3800, dr: 4, regen: 22, speed: 38, turn: 35,
     weapons: [
       W('vor_plasma_vomit', 'Vômito de plasma', 'plasma', { dmg: 120, cd: 4.0, range: 600, speed: 400, aoe: 50, arc: 90 }),
       W('vor_spores_heavy', 'Esporos', 'bio', { dmg: 8, salvo: 2, cd: 1.5, range: 300, speed: 350, aoe: 50 }),
@@ -391,7 +391,7 @@ const LUMEN = [
     hp: 200, shield: { cap: 280, regen: 25, delay: 4 }, speed: 100, turn: 150,
     weapons: [
       W('lum_solar_lance', 'Lança Solar', 'laser', { dmg: 32, cd: 1.0, range: 420, arc: 60 }),
-      W('lum_laser_light2', 'Lasers leves', 'laser', { dmg: 5, salvo: 2, cd: 0.5, range: 260 }),
+      W('lum_laser_light2', 'Lasers leves', 'laser', { dmg: 6, salvo: 2, cd: 0.5, range: 260 }),
     ],
     ability: 'prismatic_focus' }),
   S({ id: 'lum_ressonante', faction: 'lumen', name: 'Ressonante', sizeClass: 'medium', role: 'brawler', cost: 110,
@@ -409,15 +409,15 @@ const LUMEN = [
     hp: 1000, shield: { cap: 1300, regen: 80, delay: 6 }, speed: 48, turn: 55,
     weapons: [
       W('lum_radiant_choir', 'Coro Radiante', 'laser', { dmg: 96, cd: 3.0, range: 600, chain: { targets: 2, radius: 150, damage: 48 } }),
-      W('lum_laser_light3', 'Lasers leves', 'laser', { dmg: 5, salvo: 2, cd: 0.5, range: 260 }),
+      W('lum_laser_light3', 'Lasers leves', 'laser', { dmg: 6, salvo: 2, cd: 0.5, range: 260 }),
     ],
     ability: 'aurora' }),
   S({ id: 'lum_luz_primordial', faction: 'lumen', name: 'Luz Primordial', sizeClass: 'mothership', role: 'anchor', cost: 520,
     desc: 'A primeira luz. Feixe devastador telegrafado e singularidade gravitacional.',
     hp: 1800, shield: { cap: 2600, regen: 100, delay: 8 }, speed: 38, turn: 35,
     weapons: [
-      W('lum_primordial_beam', 'Feixe Primordial', 'laser', { dmg: 290, cd: 6.0, range: 800, arc: 90, charge: 1.0, minTargetClass: 'medium' }),
-      W('lum_laser_array', 'Matriz de lasers', 'laser', { dmg: 8, salvo: 4, cd: 0.6, range: 300 }),
+      W('lum_primordial_beam', 'Feixe Primordial', 'laser', { dmg: 275, cd: 6.0, range: 800, arc: 90, charge: 1.0, minTargetClass: 'medium' }),
+      W('lum_laser_array', 'Matriz de lasers', 'laser', { dmg: 10, salvo: 4, cd: 0.6, range: 300 }),
     ],
     ability: 'singularity' }),
 ];

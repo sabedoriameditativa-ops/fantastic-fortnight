@@ -31,6 +31,7 @@ function neutralWeaponMod(m) {
  * @param {number} [o.source]        spawner id (spawned units)
  * @param {number} [o.lifetimeEnd]   tick at which a spawned unit expires (0 = never)
  * @param {number} [o.tick]          creation tick
+ * @param {number} [o.slot]          team-local index (0-based) used for the cooldown stagger; defaults to id
  */
 export function makeShip(o) {
   const def = SHIPS[o.cls];
@@ -44,7 +45,7 @@ export function makeShip(o) {
     const cdTicks = Math.max(1, Math.round(w.cooldown * TICK_RATE));
     return {
       idx, def: w, cdTicks,
-      readyAt: tick + ((o.id * 7) % cdTicks),
+      readyAt: tick + (((o.slot ?? o.id) * 7) % cdTicks), // staggered by the team-local slot so mirrored fleets get identical offsets
       charging: 0,        // target id while charging a heavy beam
       chargeUntil: 0,
       mod: neutralWeaponMod({}),

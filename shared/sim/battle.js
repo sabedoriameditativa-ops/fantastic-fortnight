@@ -66,7 +66,7 @@ export function createBattle(config) {
   const placed = planDeployment(players, world);
   for (const d of placed) {
     const id = state.nextId++;
-    const s = makeShip({ id, cls: d.cls, owner: d.owner, team: d.team, x: d.x, y: d.y, heading: d.a, tick: 0 });
+    const s = makeShip({ id, cls: d.cls, owner: d.owner, team: d.team, x: d.x, y: d.y, heading: d.a, tick: 0, slot: state.alive[d.team].length });
     s.ai.nextThink = id % profiles[d.owner].thinkInterval;
     state.ships.push(s);
     state.alive[d.team].push(id);

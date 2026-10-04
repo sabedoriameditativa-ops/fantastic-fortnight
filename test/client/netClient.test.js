@@ -180,9 +180,14 @@ describe('NetClient', () => {
 
     const lefts = [];
     guest.onLeft((r) => lefts.push(r));
+    assert.ok(guest.feed.lastStart, 'battle known before leaving');
     await guest.leaveRoom();
     assert.deepEqual(lefts, ['left']);
     assert.equal(guest.room, null);
+    assert.equal(guest.feed.lastStart, null, 'leaving the room forgets the battle');
+    let replayed = false;
+    guest.feed.onStart(() => { replayed = true; });
+    assert.equal(replayed, false, 'no replay of a battle we walked out of');
     host.dispose(); guest.dispose();
   });
 

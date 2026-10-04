@@ -85,6 +85,8 @@ export function createFeedBase(o) {
     emitFrame(f) { frame.emit(f); },
     emitEnd(result) { lastEnd = result; end.emit(result); },
     emitStatus(s) { if (s !== lastStatus) { lastStatus = s; status.emit(s); } },
+    /** Forget the current battle (no replay to late subscribers); used when leaving a room. */
+    resetBattle() { lastStart = null; lastEnd = null; },
     get lastStart() { return lastStart; },
     get lastEnd() { return lastEnd; },
     get status() { return lastStatus; },

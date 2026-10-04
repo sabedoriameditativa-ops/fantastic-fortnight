@@ -27,7 +27,7 @@ import { createEventLog } from '../util/eventLog.js';
 export function createHud(root, o) {
   const start = o.start;
   const tickRate = start.tickRate || TICK_RATE;
-  const maxTicks = MAX_TICKS;
+  const maxTicks = start.maxTicks || MAX_TICKS;
   const names = new Map((start.players || []).map((p) => [p.id, p.name || p.id]));
   const playerTeam = new Map((start.players || []).map((p) => [p.id, p.team]));
   /** @type {Map<number, {cls:string, team:0|1, owner:string, maxHp:number, maxSh:number, spawned:boolean, sizeClass:string, alive:boolean}>} */

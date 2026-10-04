@@ -6,7 +6,7 @@
 // Messages out: { t:'start', info }  { t:'frame', k, s, e }  { t:'end', result }  { t:'error', message }
 
 import { createBattle, stepBattle, makeSnapshot, getResult, getInitialShips, battleWorld } from '/shared/sim/battle.js';
-import { TICK_MS, TICK_RATE, SNAPSHOT_EVERY } from '/shared/constants.js';
+import { TICK_MS, TICK_RATE, SNAPSHOT_EVERY, MAX_TICKS } from '/shared/constants.js';
 import { createSimLoop } from '../util/simLoop.js';
 
 let loop = null;
@@ -23,6 +23,7 @@ function startInfo(config, state) {
     world: battleWorld(state),
     tickRate: TICK_RATE,
     snapshotEvery: SNAPSHOT_EVERY,
+    maxTicks: config.maxTicks || MAX_TICKS,
     isLocal: true,
   };
 }

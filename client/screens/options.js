@@ -12,7 +12,7 @@ export function mount(root, props, ctx) {
   function slider(key, label) {
     const val = h('span.v', { text: `${Math.round(s[key] * 100)}%` });
     const input = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: s[key], test: `vol-${key}`,
-      onInput: (e) => { s[key] = Number(e.target.value); val.textContent = `${Math.round(s[key] * 100)}%`; ctx.persistSettings(); } });
+      onInput: (e) => { s[key] = Number(e.target.value); val.textContent = `${Math.round(s[key] * 100)}%`; ctx.persistSettings(); try { ctx.audio.play('ui.tick'); } catch { /* ignore */ } } });
     return h('div.opt-row', h('span', { text: label }), input, val);
   }
 

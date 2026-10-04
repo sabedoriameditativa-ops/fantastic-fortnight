@@ -37,6 +37,18 @@ describe('createFeedBase', () => {
     assert.equal(f.battleNo, 1);
   });
 
+  test('resetBattle() forgets the current battle so nothing is replayed', () => {
+    const f = createFeedBase({ isLocal: false });
+    f.emitStart({ seed: 2 });
+    f.resetBattle();
+    const got = [];
+    f.onStart((i) => got.push(i));
+    f.onEnd((r) => got.push(r));
+    assert.deepEqual(got, []);
+    assert.equal(f.lastStart, null);
+    assert.equal(f.lastEnd, null);
+  });
+
   test('status is replayed and only emitted on change', () => {
     const f = createFeedBase({ isLocal: false });
     const seen = [];
