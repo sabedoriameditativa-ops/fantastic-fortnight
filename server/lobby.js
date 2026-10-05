@@ -10,6 +10,8 @@ import { createRoom } from './room.js';
 
 /** Default maximum number of simultaneous rooms. */
 export const DEFAULT_MAX_ROOMS = 50;
+/** Rooms a single remote address may have alive at once (0 = unlimited). */
+export const DEFAULT_MAX_ROOMS_PER_ADDRESS = 4;
 
 /**
  * Random room code.
@@ -26,13 +28,44 @@ export function makeRoomCode(rand = (max) => randomInt(0, max)) {
  * Create the lobby.
  * @param {Object} [o]
  * @param {number} [o.maxRooms]
+ * @param {number} [o.maxRoomsPerAddress]  rooms alive per creator address (0 = unlimited; sessions without
+ *                                         `remoteAddress` are never limited)
  * @param {object} [o.roomOptions]  passed to createRoom (clock, countdownMs, maxTicks, tickMs, startMatch...)
  * @param {{warn:Function, info?:Function}} [o.log]
  */
-export function createLobby({ maxRooms = DEFAULT_MAX_ROOMS, roomOptions = {}, log = console } = {}) {
+export function createLobby({
+  maxRooms = DEFAULT_MAX_ROOMS, maxRoomsPerAddress = DEFAULT_MAX_ROOMS_PER_ADDRESS, roomOptions = {}, log = console,
+} = {}) {
   /** @type {Map<string, ReturnType<typeof createRoom>>} */
   const rooms = new Map();
+  /** Alive room codes per creator address. @type {Map<string, Set<string>>} */
+  const roomsByAddress = new Map();
   const startedAt = Date.now();
+
+  function trackAddress(addr, code) {
+    let set = roomsByAddress.get(addr);
+    if (!set) {
+      set = new Set();
+      roomsByAddress.set(addr, set);
+    }
+    set.add(code);
+  }
+
+  function untrackAddress(addr, code) {
+    const set = roomsByAddress.get(addr);
+    if (!set) return;
+    set.delete(code);
+    if (set.size === 0) roomsByAddress.delete(addr);
+  }
+
+  /** Rooms `addr` would still hold after `session` left `current` (a room it is alone in dies with it). */
+  function roomsHeldBy(addr, current) {
+    const set = roomsByAddress.get(addr);
+    if (!set) return 0;
+    let n = set.size;
+    if (current && set.has(current.code) && current.memberCount <= 1) n--;
+    return n;
+  }
 
   function reply(session, rid, result) {
     if (result.ok) {
@@ -68,9 +101,13 @@ export function createLobby({ maxRooms = DEFAULT_MAX_ROOMS, roomOptions = {}, lo
 
   function createRoomFor(session, { teamSize, budget, botDifficulty }) {
     if (rooms.size >= maxRooms) return { ok: false, code: ERR.ROOM_FULL, detail: 'server' };
+    const current = roomOf(session);
+    const addr = typeof session.remoteAddress === 'string' && session.remoteAddress ? session.remoteAddress : null;
+    if (addr && maxRoomsPerAddress > 0 && roomsHeldBy(addr, current) >= maxRoomsPerAddress) {
+      return { ok: false, code: ERR.ROOM_FULL, detail: 'address' };
+    }
     const code = uniqueCode();
     if (!code) return { ok: false, code: ERR.ROOM_FULL, detail: 'codes' };
-    const current = roomOf(session);
     if (current) current.leave(session);
     const room = createRoom({
       ...roomOptions,
@@ -82,10 +119,12 @@ export function createLobby({ maxRooms = DEFAULT_MAX_ROOMS, roomOptions = {}, lo
       log,
       onDestroy: (r) => {
         rooms.delete(r.code);
+        if (addr) untrackAddress(addr, r.code);
         if (roomOptions.onDestroy) roomOptions.onDestroy(r);
       },
     });
     rooms.set(code, room);
+    if (addr) trackAddress(addr, code);
     return { ok: true, room: room.toState(session.id) };
   }
 

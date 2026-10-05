@@ -12,6 +12,12 @@ import {
 export const CLOSE = Object.freeze({
   VERSION_MISMATCH: 4000,
   REPLACED: 4001,
+  /** No `hello` within HANDSHAKE_TIMEOUT_MS of connecting. */
+  HANDSHAKE_TIMEOUT: 4002,
+  /** Too many concurrent sockets from the same remote address. */
+  TOO_MANY_CONNECTIONS: 4003,
+  /** Client stopped reading: send buffer above MAX_BUFFERED. */
+  BACKPRESSURE: 4004,
   RATE_LIMITED: 4008,
   SHUTDOWN: 1001,
 });
@@ -19,8 +25,12 @@ export const CLOSE = Object.freeze({
 /** Rate-limit violations tolerated within VIOLATION_WINDOW_MS before the socket is closed. */
 export const MAX_VIOLATIONS = 3;
 export const VIOLATION_WINDOW_MS = 10_000;
-/** Outgoing bytes a stalled client may have queued before we stop feeding it. */
+/** Outgoing bytes a stalled client may have queued before it is disconnected. */
 export const MAX_BUFFERED = 8 * 1024 * 1024;
+/** A socket that has not sent `hello` after this long is closed. */
+export const HANDSHAKE_TIMEOUT_MS = 10_000;
+/** Concurrent sockets accepted per remote address (0 = unlimited). */
+export const DEFAULT_MAX_SOCKETS_PER_ADDRESS = 16;
 
 const defaultClock = {
   now: () => Date.now(),
@@ -65,6 +75,34 @@ function makeToken() {
 }
 
 /**
+ * Per-remote-address concurrency limiter for sockets. Addresses that are
+ * unknown (`undefined`/empty) are never limited.
+ * @param {{ maxSockets?: number }} [o]  0 disables the cap
+ * @returns {{ acquire(addr?: string): boolean, release(addr?: string): void, count(addr?: string): number }}
+ */
+export function createAddressLimiter({ maxSockets = DEFAULT_MAX_SOCKETS_PER_ADDRESS } = {}) {
+  const counts = new Map();
+  return {
+    acquire(addr) {
+      if (!addr || !maxSockets) return true;
+      const n = counts.get(addr) || 0;
+      if (n >= maxSockets) return false;
+      counts.set(addr, n + 1);
+      return true;
+    },
+    release(addr) {
+      if (!addr || !maxSockets) return;
+      const n = counts.get(addr) || 0;
+      if (n <= 1) counts.delete(addr);
+      else counts.set(addr, n - 1);
+    },
+    count(addr) {
+      return counts.get(addr) || 0;
+    },
+  };
+}
+
+/**
  * Session registry: creates sessions, resumes them by token and expires them
  * after the reconnection grace period.
  * @param {Object} [o]
@@ -89,15 +127,22 @@ export function createSessionStore({ graceMs = RECONNECT_GRACE_MS, onExpire = ()
       createdAt: clock.now(),
       disconnectedAt: 0,
       expireTimer: null,
+      /** Remote address of the current socket (undefined when unknown). */
+      remoteAddress: undefined,
       chatBucket: createTokenBucket(CHAT_RATE_LIMIT.perSecond, CHAT_RATE_LIMIT.burst, clock.now),
       /**
        * Send a pre-serialized JSON string. Dropped when the socket is not
-       * open or when the client has stalled (send buffer above MAX_BUFFERED).
+       * open. A client that stopped reading (send buffer above MAX_BUFFERED)
+       * is disconnected with CLOSE.BACKPRESSURE so it goes through the normal
+       * grace/reconnect path instead of desyncing silently.
        */
       sendRaw(str) {
         const sock = session.ws;
         if (!sock || sock.readyState !== 1 /* OPEN */) return false;
-        if (sock.bufferedAmount > MAX_BUFFERED) return false;
+        if (sock.bufferedAmount > MAX_BUFFERED) {
+          session.close(CLOSE.BACKPRESSURE, 'slow consumer');
+          return false;
+        }
         try {
           sock.send(str);
           return true;
@@ -200,10 +245,15 @@ export function createSessionStore({ graceMs = RECONNECT_GRACE_MS, onExpire = ()
  * @param {Object} o
  * @param {ReturnType<typeof createSessionStore>} o.sessions
  * @param {{ handleMessage(session, msg): void, onDisconnect(session): void, onReconnect(session): void }} o.lobby
- * @param {{now():number}} [o.clock]
+ * @param {{now():number, setTimeout:Function, clearTimeout:Function}} [o.clock]
  * @param {{ warn(...a:any[]):void }} [o.log]
+ * @param {string} [o.remoteAddress]   client address (for the per-address limiter and `session.remoteAddress`)
+ * @param {ReturnType<typeof createAddressLimiter>} [o.limiter]  per-address socket cap
+ * @param {number} [o.handshakeMs]     close sockets that never send `hello` after this long (default 10 s)
  */
-export function attachConnection(ws, { sessions, lobby, clock = defaultClock, log = console }) {
+export function attachConnection(ws, {
+  sessions, lobby, clock = defaultClock, log = console, remoteAddress, limiter, handshakeMs = HANDSHAKE_TIMEOUT_MS,
+}) {
   let session = null;
   const bucket = createTokenBucket(RATE_LIMIT.perSecond, RATE_LIMIT.burst, clock.now);
   const violations = [];
@@ -215,6 +265,29 @@ export function attachConnection(ws, { sessions, lobby, clock = defaultClock, lo
     try {
       if (ws.readyState === 1) ws.send(JSON.stringify(msg));
     } catch { /* ignore */ }
+  }
+
+  ws.on('error', () => { /* 'close' follows */ });
+
+  if (limiter && !limiter.acquire(remoteAddress)) {
+    sendError(ERR.RATE_LIMITED, 'connections');
+    try { ws.close(CLOSE.TOO_MANY_CONNECTIONS, 'too many connections'); } catch { /* ignore */ }
+    return;
+  }
+
+  let handshakeTimer = handshakeMs > 0
+    ? clock.setTimeout(() => {
+      handshakeTimer = null;
+      if (session) return;
+      try { ws.close(CLOSE.HANDSHAKE_TIMEOUT, 'hello timeout'); } catch { /* ignore */ }
+    }, handshakeMs)
+    : null;
+
+  function clearHandshakeTimer() {
+    if (handshakeTimer !== null) {
+      clock.clearTimeout(handshakeTimer);
+      handshakeTimer = null;
+    }
   }
 
   function welcome() {
@@ -232,12 +305,19 @@ export function attachConnection(ws, { sessions, lobby, clock = defaultClock, lo
       return;
     }
     const resumed = msg.token !== undefined ? sessions.resume(msg.token, ws) : null;
+    clearHandshakeTimer();
     if (resumed) {
       session = resumed;
+      session.remoteAddress = remoteAddress;
       welcome();
-      lobby.onReconnect(session);
+      try {
+        lobby.onReconnect(session);
+      } catch (err) {
+        log.warn('[session] reconnect handler error', err);
+      }
     } else {
       session = sessions.create(name, ws);
+      session.remoteAddress = remoteAddress;
       welcome();
     }
   }
@@ -282,7 +362,14 @@ export function attachConnection(ws, { sessions, lobby, clock = defaultClock, lo
   ws.on('error', () => { /* 'close' follows */ });
 
   ws.on('close', () => {
+    clearHandshakeTimer();
+    if (limiter) limiter.release(remoteAddress);
     if (!session) return;
-    if (sessions.detach(session, ws)) lobby.onDisconnect(session);
+    if (!sessions.detach(session, ws)) return;
+    try {
+      lobby.onDisconnect(session);
+    } catch (err) {
+      log.warn('[session] disconnect handler error', err);
+    }
   });
 }

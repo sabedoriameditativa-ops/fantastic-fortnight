@@ -25,8 +25,10 @@ numbers below reference it. Long-form design rationale: `docs/design/*.md`.
   needed. Order within a column is deterministic (catalog order, then count).
 - **Victory**: all enemy *purchased* ships destroyed (spawned units don't count).
   Both wiped in the same tick → draw.
-- **Sudden death** at 150 s: all regeneration/repair/shield regen off, kiting and
-  retreat disabled, damage ×(1 + 0.2 per 15 s elapsed since 150 s). Event `['phase','suddenDeath']`.
+- **Sudden death** at 150 s: passive regeneration, nanite repair and shield regen off;
+  heal-over-time effects and kill-heals (Vorrax *Fome*) off; instant ability heals still
+  work (bounded by their cooldowns). Kiting and retreat disabled, damage ×(1 + 0.2 per
+  15 s elapsed since 150 s). Event `['phase','suddenDeath']`.
 - **Hard stop** at 240 s: winner = higher remaining value
   `V = Σ cost × (hp+shield)/(maxHp+maxShield)` over surviving purchased ships; if
   within 2% → tiebreak by total damage dealt; still within 2% → draw.
@@ -71,6 +73,8 @@ numbers below reference it. Long-form design rationale: `docs/design/*.md`.
   arc for `charge` seconds (flag CASTING), then fires as hitscan.
 - **Piercing shot** (Ariete ability): the next railgun shot hits every enemy within a
   `coneDeg` cone up to `maxTargets`, in distance order.
+- Contact weapons (`contact: true`, Carrapato mandibles) measure range edge-to-edge (`d − r_src − r_target ≤ range`).
+- A rolled miss never damages the primary target: AoE splash on a miss excludes it and the fizzle point lies outside the splash radius.
 - Multiple turrets (salvo > 1) fire all shots in the same tick; cooldown offsets at battle
   start (`(id·7) mod cooldownTicks`) avoid synchronized volleys.
 
@@ -90,11 +94,11 @@ hp -= hull; lastHullHitTick = tick; dot applied if weapon.dot (ticks each 0.5 s,
   processed in a dedicated phase (two ships can kill each other in the same tick).
 - **Regen** (per tick, skipped while disrupted or in sudden death): shields regen after
   `delay` seconds without shield damage; organic hulls regen always; nanite hulls repair
-  after 3 s without hull damage.
+  after 2 s without hull damage (`COMBAT.naniteRepairDelay`).
 - **Disrupt** (ion hits, EMP abilities, acid cloud for shields only): halts regen/repair for
   the stated duration; 2 s immunity after it expires (except for ability-sourced disrupts
   which always apply but also grant the immunity afterwards).
-- **Passives**: Terran *Coordenação de Fogo*; Vorrax *Fome* (killer heals 10% max hp);
+- **Passives**: Terran *Coordenação de Fogo*; Vorrax *Fome* (killer heals 5% max hp; only kills of purchased ships count; off in sudden death);
   Lúmen *Fase* (first shield break → UNTARGETABLE 1 s, once per 20 s; projectiles in
   flight still hit); Ferrix *Rede Neural* (+0.10 accuracy vs tiny/small).
 
@@ -125,7 +129,7 @@ every tick. Terminology from `docs/design/battle-ai.md` §2–3.
 Other modes: `formation` (advance phase: keep slot relative to the team anchor, move at
 the group speed = slowest non-diver alive ship), `retreat` (to nearest support/carrier or
 rear point; hull < threshold by role: diver 0.35, kiter 0.4, brawler 0.25, escort/support 0.45;
-exit at +0.2 or when alone), `idleAdvance` (no target: move toward enemy centroid at 0.5·max).
+exit at +0.2 or when alone; a retreat ended by the 10 s cap starts a 15 s cooldown before another; hulls that cannot regenerate exit when shield ≥ 60% of cap), `idleAdvance` (no target: move toward enemy centroid at 0.5·max).
 
 Phases: `advance` until first contact (any ship within 1.1·range of an enemy) or 45 s,
 then `engage` (`['phase','engage']`).
@@ -194,6 +198,7 @@ damage of projectiles in flight toward me. Used by retreat, shields, teleports, 
 | emp_storm | ≥ 5 enemies within 400 or enemy mothership within 400 |
 
 Teleport destinations are clamped inside the arena and pushed out of other hulls.
+Effects of the same ability id refresh (longest duration wins) instead of stacking; different abilities still combine.
 
 ### 3.6 Difficulty profiles (bots only; humans always get `especialista` knobs)
 | knob | facil | normal | dificil | especialista |

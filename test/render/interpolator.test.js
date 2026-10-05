@@ -158,6 +158,28 @@ describe('interpolator', () => {
     assert.ok(ip.ticksPerSec > 60, `rate ${ip.ticksPerSec}`);
   });
 
+  test('a sub-second pause does not drag the tick-rate estimate down (single long gap ignored)', () => {
+    const ip = createInterpolator({ tickMs: TICK_MS, snapshotEvery: EVERY, delayMs: 120 });
+    const pos = (k) => [{ id: 1, x: k, y: 0 }];
+    let now = 0, k = 0;
+    for (let i = 0; i < 20; i++) { ip.push(frame(k, pos(k), now)); k += 2; now += 100; }
+    assert.ok(Math.abs(ip.ticksPerSec - 20) < 0.5, `steady rate ${ip.ticksPerSec}`);
+    now += 800; // paused (speed 0) for 800 ms, then resumed at 1x
+    const rates = [];
+    for (let i = 0; i < 12; i++) { ip.push(frame(k, pos(k), now)); k += 2; now += 100; rates.push(ip.ticksPerSec); }
+    for (const r of rates) assert.ok(r > 19.5 && r < 20.5, `rate after unpause ${rates.map((x) => x.toFixed(1)).join(' ')}`);
+  });
+
+  test('a sustained slowdown (x4 → x1) is still tracked', () => {
+    const ip = createInterpolator({ tickMs: TICK_MS, snapshotEvery: EVERY, delayMs: 120 });
+    const pos = (k) => [{ id: 1, x: k, y: 0 }];
+    let now = 0, k = 0;
+    for (let i = 0; i < 80; i++) { ip.push(frame(k, pos(k), now)); k += 2; now += 25; }
+    assert.ok(ip.ticksPerSec > 60, `x4 rate ${ip.ticksPerSec}`);
+    for (let i = 0; i < 40; i++) { ip.push(frame(k, pos(k), now)); k += 2; now += 100; }
+    assert.ok(ip.ticksPerSec < 24, `x1 rate after slowdown ${ip.ticksPerSec}`);
+  });
+
   test('a pause (no frames) freezes at the extrapolation bound and resumes cleanly', () => {
     const ip = createInterpolator({ tickMs: TICK_MS, snapshotEvery: EVERY, delayMs: 120, maxExtrapolateMs: 100 });
     const pos = (k) => [{ id: 1, x: k * 5, y: 0 }];

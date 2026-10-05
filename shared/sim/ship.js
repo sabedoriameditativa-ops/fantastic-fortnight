@@ -90,6 +90,7 @@ export function makeShip(o) {
       // tangent is the x-mirror of team 0's choice (keeps mirrored fleets symmetric, SPEC §8.2)
       lastJumpTick: -1000, slotDx: 0, slotDy: 0, orbitSign: ((slot & 1) ? 1 : -1) * (o.team === 0 ? 1 : -1),
       fleeX: 0, fleeY: 0, lastTargetId: 0, holdOverride: 0, retreatSince: 0,
+      retreatBlockedUntil: 0, // no new retreat before this tick (set when a retreat ends by the time cap)
     },
     targetedBy: 0, targetedByTerran: 0, allocDps: 0, incoming: 0, incomingInterceptables: 0,
     flags: 0,
@@ -101,12 +102,26 @@ export function makeShip(o) {
 /**
  * Add a timed effect to a ship. Props are multiplicative (…Mul), additive
  * (drAdd, rangeAdd) or weapon-scoped (w: weapon index, wt: weapon type).
+ * With a `key` (ability id), a second application while an effect with the
+ * same key is active refreshes it (longest `until` wins, props replaced)
+ * instead of stacking: overlapping auras from several casters never multiply.
  * @param {object} ship
  * @param {number} until tick (exclusive) at which the effect expires
  * @param {object} props
+ * @param {string} [key] ability id; same-key effects refresh rather than stack
  */
-export function addEffect(ship, until, props) {
-  const fx = Object.assign({ until, boosted: false, w: -1, wt: null }, props);
+export function addEffect(ship, until, props, key) {
+  if (key) {
+    const list = ship.fx;
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i];
+      if (f.key !== key) continue;
+      Object.assign(f, props);
+      if (until > f.until) f.until = until;
+      return f;
+    }
+  }
+  const fx = Object.assign({ until, boosted: false, w: -1, wt: null, key: key || null }, props);
   ship.fx.push(fx);
   return fx;
 }

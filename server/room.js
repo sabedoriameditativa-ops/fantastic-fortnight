@@ -164,10 +164,24 @@ export function createRoom(o) {
     destroyTimer = clock.setTimeout(() => {
       destroyTimer = null;
       if (destroyed || connectedHumans().length > 0) return;
-      // Let a running battle finish; endBattle re-checks.
-      if (phase === 'battle') return;
+      // Nobody came back within emptyRoomMs: an abandoned battle (paused by
+      // syncMatchRunner) is torn down too instead of simulating for no one.
       destroy('room_closed');
     }, emptyRoomMs);
+  }
+
+  /**
+   * Keep the match loop running only while somebody is connected to watch
+   * it: with no connected humans (players or spectators) the runner is paused
+   * and the empty-room timer eventually destroys the room; the first
+   * reconnect/join resumes the battle from the same tick.
+   */
+  function syncMatchRunner() {
+    if (destroyed || phase !== 'battle' || !match || !match.runner) return;
+    const runner = match.runner;
+    if (typeof runner.pause !== 'function' || typeof runner.resume !== 'function') return;
+    if (connectedHumans().length === 0) runner.pause();
+    else runner.resume();
   }
 
   function migrateHost() {
@@ -313,6 +327,7 @@ export function createRoom(o) {
     cancelDestroyTimer();
     broadcastState();
     if (phase === 'battle' || phase === 'results') sendBattleSync(m);
+    syncMatchRunner();
     return ok({ room: toState(m.id) });
   }
 
@@ -329,6 +344,7 @@ export function createRoom(o) {
     if (hostId === m.id) migrateHost();
     if (phase === 'results') checkRematch();
     broadcastState();
+    syncMatchRunner();
     maybeScheduleDestroy();
   }
 
@@ -355,6 +371,7 @@ export function createRoom(o) {
     }, graceMs);
     if (phase === 'results') checkRematch();
     broadcastState();
+    syncMatchRunner();
     maybeScheduleDestroy();
   }
 
@@ -396,6 +413,7 @@ export function createRoom(o) {
     session.roomCode = code;
     broadcastState();
     if (phase === 'battle' || phase === 'results') sendBattleSync(m);
+    syncMatchRunner();
     return true;
   }
 
@@ -724,6 +742,13 @@ export function createRoom(o) {
       onEnd(result) {
         if (match !== thisMatch) return;
         endBattle(result);
+      },
+      // The simulation threw and not even a draw result could be built:
+      // close the room so nobody is left waiting on a dead battle.
+      onAbort(err) {
+        if (match !== thisMatch || destroyed) return;
+        log.warn('[room] battle aborted', code, err);
+        destroy('room_closed');
       },
     });
   }

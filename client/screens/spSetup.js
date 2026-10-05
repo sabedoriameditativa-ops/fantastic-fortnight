@@ -1,7 +1,7 @@
 // Single-player setup: level (1–15 + endless), enemy difficulty, team size and
 // ally bot difficulty. Cleared levels are marked from localStorage progress.
 
-import { T, fmt, difficultyName } from '../i18n.js';
+import { T, fmt, difficultyName, difficultyDescription } from '../i18n.js';
 import { h, clear, button, segmented, select, add } from '../util/dom.js';
 import { num } from '../util/format.js';
 import { isLevelCleared } from '../util/storage.js';
@@ -9,6 +9,7 @@ import { normalizeSpSetup } from '../util/spConfig.js';
 import { DIFFICULTIES, TEAM_SIZES, DEFAULT_BUDGET } from '/shared/constants.js';
 import { FACTIONS, SHIPS } from '/shared/catalog.js';
 import { LEVELS, levelInfo, enemyBudget, levelBuilder } from '/shared/levels.js';
+import { AI_PROFILES } from '/shared/aiProfiles.js';
 import { validateFleet } from '/shared/fleet.js';
 
 export function mount(root, props, ctx) {
@@ -65,7 +66,7 @@ export function mount(root, props, ctx) {
         h('dt', T.sp.yourBudget), h('dd', `${num(DEFAULT_BUDGET)} ${T.app.points}`),
         boss ? h('dt', '★') : null, boss ? h('dd.warn', { text: fmt(T.sp.boss, { name: boss }) }) : null,
       ),
-      h('p.small.muted', { text: T.sp.diffDesc[setup.difficulty] }),
+      h('p.small.muted', { text: difficultyDescription(setup.difficulty, AI_PROFILES[setup.difficulty] ? AI_PROFILES[setup.difficulty].budgetMul : 1) }),
     );
     renderAllies();
   }

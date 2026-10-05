@@ -21,7 +21,7 @@ export const HULL_TYPES = {
   armored: { id: 'armored', name: 'Blindado', desc: 'Reduz todo dano recebido no casco em um valor fixo (exceto canhões magnéticos).' },
   organic: { id: 'organic', name: 'Orgânico', desc: 'Regenera casco continuamente, mesmo sob fogo. Pulsos iônicos interrompem a regeneração.' },
   crystalline: { id: 'crystalline', name: 'Cristalino', desc: 'Frágil e sem regeneração; refrata lasers mas estilhaça com projéteis cinéticos.' },
-  nanite: { id: 'nanite', name: 'Nanítico', desc: 'Repara o casco após 3 s sem sofrer dano. Pulsos iônicos interrompem o reparo.' },
+  nanite: { id: 'nanite', name: 'Nanítico', desc: 'Repara o casco após 2 s sem sofrer dano. Pulsos iônicos interrompem o reparo.' },
 };
 
 export const WEAPON_TYPES = ['kinetic', 'railgun', 'flak', 'laser', 'plasma', 'missile', 'torpedo', 'bio', 'ion'];

@@ -48,8 +48,10 @@ export function mount(root, props, ctx) {
     return net;
   }
 
+  let subscribedTo = null;
   function subscribe() {
-    if (!net) return;
+    if (!net || subscribedTo === net) return;
+    subscribedTo = net;
     offs.push(net.onRoom((room) => {
       if (disposed) return;
       if (room.phase === 'lobby' || room.phase === 'results') hideCountdown();
@@ -72,7 +74,11 @@ export function mount(root, props, ctx) {
     offs.push(net.feed.onStart(() => { if (!disposed) { hideCountdown(); ctx.go('battle', { mode: 'mp' }); } }));
     offs.push(net.onStatus((s) => {
       if (disposed) return;
-      if (s === 'lost') ctx.toast(T.mp.connectionLost, 'error');
+      if (s === 'lost') {
+        ctx.toast(T.mp.connectionLost, 'error');
+        // reconnection gave up while on the entry screen: offer the retry control
+        if (view === 'entry') { renderEntry(T.mp.connectionLost); return; }
+      }
       const st = container.querySelector('[data-test=conn-status]');
       if (st) st.textContent = s === 'ok' ? fmt(T.mp.connected, { name: net.name }) : s === 'reconnecting' ? T.mp.reconnecting : s === 'lost' ? T.mp.connectionLost : '';
     }));
@@ -102,7 +108,7 @@ export function mount(root, props, ctx) {
     const createBtn = button(T.mp.create, { test: 'create-room', primary: true, onClick: create });
     const joinBtn = button(T.mp.join, { test: 'join-room', primary: true, onClick: join });
     async function create() {
-      if (!net) { if (!(await ensureNet())) return; }
+      if (!net || !net.connected) { if (!(await ensureNet())) return; }
       createBtn.disabled = true;
       try { const room = await net.createRoom({ teamSize, budget }); chatMessages.length = 0; renderRoom(room); }
       catch (e) { fail(e); createBtn.disabled = false; }
@@ -110,7 +116,7 @@ export function mount(root, props, ctx) {
     async function join() {
       const code = normalizeRoomCode(codeInput.value);
       if (!isRoomCode(code)) { ctx.toast(T.mp.codeHint, 'warn'); codeInput.focus(); return; }
-      if (!net) { if (!(await ensureNet())) return; }
+      if (!net || !net.connected) { if (!(await ensureNet())) return; }
       joinBtn.disabled = true;
       try { const room = await net.joinRoom(code); chatMessages.length = 0; renderRoom(room); }
       catch (e) { fail(e); joinBtn.disabled = false; }
@@ -145,7 +151,9 @@ export function mount(root, props, ctx) {
     view = 'room';
     const mine = me(room);
     const host = isHost(room);
-    const myFleet = state.mpFleet || null;
+    // the server is the authority on whether this room has our fleet; the local
+    // copy is only a convenience (badge / preload for the builder)
+    const myFleet = mine && mine.s.hasFleet ? (state.mpFleet || null) : null;
     clear(container);
     const link = roomLink(room.code, location);
     const copy = async (text, msg) => {
@@ -192,7 +200,7 @@ export function mount(root, props, ctx) {
       const sum = myFleet ? fleetSummary(myFleet) : null;
       add(fleetPanel, h('h3', { text: T.lobby.yourFleet }),
         myFleet ? h('div.small', h('span.badge', { class: `f-${myFleet.faction}`, text: FACTIONS[myFleet.faction].short }), ` ${sum.count} ${T.app.ships} · ${num(sum.cost)} ${T.app.points}`) : h('div.small.muted', { text: T.lobby.noFleet }),
-        button(myFleet ? T.lobby.editFleet : T.lobby.buildFleet, { test: 'build-fleet', class: 'btn-block', disabled: room.phase !== 'lobby', onClick: () => ctx.go('fleetBuilder', { mode: 'mp', budget: room.budget, fleet: myFleet, room }) }),
+        button(myFleet ? T.lobby.editFleet : T.lobby.buildFleet, { test: 'build-fleet', class: 'btn-block', disabled: room.phase !== 'lobby', onClick: () => ctx.go('fleetBuilder', { mode: 'mp', budget: room.budget, fleet: myFleet || state.mpFleet || null, room }) }),
         readyBtn);
     } else {
       add(fleetPanel, h('h3', { text: T.lobby.spectators }), h('div.small.muted', { text: T.lobby.spectating }));

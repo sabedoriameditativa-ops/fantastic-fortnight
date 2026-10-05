@@ -2,7 +2,7 @@
 // (incl. chain beams and telegraphed charge), projectiles (tracking, miss
 // offsets, AoE, interceptable by point defense / flak curtain), piercing shot.
 
-import { COMBAT, ABILITIES } from '../catalog.js';
+import { COMBAT, ABILITIES, SIZE_CLASS } from '../catalog.js';
 import { TICK_RATE, DT } from '../constants.js';
 import { angleDiff, clamp, DEG } from './math.js';
 import { queryCircle } from './spatial.js';
@@ -13,6 +13,7 @@ import { orderedShips } from './queries.js';
 
 const buf = [];
 const coneBuf = [];
+const MAX_RADIUS = SIZE_CLASS.mothership.radius;
 
 /** Effective range of a weapon right now (buffs included). */
 export function weaponRange(s, w) {
@@ -37,12 +38,22 @@ export function hitChance(s, w, t, d) {
   return clamp(p, COMBAT.minHitChance, COMBAT.maxHitChance);
 }
 
+/**
+ * Distance at which weapon `w` of `s` reaches ship `t`, centre to centre.
+ * Contact weapons (mandibles) measure their range edge to edge, so the reach
+ * grows with both hull radii; every other weapon measures centre to centre.
+ */
+export function reachRange(s, w, t) {
+  const R = weaponRange(s, w);
+  return w.def.contact ? R + s.radius + t.radius : R;
+}
+
 /** Can weapon `w` of `s` shoot at ship `t` right now (alive, targetable, size, range, arc)? */
 export function canShoot(s, w, t, tick) {
   if (!t || t.team === s.team || !isTargetable(t, tick)) return false;
   if (t.sizeIdx < w.minTargetIdx) return false;
   const dx = t.x - s.x, dy = t.y - s.y;
-  const R = weaponRange(s, w);
+  const R = reachRange(s, w, t);
   if (dx * dx + dy * dy > R * R) return false;
   if (w.arcRad < Math.PI) {
     const bearing = Math.atan2(dy, dx);
@@ -57,7 +68,7 @@ export function canShoot(s, w, t, tick) {
  * (min(ehp, damage × fraction) × accuracy), ties broken by distance.
  */
 function bestShootable(state, s, w) {
-  const R = weaponRange(s, w);
+  const R = weaponRange(s, w) + (w.def.contact ? s.radius + MAX_RADIUS : 0); // contact: edge-to-edge reach (canShoot filters exactly)
   const T = getTables();
   const acc = T.acc[s.clsIdx][w.idx], frac = T.frac[s.clsIdx][w.idx];
   queryCircle(state.grid, state.ships, s.x, s.y, R, buf, 1 - s.team);
@@ -211,7 +222,7 @@ function allocProjectile(state) {
   if (state.projFree.length > 0) p = pool[state.projFree.pop()];
   else {
     p = { slot: pool.length, id: 0, alive: false, srcId: 0, dstId: 0, team: 0, weaponIdx: 0, type: '', dmg: 0, x: 0, y: 0,
-      speed: 0, hit: false, aoe: 0, dot: null, interceptable: false, offX: 0, offY: 0, aimX: 0, aimY: 0, ttl: 0, claimedTick: -1 };
+      speed: 0, hit: false, aoe: 0, dot: null, interceptable: false, offX: 0, offY: 0, aimX: 0, aimY: 0, ttl: 0, claimedTick: -1, spawnTick: 0 };
     pool.push(p);
   }
   return p;
@@ -223,13 +234,13 @@ export function spawnProjectile(state, s, w, t, hit, dmg, k) {
   p.id = state.nextProjId++;
   p.alive = true; p.srcId = s.id; p.dstId = t.id; p.team = s.team; p.weaponIdx = w.idx; p.type = w.def.type;
   p.dmg = dmg; p.x = s.x; p.y = s.y; p.speed = w.def.speed; p.hit = hit; p.aoe = w.def.aoe; p.dot = w.def.dot;
-  p.interceptable = w.def.interceptable; p.claimedTick = -1;
+  p.interceptable = w.def.interceptable; p.claimedTick = -1; p.spawnTick = state.tick;
   if (hit) { p.offX = 0; p.offY = 0; }
-  else { // miss: fly to an offset point beside the target and fizzle there
+  else { // miss: fly to an offset point beside the target and fizzle there (outside the splash radius for AoE)
     const dx = t.x - s.x, dy = t.y - s.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 1;
     const side = ((p.id + k) & 1) ? 1 : -1;
-    const off = t.radius + 24 + (p.id % 3) * 10;
+    const off = t.radius + Math.max(24, w.def.aoe + 8) + (p.id % 3) * 10;
     p.offX = (-dy / d) * off * side; p.offY = (dx / d) * off * side;
   }
   p.aimX = t.x + p.offX; p.aimY = t.y + p.offY;
@@ -270,7 +281,7 @@ export function advanceProjectiles(state) {
     }
     p.x += (dx / d) * step; p.y += (dy / d) * step;
     if (--p.ttl <= 0) {
-      if (p.aoe > 0) explode(state, p, null);
+      if (p.aoe > 0) explode(state, p, null, p.hit ? null : t);
       endProjectile(state, p, 0);
     }
   }
@@ -282,21 +293,27 @@ function impact(state, p, t) {
     if (p.aoe > 0) explode(state, p, t);
     else queueDamage(state, p.srcId, t.id, p.dmg, p.type, p.dot ? { dot: p.dot } : null);
     endProjectile(state, p, 1);
-  } else {
-    if (p.aoe > 0) explode(state, p, null);
+  } else { // rolled miss: the fizzle splash may hit neighbours but never the primary target (SPEC §2.2)
+    if (p.aoe > 0) explode(state, p, null, p.hit ? null : t);
     endProjectile(state, p, 0);
   }
 }
 
 const aoeBuf = [];
 
-function explode(state, p, primary) {
+/**
+ * Splash damage around the projectile: `primary` (a rolled hit) takes full
+ * damage, everyone else within aoe takes the falloff amount, `skip` (the
+ * primary target of a rolled miss) takes nothing.
+ */
+function explode(state, p, primary, skip) {
   const ships = state.ships;
   queryCircle(state.grid, ships, p.x, p.y, p.aoe, aoeBuf, 1 - p.team);
   state.events.push(['aoe', Math.round(p.x), Math.round(p.y), p.aoe, p.type]);
   const edge = COMBAT.aoeEdgeFalloff;
   for (let i = 0; i < aoeBuf.length; i++) {
     const e = aoeBuf[i];
+    if (e === skip) continue;
     let mul;
     if (e === primary) mul = 1;
     else {
@@ -319,7 +336,7 @@ function tryPointDefense(state, s, w) {
   let best = null, bestD = R * R;
   for (let i = 0; i < pool.length; i++) {
     const p = pool[i];
-    if (!p.alive || !p.interceptable || p.team === s.team || p.claimedTick === tick) continue;
+    if (!p.alive || !p.interceptable || p.team === s.team || p.claimedTick === tick || p.spawnTick === tick) continue; // launched this tick: engageable from the next one regardless of processing order
     const d2 = (p.x - s.x) * (p.x - s.x) + (p.y - s.y) * (p.y - s.y);
     if (d2 <= bestD) { bestD = d2; best = p; }
   }
@@ -342,7 +359,7 @@ export function flakCurtains(state) {
     if (!s.alive || s.curtainUntil <= tick || s.curtainLeft <= 0) continue;
     for (let k = 0; k < pool.length && s.curtainLeft > 0; k++) {
       const pr = pool[k];
-      if (!pr.alive || !pr.interceptable || pr.team === s.team) continue;
+      if (!pr.alive || !pr.interceptable || pr.team === s.team || pr.spawnTick === tick) continue;
       const d2 = (pr.x - s.x) * (pr.x - s.x) + (pr.y - s.y) * (pr.y - s.y);
       if (d2 > p.radius * p.radius) continue;
       interceptProjectile(state, pr);

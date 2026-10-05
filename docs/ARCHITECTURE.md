@@ -307,9 +307,12 @@ Serves `client/` at `/` and `shared/` at `/shared/` with correct MIME types (`.j
  * @property {{ w:number, h:number }} world
  * @property {number} tickRate
  * @property {number} snapshotEvery
+ * @property {number} [maxTicks]         BattleConfig.maxTicks of this match (default MAX_TICKS); the HUD clock's upper bound
  * @property {number[]} [dead]           reconnect only
  */
 ```
+
+Close codes: 4000 version mismatch, 4001 session resumed elsewhere, 4002 handshake timeout (10 s without `hello`), 4003 too many sockets from one address (`MAX_SOCKETS_PER_IP`, default 16, 0 = off), 4004 backpressure (> 8 MB buffered), 4008 rate-limit violations. `MAX_ROOMS_PER_IP` (default 4, 0 = off) caps alive rooms per creator address (`ROOM_FULL` with `detail: 'address'`). When no human or spectator is connected, the match loop pauses and the room is destroyed after 60 s; a player returning before that resumes the same battle.
 
 Validation rules: message ≤ 16 KB, JSON parse in try/catch, unknown `t` → BAD_MESSAGE, token bucket 20 msg/s burst 40, numeric fields `Number.isInteger` + range, never trust client ids (session identifies the player).
 
@@ -368,6 +371,8 @@ Renderer.onFrame(frame)     // push to interpolator; schedule frame.e for VFX/SF
 Renderer.draw(nowMs)        // called from rAF by the battle screen
 Renderer.resize()
 Renderer.setOptions({ showNames, grid, reducedMotion, quality })
+Renderer.registerShips(ships)   // idempotent: register ShipInit entries unknown so far (spawned units after a reconnect)
+Renderer.resync(start)          // reconnect: registerShips(start.ships) + mark start.dead + interpolator reset
 Renderer.getView()          // { ships: Map<id, {x,y,a,hp,sh,flags,cls,team,owner}>, tick } — used by HUD
 Renderer.camera             // { follow(id), setMode('auto'|'free'), zoomBy(f), pan(dx,dy) }
 Renderer.dispose()

@@ -3,7 +3,7 @@
 // budget bar, presets, autocomplete, clear, fleet summary with composition and
 // pt-BR validation messages.
 
-import { T, fmt, fleetErrorMessage, difficultyName } from '../i18n.js';
+import { T, fmt, fleetErrorMessage, errorMessage, difficultyName } from '../i18n.js';
 import { h, clear, button, tooltip, svgIcon, statBar, add } from '../util/dom.js';
 import { num, dec } from '../util/format.js';
 import { animateShip } from '../util/shipCanvas.js';
@@ -248,7 +248,8 @@ export function mount(root, props, ctx) {
       if (props.onConfirm) await props.onConfirm(v.fleet);
       else if (state.net) { await state.net.setFleet(v.fleet); state.mpFleet = v.fleet; ctx.saveLastFleet(v.fleet); ctx.toast(T.builder.fleetSent, 'ok'); ctx.go('lobby'); }
     } catch (e) {
-      ctx.toast(fleetErrorMessage(e.code, e.detail), 'error');
+      // server rejections carry protocol codes (FLEET_INVALID{code}, WRONG_PHASE, NOT_CONNECTED…), not only fleet codes
+      ctx.toast(errorMessage(e && e.code || 'UNKNOWN', e && e.detail), 'error');
     } finally { busy = false; if (confirmBtn.isConnected) refresh(); }
   }
 

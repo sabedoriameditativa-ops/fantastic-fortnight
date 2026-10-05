@@ -1,7 +1,8 @@
 // Server bootstrap: HTTP static files + WebSocket lobby on one port.
 // `PORT` env (default 3000), prints "listening <port>" when ready, graceful
 // SIGTERM/SIGINT. Env overrides for tests: FE_MAX_TICKS (battle length),
-// FE_TICK_MS (loop speed), FE_COUNTDOWN_MS (countdown length).
+// FE_TICK_MS (loop speed), FE_COUNTDOWN_MS (countdown length). Abuse caps:
+// MAX_ROOMS (global), MAX_SOCKETS_PER_IP, MAX_ROOMS_PER_IP (0 = unlimited).
 
 import http from 'node:http';
 import path from 'node:path';
@@ -9,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { MAX_MESSAGE_BYTES } from '../shared/protocol.js';
 import { createStaticHandler } from './static.js';
-import { createSessionStore, attachConnection, CLOSE } from './session.js';
+import { createSessionStore, attachConnection, createAddressLimiter, CLOSE } from './session.js';
 import { createLobby } from './lobby.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -21,19 +22,37 @@ function envInt(name) {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/** Like envInt but 0 is a valid value (used to switch a cap off). */
+function envCount(name) {
+  const v = process.env[name];
+  if (v === undefined || v === '') return undefined;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
 /**
- * Read the server configuration from the environment.
- * @returns {{ port:number, host:string|undefined, maxTicks?:number, tickMs?:number, countdownMs?:number, maxRooms?:number }}
+ * Read the server configuration from the environment. An unusable `PORT`
+ * value is reported through `log.warn` and replaced by the default.
+ * @param {{warn:Function}} [log]
+ * @returns {{ port:number, host:string|undefined, maxTicks?:number, tickMs?:number, countdownMs?:number, maxRooms?:number, maxSocketsPerAddress?:number, maxRoomsPerAddress?:number }}
  */
-export function envConfig() {
-  const port = process.env.PORT !== undefined && process.env.PORT !== '' ? Number(process.env.PORT) : 3000;
+export function envConfig(log = console) {
+  const raw = process.env.PORT;
+  let port = 3000;
+  if (raw !== undefined && raw !== '') {
+    const n = Number(raw);
+    if (Number.isInteger(n) && n >= 0 && n <= 65535) port = n;
+    else log.warn(`PORT inválido ("${raw}"), usando ${port} / invalid PORT, falling back to ${port}`);
+  }
   return {
-    port: Number.isInteger(port) && port >= 0 ? port : 3000,
+    port,
     host: process.env.HOST || undefined,
     maxTicks: envInt('FE_MAX_TICKS'),
     tickMs: envInt('FE_TICK_MS'),
     countdownMs: envInt('FE_COUNTDOWN_MS'),
     maxRooms: envInt('MAX_ROOMS'),
+    maxSocketsPerAddress: envCount('MAX_SOCKETS_PER_IP'),
+    maxRoomsPerAddress: envCount('MAX_ROOMS_PER_IP'),
   };
 }
 
@@ -47,6 +66,9 @@ export function envConfig() {
  * @param {number} [o.countdownMs]
  * @param {number} [o.graceMs]
  * @param {number} [o.maxRooms]
+ * @param {number} [o.maxSocketsPerAddress]  concurrent sockets per remote address (default 16, 0 = unlimited)
+ * @param {number} [o.maxRoomsPerAddress]    alive rooms per creator address (default 4, 0 = unlimited)
+ * @param {number} [o.handshakeMs]           close sockets that never send `hello` (default 10 s)
  * @param {{log:Function, warn:Function}} [o.log]
  * @returns {Promise<{ port:number, httpServer: http.Server, wss: WebSocketServer, lobby: object, sessions: object, close(): Promise<void> }>}
  */
@@ -58,11 +80,18 @@ export async function startServer(o = {}) {
   if (o.countdownMs) roomOptions.countdownMs = o.countdownMs;
   if (o.graceMs) roomOptions.graceMs = o.graceMs;
 
-  const lobby = createLobby({ maxRooms: o.maxRooms, roomOptions, log });
+  const lobby = createLobby({ maxRooms: o.maxRooms, maxRoomsPerAddress: o.maxRoomsPerAddress, roomOptions, log });
   const sessions = createSessionStore({
     graceMs: o.graceMs,
-    onExpire: (session) => lobby.onSessionExpired(session),
+    onExpire: (session) => {
+      try {
+        lobby.onSessionExpired(session);
+      } catch (err) {
+        log.warn('[session] expiry handler error', err);
+      }
+    },
   });
+  const limiter = createAddressLimiter(o.maxSocketsPerAddress !== undefined ? { maxSockets: o.maxSocketsPerAddress } : {});
 
   const handler = createStaticHandler({
     clientDir: path.join(ROOT, 'client'),
@@ -75,8 +104,15 @@ export async function startServer(o = {}) {
     perMessageDeflate: { threshold: 512 },
     maxPayload: MAX_MESSAGE_BYTES,
   });
-  wss.on('connection', (ws) => attachConnection(ws, { sessions, lobby, log }));
-  wss.on('error', (err) => log.warn('[ws] server error', err));
+  wss.on('connection', (ws, req) => attachConnection(ws, {
+    sessions, lobby, log, limiter, handshakeMs: o.handshakeMs,
+    remoteAddress: req && req.socket ? req.socket.remoteAddress : undefined,
+  }));
+  // ws re-emits the http server's errors; the listen failure is already reported by startServer's rejection.
+  wss.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') return;
+    log.warn('[ws] server error', err);
+  });
 
   await new Promise((resolve, reject) => {
     httpServer.once('error', reject);
@@ -120,7 +156,16 @@ export async function startServer(o = {}) {
 
 async function main() {
   const cfg = envConfig();
-  const server = await startServer(cfg);
+  let server;
+  try {
+    server = await startServer(cfg);
+  } catch (err) {
+    if (err && err.code === 'EADDRINUSE') {
+      console.error(`porta ${cfg.port} em uso — defina PORT=<outra> / port ${cfg.port} is in use — set PORT=<other>`);
+      process.exit(1);
+    }
+    throw err;
+  }
   console.log(`listening ${server.port}`);
   let shuttingDown = false;
   const shutdown = (signal) => {

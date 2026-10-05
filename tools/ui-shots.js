@@ -6,10 +6,14 @@
 // entry, and captures a screenshot of every screen. Fails on any page error or
 // console error.
 //
-//   node tools/ui-shots.js [--out DIR] [--port 8766] [--w 1440] [--h 900] [--mobile] [--quick]
+//   node tools/ui-shots.js [--out DIR] [--port N] [--w 1440] [--h 900] [--mobile] [--quick]
+//
+// Without --port a free port is picked (never assume a fixed one: a stale server
+// on it would be screenshotted instead of this checkout).
 
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
 import { stat, mkdir, access } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { join, extname, resolve, dirname } from 'node:path';
@@ -19,7 +23,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : def; };
 const OUT = resolve(opt('out', process.env.SCRATCHPAD ? join(process.env.SCRATCHPAD, 'ui-shots') : join(ROOT, 'test-results', 'ui-shots')));
-const PORT = +opt('port', 8766);
+const PORT = +opt('port', 0);              // 0 → pick a free port in main()
 const MOBILE = args.includes('--mobile');
 const W = +opt('w', MOBILE ? 390 : 1440), H = +opt('h', MOBILE ? 844 : 900);
 const QUICK = args.includes('--quick');
@@ -47,6 +51,29 @@ function serveStatic(port) {
   });
 }
 
+/** Ask the OS for a free TCP port on 127.0.0.1. */
+function freePort() {
+  return new Promise((res, rej) => {
+    const s = createNetServer();
+    s.on('error', rej);
+    s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => res(port)); });
+  });
+}
+
+/** Spawn a child and resolve once its stdout matches `ready`; reject if it exits first (e.g. EADDRINUSE). */
+function spawnUntil(cmd, argv, env, ready, ms) {
+  return new Promise((res, rej) => {
+    const child = spawn(cmd, argv, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '', done = false;
+    const finish = (fn, v) => { if (!done) { done = true; fn(v); } };
+    child.stdout.on('data', (c) => { out += String(c); if (ready.test(out)) finish(res, child); });
+    child.stderr.on('data', (c) => { err += String(c); });
+    child.on('error', (e) => finish(rej, e));
+    child.on('exit', (code, signal) => finish(rej, new Error(`${cmd} exited (${code ?? signal}) before it was ready: ${(out + err).trim()}`)));
+    setTimeout(() => { if (!done) { child.kill(); finish(rej, new Error(`${cmd} did not become ready in ${ms} ms`)); } }, ms).unref();
+  });
+}
+
 async function waitHttp(url, ms = 8000) {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
@@ -64,9 +91,9 @@ async function startServer(port) {
     const env = { ...process.env, PORT: String(port) };
     if (opt('tick', '')) env.FE_TICK_MS = opt('tick', '');
     if (opt('countdown', '')) env.FE_COUNTDOWN_MS = opt('countdown', '');
-    const child = spawn(process.execPath, [serverEntry], { env, stdio: 'ignore' });
-    if (await waitHttp(`http://127.0.0.1:${port}/`, 5000)) return { close: () => child.kill(), kind: 'server/index.js', base: `http://127.0.0.1:${port}/` };
-    child.kill();
+    // the server prints "listening <port>"; an HTTP probe alone would accept a stale process already bound to the port
+    const child = await spawnUntil(process.execPath, [serverEntry], env, /listening \d+/, 5000);
+    return { close: () => child.kill(), kind: 'server/index.js', base: `http://127.0.0.1:${port}/` };
   }
   // 2. the global http-server (repo root: client at /client/, shared at /shared/)
   try {
@@ -87,7 +114,8 @@ async function loadPlaywright() {
 
 async function main() {
   await mkdir(OUT, { recursive: true });
-  const server = await startServer(PORT);
+  const port = PORT || await freePort();
+  const server = await startServer(port);
   console.log('serving via', server.kind, server.base);
   const pw = await loadPlaywright();
   const browser = await pw.chromium.launch({ headless: true, args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-vsync'] });

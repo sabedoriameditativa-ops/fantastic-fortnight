@@ -17,6 +17,9 @@ const COMMIT_TICKS = 2 * TICK_RATE;
 const HYSTERESIS = 1.25;
 const ADVANCE_MAX_TICKS = 45 * TICK_RATE;
 const MAX_RETREAT_TICKS = 10 * TICK_RATE;
+const RETREAT_COOLDOWN_TICKS = 15 * TICK_RATE; // after a retreat ends by the time cap, no new retreat for this long
+const RETREAT_SHIELD_EXIT = 0.6;               // hulls that cannot regenerate leave retreat once shields are back to this fraction
+const ORBIT_MAX_OFFSET = Math.PI / 3;          // fixed-arc divers never aim their orbit more than 60° off the target
 const SHORT_PHASE_TICKS = 1.5 * TICK_RATE; // targets phased out for at most this long are kept
 
 /** Scoring weights per role (design battle-ai §2.3, extended for striker/support/carrier). */
@@ -368,13 +371,19 @@ export function decide(state, s) {
   } else if (!best) s.ai.targetId = 0;
   const t = s.ai.targetId > 0 ? ships[s.ai.targetId - 1] : null;
   // ---- retreat (hysteresis) ----
+  // A retreat is a temporary pull-back (SPEC §3.1): it ends when the hull recovered (+0.2), when the ship is alone,
+  // or by the time cap, after which a cooldown blocks the next one so a ship that cannot heal does not flee for the
+  // rest of the battle in back-to-back episodes. Hulls without regeneration (Lúmen, shielded Terran capitals) can
+  // only recover shields, so for them a recovered shield (≥ 60% of cap) is the exit criterion instead.
   const canRetreat = P.retreat && s.role !== 'anchor' && !state.suddenDeath && !s.kamikaze && !s.latch && (s.regen > 0 || s.shieldMax > 0);
   if (canRetreat) {
     const frac = s.hp / s.hpMax, th = RETREAT_AT[s.role] || 0.3;
-    if (!s.ai.retreating && frac < th) {
+    if (!s.ai.retreating && frac < th && tick >= s.ai.retreatBlockedUntil) {
       if (alliesWithin(state, s, 600, qbuf).length > 0) { s.ai.retreating = true; s.ai.retreatSince = tick; } // alone = fight
     } else if (s.ai.retreating) {
-      if (frac > th + 0.2 || tick - s.ai.retreatSince > MAX_RETREAT_TICKS) s.ai.retreating = false;
+      const recovered = s.regen > 0 || s.hot ? frac > th + 0.2 : s.shield >= RETREAT_SHIELD_EXIT * s.shieldMax;
+      if (tick - s.ai.retreatSince > MAX_RETREAT_TICKS) { s.ai.retreating = false; s.ai.retreatBlockedUntil = tick + RETREAT_COOLDOWN_TICKS; }
+      else if (recovered) s.ai.retreating = false;
       else if (alliesWithin(state, s, 600, qbuf).length === 0) s.ai.retreating = false;
     }
   } else s.ai.retreating = false;
@@ -395,7 +404,7 @@ export function decide(state, s) {
     const d = Math.sqrt((t.x - s.x) * (t.x - s.x) + (t.y - s.y) * (t.y - s.y));
     const kiting = P.kiting && !state.suddenDeath;
     switch (s.role) {
-      case 'diver': ai.mode = d > s.engageRange * s.mod.rangeMul ? 'approach' : 'orbit'; break;
+      case 'diver': ai.mode = gunDistance(s, t, d) > s.engageRange * s.mod.rangeMul ? 'approach' : 'orbit'; break;
       case 'brawler': ai.mode = 'hold'; break;
       case 'kiter': ai.mode = kiting ? 'kite' : 'hold'; break;
       case 'striker': {
@@ -421,6 +430,11 @@ export function decide(state, s) {
       else ab.pendingAt = tick + P.abilityDelayTicks; // 0 → cast in this tick's cast phase
     }
   }
+}
+
+/** Distance the main weapon measures its range against: edge to edge for contact weapons, else centre to centre. */
+function gunDistance(s, t, d) {
+  return s.weapons[0].def.contact ? d - s.radius - t.radius : d;
 }
 
 function protecteeAlive(state, s) {
@@ -525,8 +539,20 @@ export function computeDesired(state, s, out) {
       const tx = t.x - s.x, ty = t.y - s.y;
       const d = Math.sqrt(tx * tx + ty * ty) || 1;
       const nx = tx / d, ny = ty / d;
-      const k = d > 0.6 * R ? 0.8 : -0.3;
-      dx = -ny * ai.orbitSign + nx * k; dy = nx * ai.orbitSign + ny * k; speed = cap;
+      const w0 = s.weapons[0];
+      const outside = gunDistance(s, t, d) > 0.6 * R;
+      if (w0.arcRad >= Math.PI) { // turret: free strafing run, drifting out again inside the ring
+        const k = outside ? 0.8 : -0.3;
+        dx = -ny * ai.orbitSign + nx * k; dy = nx * ai.orbitSign + ny * k; speed = cap;
+      } else {
+        // fixed gun: the heading follows the steering direction, so the orbit is a spiral whose angle off the target
+        // stays inside the weapon arc (the target is then within arc whenever the ship is roughly on course). Inside
+        // the ring the ship keeps facing the target and only creeps in; separation pushes it back out.
+        const a = Math.min(0.7 * w0.arcRad, ORBIT_MAX_OFFSET);
+        const ca = Math.cos(a), sa = Math.sin(a) * ai.orbitSign;
+        dx = nx * ca - ny * sa; dy = ny * ca + nx * sa;
+        speed = outside ? cap : cap * 0.35;
+      }
       break;
     }
     case 'escortSlot': {

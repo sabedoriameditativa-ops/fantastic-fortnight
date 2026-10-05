@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createBattle, stepBattle } from '../../shared/sim/battle.js';
 import { AI_PROFILES } from '../../shared/aiProfiles.js';
 import { config1v1, scalePreset, oneOfEachFleet } from './helpers.js';
+import { SHIPS } from '../../shared/catalog.js';
 
 const MOVING_MODES = new Set(['approach', 'idleAdvance', 'formation', 'retreat', 'kamikaze', 'backline', 'escortSlot', 'orbit', 'kite', 'hold']);
 
@@ -83,4 +84,68 @@ test('team think assigns focus targets and protectees', () => {
   const escorts = state.ships.filter((s) => s.alive && (s.role === 'escort' || s.role === 'support'));
   assert.ok(escorts.every((s) => s.ai.protecteeId === 0 || state.ships[s.ai.protecteeId - 1].team === s.team));
   assert.ok(state.ships.some((s) => s.alive && s.allocDps > 0));
+});
+
+/** Keep a ship from shooting or casting (a passive, still-moving target). */
+function disarm(s) {
+  for (const w of s.weapons) w.readyAt = 1e9;
+  s.ability.readyAt = 1e9;
+}
+
+test('orbit keeps fixed-arc guns on target: every diver fires on ≥ 50% of the ticks its weapon is ready while in range of a large target', () => {
+  const DIVERS = ['ter_vespa', 'lum_centelha', 'fer_vetor', 'vor_zangao', 'vor_larva'];
+  for (const cls of DIVERS) {
+    let ready = 0, fired = 0;
+    for (const seed of [1, 2, 3]) {
+      const a = { faction: SHIPS[cls].faction, ships: [{ cls, count: 1 }] };
+      const b = { faction: 'terran', ships: [{ cls: 'ter_hercules', count: 1 }] };
+      const state = createBattle(config1v1(a, b, `orbit-${cls}-${seed}`, 'especialista', { maxTicks: 1500 }));
+      const s = state.ships[0], t = state.ships[1], w = s.weapons[0];
+      assert.ok(w.arcRad < Math.PI / 2, `${cls} has a fixed narrow gun`);
+      disarm(t);
+      while (!state.ended) {
+        const wasReady = w.readyAt <= state.tick + 1; // ready in the coming tick's weapons phase
+        const ev = stepBattle(state);
+        if (!s.alive || !t.alive) break;
+        const R = w.def.range * w.mod.rangeMul * s.mod.rangeMul + w.mod.rangeAdd;
+        if (!wasReady || Math.hypot(t.x - s.x, t.y - s.y) > R || s.ai.mode !== 'orbit') continue;
+        ready++;
+        if (ev.some((e) => (e[0] === 'shot' && e[1] === s.id && e[3] === 0) || (e[0] === 'proj' && e[2] === s.id && e[4] === 0))) fired++;
+      }
+    }
+    assert.ok(ready > 100, `${cls}: only ${ready} ready-in-range orbit ticks`);
+    assert.ok(fired >= 0.5 * ready, `${cls}: fired on ${fired}/${ready} ready ticks in orbit (${(100 * fired / ready).toFixed(0)}%)`);
+  }
+});
+
+test('retreat ends by the time cap at most once per cooldown; hulls without regen exit on shield recovery', () => {
+  const fleet = scalePreset('lum_coro', 1500);
+  const state = createBattle(config1v1(fleet, fleet, 'retreat-cd'));
+  for (let i = 0; i < 20; i++) stepBattle(state);
+  const prisma = state.ships.find((s) => s.cls === 'lum_prisma' && s.team === 0);
+  assert.equal(prisma.regen, 0);
+  const enemy = state.ships.find((s) => s.team === 1);
+  // keep the fight far away so the prisma is only ever hurt by hand
+  for (const s of state.ships) if (s.team === 1) { s.x = state.world.w - 150; disarm(s); }
+  prisma.ai.targetId = enemy.id;
+  prisma.hp = 0.3 * prisma.hpMax; prisma.shield = 0; prisma.lastShieldHitTick = state.tick; // below the kiter threshold 0.4
+  let entered = -1;
+  for (let i = 0; i < 40 && entered < 0; i++) { stepBattle(state); if (prisma.ai.retreating) entered = state.tick; }
+  assert.ok(entered > 0, 'retreat entered');
+  prisma.shield = 0; prisma.lastShieldHitTick = state.tick + 10000; // shields kept broken: only the time cap can end this retreat
+  while (prisma.ai.retreating && state.tick < entered + 12 * 20) { stepBattle(state); prisma.shield = 0; prisma.hp = 0.3 * prisma.hpMax; }
+  assert.ok(!prisma.ai.retreating, 'retreat ended by the 10 s cap');
+  assert.ok(state.tick - entered >= 10 * 20 && state.tick - entered <= 10 * 20 + 20, `cap hit after ${state.tick - entered} ticks`);
+  assert.ok(prisma.ai.retreatBlockedUntil >= state.tick + 14 * 20, 'cooldown set');
+  // still below the threshold: no new retreat episode during the cooldown
+  for (let i = 0; i < 10 * 20; i++) { stepBattle(state); prisma.hp = 0.3 * prisma.hpMax; prisma.shield = 0; assert.ok(!prisma.ai.retreating, `re-entered retreat at +${i} ticks`); }
+  // after the cooldown a new retreat is allowed, and it exits as soon as the shield is back (hull cannot regenerate)
+  while (state.tick < prisma.ai.retreatBlockedUntil + 1) { stepBattle(state); prisma.hp = 0.3 * prisma.hpMax; }
+  let again = -1;
+  for (let i = 0; i < 40 && again < 0; i++) { stepBattle(state); prisma.hp = 0.3 * prisma.hpMax; if (prisma.ai.retreating) again = state.tick; }
+  assert.ok(again > 0, 'retreat allowed again after the cooldown');
+  prisma.shield = prisma.shieldMax;
+  for (let i = 0; i < 12 && prisma.ai.retreating; i++) { stepBattle(state); prisma.hp = 0.3 * prisma.hpMax; }
+  assert.ok(!prisma.ai.retreating, 'shield recovered → retreat over although the hull is still low');
+  assert.ok(state.tick - again < 10 * 20, 'exited before the cap');
 });

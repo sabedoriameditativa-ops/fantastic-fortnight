@@ -74,8 +74,11 @@ export function mount(root, props, ctx) {
       myTeam = me ? me.team : null;
     }
     if (startedOnce && renderer && String(start.seed) === String(currentSeed)) {
-      // reconnect to the same battle: resync the interpolator, keep the HUD
-      renderer.interpolator.reset();
+      // reconnect to the same battle: the server resends start with the units
+      // spawned meanwhile (start.ships) and the ids that died (start.dead).
+      // Register them in the views we keep, then resync the interpolator.
+      try { renderer.resync(start); } catch (e) { ctx.reportError(e); }
+      try { if (hud) hud.resync(start); } catch (e) { ctx.reportError(e); }
       return;
     }
     if (renderer) { renderer.dispose(); renderer = null; }
@@ -127,7 +130,7 @@ export function mount(root, props, ctx) {
         }
         el.appendChild(h('div.pl',
           h('div.pn', { class: t === 0 ? 'team-a' : 'team-b', text: p.name + (p.id === myPlayerId ? ` (${T.app.you})` : '') }),
-          h('div.small.muted', { text: `${f ? f.name : p.faction} · ${p.isBot ? `${T.app.bot} ${T.difficulty[p.ai] || ''}` : ''}`.trim() }),
+          h('div.small.muted', { text: [f ? f.name : p.faction, p.isBot ? `${T.app.bot} ${T.difficulty[p.ai] || ''}`.trim() : ''].filter(Boolean).join(' · ') }),
           row,
         ));
       }
@@ -144,7 +147,8 @@ export function mount(root, props, ctx) {
   function setSpeed(x) {
     if (!isLocal || !feed) return;
     const v = [0, 1, 2, 4].includes(x) ? x : 1;
-    if (v > 0) { speed = v; state.settings.speed = v; }
+    if (v > 0 && v !== state.settings.speed) { state.settings.speed = v; try { ctx.persistSettings(); } catch { /* storage may be unavailable */ } }
+    if (v > 0) speed = v;
     feed.controls.setSpeed(v);
     if (hud) hud.setSpeed(v);
   }
@@ -162,8 +166,13 @@ export function mount(root, props, ctx) {
     if (hud) hud.setToggles({ showNames: state.settings.showNames, grid: state.settings.grid, muted: state.settings.muted });
   }
 
+  let quitting = false;
   async function quit() {
-    const ok = await confirmDialog(T.battle.quitConfirm, { ok: T.battle.quit, cancel: T.app.cancel, test: 'quit' });
+    if (quitting) return;
+    quitting = true;
+    let ok = false;
+    try { ok = await confirmDialog(T.battle.quitConfirm, { ok: T.battle.quit, cancel: T.app.cancel, test: 'quit' }); }
+    finally { quitting = false; }
     if (!ok || disposed) return;
     if (!isLocal && state.net) { state.net.leaveRoom().catch(() => {}); ctx.go('lobby'); }
     else ctx.go('menu');
@@ -222,6 +231,7 @@ export function mount(root, props, ctx) {
   // ---- keyboard ----
   const onKey = (e) => {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (quitting) return; // the quit dialog owns the keyboard (Esc / Enter / Space on its buttons)
     if (e.key === ' ') { e.preventDefault(); if (introEl) startClock(); else togglePause(); }
     else if (e.key === '1') setSpeed(1);
     else if (e.key === '2') setSpeed(2);

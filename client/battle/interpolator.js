@@ -9,6 +9,9 @@
 // Pure module (no DOM) — unit-tested in Node. Snapshot rows follow
 // docs/ARCHITECTURE.md §3: [id, x*10, y*10, heading 0..255, hp‰, shield‰, flags].
 
+/** A frame gap longer than this × the expected interval counts as a stall for the rate estimator. */
+const GAP_OUTLIER = 3;
+
 const DEFAULTS = {
   tickMs: 50,
   snapshotEvery: 2,
@@ -61,6 +64,7 @@ export function createInterpolator(opts = {}) {
   /** @type {{k:number,s:number[][],e:any[],at:number,byId:Map<number,number[]>}[]} */
   let frames = [];
   let rate = nominalRate;
+  let gapOutliers = 0;        // consecutive frame gaps far longer than the rate predicts
   let presTick = -1;          // presentation tick (float); -1 = not started
   let lastNow = -1;
   let presentedK = -Infinity; // highest frame.k whose events were released
@@ -92,6 +96,7 @@ export function createInterpolator(opts = {}) {
   function reset() {
     frames = [];
     rate = nominalRate;
+    gapOutliers = 0;
     presTick = -1;
     lastNow = -1;
     presentedK = -Infinity;
@@ -118,8 +123,15 @@ export function createInterpolator(opts = {}) {
         const dtMs = at - prev.at;
         if (dtMs > 0 && dtMs < 1000) {
           const inst = (f.k - prev.k) / dtMs;
-          const clamped = Math.min(nominalRate * 6, Math.max(nominalRate * 0.25, inst));
-          rate += (clamped - rate) * 0.15;
+          // A single gap much longer than the current rate predicts is a stall
+          // (sub-second pause, hiccup), not a new rate: ignore it once. Two in a
+          // row mean the feed really slowed down (e.g. x4 → x1), so adapt.
+          const stall = dtMs > GAP_OUTLIER * (f.k - prev.k) / rate;
+          if (!stall || gapOutliers >= 1) {
+            const clamped = Math.min(nominalRate * 6, Math.max(nominalRate * 0.25, inst));
+            rate += (clamped - rate) * 0.15;
+          }
+          gapOutliers = stall ? gapOutliers + 1 : 0;
         }
       }
       frames.push(f);

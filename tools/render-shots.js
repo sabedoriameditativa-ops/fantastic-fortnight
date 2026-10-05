@@ -4,10 +4,11 @@
 // ships, one row per faction at zoom 2, a mid-battle frame, an explosion
 // moment and a 500-ship stress frame. Prints the paths and measured frame times.
 //
-//   node tools/render-shots.js [--out DIR] [--port 8765] [--w 1920] [--h 1080] [--quick]
+//   node tools/render-shots.js [--out DIR] [--port N (default: a free port)] [--w 1920] [--h 1080] [--quick]
 
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
 import { readFile, stat, mkdir } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { join, extname, resolve, dirname } from 'node:path';
@@ -17,7 +18,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : def; };
 const OUT = resolve(opt('out', process.env.SCRATCHPAD ? join(process.env.SCRATCHPAD, 'shots') : join(ROOT, 'test-results', 'render-shots')));
-const PORT = +opt('port', 8765);
+const PORT = +opt('port', 0);              // 0 → pick a free port in main()
 const W = +opt('w', 1920), H = +opt('h', 1080);
 const QUICK = args.includes('--quick');
 
@@ -50,6 +51,15 @@ async function waitHttp(url, ms = 8000) {
     await new Promise((r) => setTimeout(r, 150));
   }
   return false;
+}
+
+/** Ask the OS for a free TCP port on 127.0.0.1. */
+function freePort() {
+  return new Promise((res, rej) => {
+    const s = createNetServer();
+    s.on('error', rej);
+    s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => res(port)); });
+  });
 }
 
 async function startServer(port) {
@@ -92,10 +102,11 @@ async function measure(page, ms) {
 
 async function main() {
   await mkdir(OUT, { recursive: true });
-  const server = await startServer(PORT);
+  const port = PORT || await freePort();
+  const server = await startServer(port);
   const pw = await loadPlaywright();
   const browser = await pw.chromium.launch({ headless: true, args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-vsync'] });
-  const base = `http://127.0.0.1:${PORT}/client/dev/render-demo.html`;
+  const base = `http://127.0.0.1:${port}/client/dev/render-demo.html`;
   const errors = [];
   const shots = [];
   const stats = {};

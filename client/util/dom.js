@@ -203,8 +203,13 @@ export function segmented(items, opts = {}) {
 /** Show a modal confirmation; resolves true/false. Keyboard: Esc cancels, Enter confirms. */
 export function confirmDialog(message, { ok = 'OK', cancel = 'Cancelar', test = 'confirm' } = {}) {
   return new Promise((resolve) => {
-    const done = (v) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
-    const onKey = (e) => { if (e.key === 'Escape') done(false); else if (e.key === 'Enter') done(true); };
+    // Capture phase + stopPropagation: screen-level shortcuts (e.g. the battle's
+    // Esc → quit) must not see the keys that drive the modal.
+    const done = (v) => { overlay.remove(); document.removeEventListener('keydown', onKey, true); resolve(v); };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); done(false); }
+      else if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); done(true); }
+    };
     const overlay = h('div.modal-overlay',
       h('div.panel.modal', { role: 'dialog', 'aria-modal': 'true' },
         h('p.modal-text', { text: message }),
@@ -215,7 +220,7 @@ export function confirmDialog(message, { ok = 'OK', cancel = 'Cancelar', test = 
       ),
     );
     document.body.appendChild(overlay);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
     const okBtn = overlay.querySelector('.btn-primary');
     if (okBtn) okBtn.focus();
   });

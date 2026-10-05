@@ -403,14 +403,18 @@ export function createMusicEngine(o) {
   function stingerVictory(t, dest) {
     const v = voice(t, dest);
     const chords = [[Gmaj, 0, 0.55], [Amaj, 0.5, 0.55], [Dmaj, 1.0, 1.4]];
+    const sends = [];
     for (const [ch, off, dur] of chords) {
       const g = env(v, t + off, { a: 0.02, d: dur * 0.4, s: 0.7, hold: dur * 0.4, r: 0.5, peak: 0.22 }, dest);
+      sends.push(g);
       const f = lp(v, 2000, 0.8, g);
       for (const m of ch) play(v, osc(v, 'sawtooth', mtof(m + 12), t + off, f), t + off, t + off + dur + 0.6);
     }
     const sg = env(v, t, { a: 0.3, d: 1.2, r: 0.6, peak: 0.12 }, dest);
     play(v, noise(v, 'pink', t, hp(v, 4000, 0.7, sg)), t, t + 2.2);
-    if (reverbIn) { const s = gainNode(v, 0.5, reverbIn); dest.connect(s); }
+    // reverb send fed from the voice's own envelopes (never from `dest`: a
+    // dest→send edge would outlive the voice's cleanup and leak one gain per stinger)
+    if (reverbIn) { const s = gainNode(v, 0.5, reverbIn); for (const g of sends) g.connect(s); sg.connect(s); }
     done(v);
   }
 
@@ -458,9 +462,22 @@ export function createMusicEngine(o) {
     }
   }
 
+  /** Gain the theme's fade-in ramp (0 at startAt → 1 at startAt + fadeIn) has reached at time t. */
+  function fadeInValueAt(th, t) {
+    const fi = th.fadeIn > 0 ? th.fadeIn : 0.001;
+    return Math.max(0, Math.min(1, (t - th.startAt) / fi));
+  }
+
   function retire(th, tSwitch, fade) {
-    th.bus.gain.setValueAtTime(1, tSwitch);
-    th.bus.gain.linearRampToValueAtTime(0, tSwitch + fade);
+    // The theme may still be fading in: continue that ramp from its current
+    // value up to tSwitch, then fade out — never force the bus to 1 (pop).
+    const g = th.bus.gain;
+    const now = ctx.currentTime;
+    const t0 = Math.min(now, tSwitch);
+    g.cancelScheduledValues(t0);
+    g.setValueAtTime(fadeInValueAt(th, t0), t0);
+    g.linearRampToValueAtTime(fadeInValueAt(th, tSwitch), tSwitch);
+    g.linearRampToValueAtTime(0, tSwitch + fade);
     th.stopAt = tSwitch + fade + 0.2;
     fading.push(th);
   }
@@ -484,6 +501,7 @@ export function createMusicEngine(o) {
     if (old) tSwitch = Math.max(now + 0.02, stinger ? old.nextEighthTime() : old.nextBarTime());
     const th = makeTheme(next, tSwitch);
     const fadeIn = next === 'menu' ? 3.0 : stinger ? 0.3 : 2.0;
+    th.fadeIn = fadeIn;
     th.bus.gain.setValueAtTime(0, tSwitch);
     th.bus.gain.linearRampToValueAtTime(1, tSwitch + fadeIn);
     if (old) retire(old, tSwitch, stinger ? 0.4 : 2.0);

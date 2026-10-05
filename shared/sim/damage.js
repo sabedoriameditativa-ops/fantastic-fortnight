@@ -148,6 +148,17 @@ const DOT_OPTS = { ignoreDr: true };
 
 /**
  * Restore hull or shield points, emitting a 'heal' event and counting stats.
+ *
+ * Sudden-death healing rule (SPEC §1 "all regeneration/repair off" refined):
+ * after the sudden-death tick every *continuous* source of recovery stops —
+ * passive hull regen / nanite repair / shield regen, the Colmeia-Mãe aura, the
+ * reconstruction heal-over-time, the leech drain heal and the Vorrax 'Fome'
+ * kill-heal (which is also restricted to purchased victims at all times, so
+ * free spawned larvae/vespas/vetores never feed it). One-shot ability heals cast
+ * during sudden death (molt, reactive nanites, shield overload, aurora's shield
+ * restore) still apply: they are bounded by the ability cooldown and cannot
+ * stall the damage ramp. Callers of per-tick healing must gate on
+ * `!state.suddenDeath`; this function itself does not.
  * @param {string} kind 'hull'|'shield'
  * @returns {number} amount actually restored
  */
@@ -203,8 +214,8 @@ export function regenPhase(state) {
         }
       }
     }
-    if (s.hot) {
-      if (s.hot.until <= tick) s.hot = null;
+    if (s.hot) { // reconstruction heal-over-time: continuous healing, off in sudden death (see heal())
+      if (s.hot.until <= tick || !passive) s.hot = null;
       else if (s.hp < s.hpMax) {
         const add = Math.min(s.hot.perTick, s.hpMax - s.hp);
         s.hp += add;
@@ -253,7 +264,9 @@ function killShip(state, s, killerId) {
   const killer = killerId > 0 ? ships[killerId - 1] : null;
   if (killer) {
     if (s.purchased) { killer.kills++; const ks = state.stats[killer.owner]; if (ks) ks.kills++; }
-    if (killer.alive && killer.faction === 'vorrax' && killer.team !== s.team) {
+    // Vorrax 'Fome': purchased victims only (spawned units are free and would heal a Vorrax ship faster than
+    // spawners lose them) and never in sudden death (see heal()), so the damage ramp always converges
+    if (killer.alive && killer.faction === 'vorrax' && killer.team !== s.team && s.purchased && !state.suddenDeath) {
       heal(state, killer.id, killer, killer.hpMax * COMBAT.vorraxHungerHeal, 'hull');
     }
   }

@@ -18,11 +18,20 @@ export function createShields(o) {
   const restores = new Map();
   const rand = makeRand(0x5e1d);
 
-  /** Hex-grid mask canvas for a given screen radius (px, rounded to 8). */
+  /** Mask radii (px): a handful of power-of-two sizes; drawImage scales the mask to the requested radius. */
+  const MASK_SIZES = [32, 64, 128, 256, 512];
+  const MASK_CACHE_MAX = MASK_SIZES.length;
+  /**
+   * Hex-grid mask canvas for a given screen radius (px). Quantized up to the next
+   * power-of-two radius so the cache holds at most 5 canvases (~5.5 MB) instead
+   * of one per 8-px bucket (≈50 MB with a zooming camera over aura domes).
+   */
   function hexMask(rPx) {
-    const key = Math.max(16, Math.min(512, Math.round(rPx / 8) * 8));
+    let key = MASK_SIZES[MASK_SIZES.length - 1];
+    for (const sz of MASK_SIZES) if (rPx <= sz) { key = sz; break; }
     let c = maskCache.get(key);
     if (c) return c;
+    if (maskCache.size >= MASK_CACHE_MAX) maskCache.delete(maskCache.keys().next().value);
     const S = key * 2;
     c = makeCanvas(S, S);
     const g = c.getContext('2d');
@@ -147,5 +156,5 @@ export function createShields(o) {
     ctx.globalCompositeOperation = 'source-over';
   }
 
-  return { ripple, shatter, restored, drawBubble, drawRipples, hexMask, clear() { ripples.length = 0; breaks.clear(); restores.clear(); }, rgba, clamp };
+  return { ripple, shatter, restored, drawBubble, drawRipples, hexMask, clear() { ripples.length = 0; breaks.clear(); restores.clear(); maskCache.clear(); }, get maskCacheSize() { return maskCache.size; }, rgba, clamp };
 }

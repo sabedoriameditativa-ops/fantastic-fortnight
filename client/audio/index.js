@@ -165,6 +165,7 @@ export function createAudioEngine(deps = {}) {
   let hidden = false;
   const cam = { cx: 0, cy: 0, hw: 1400, aspect: 16 / 9, set: false };
   const voices = [];                 // active SFX voices (pooled)
+  const dying = [];                  // stolen voices fading out (cleaned up by gcVoices)
   const recent = new Map();          // coalescing slots by key
   const buckets = new Map();         // rate limit token buckets by name
   const deferred = [];               // { at, name, opts }
@@ -282,6 +283,11 @@ export function createAudioEngine(deps = {}) {
       const v = voices[i];
       if (v.dead || v.end + 0.5 < now) { v.cleanup(); voices.splice(i, 1); }
     }
+    // stolen voices: their graph stays connected until the 10 ms fade + stop have played out
+    for (let i = dying.length - 1; i >= 0; i--) {
+      const v = dying[i];
+      if (v.end + 0.1 < now) { v.cleanup(); dying.splice(i, 1); }
+    }
   }
 
   function acquire(priority, now) {
@@ -304,7 +310,10 @@ export function createAudioEngine(deps = {}) {
     v.dead = true;
     const i = voices.indexOf(v);
     if (i >= 0) voices.splice(i, 1);
-    v.cleanup();
+    // Do not disconnect now: that would cut the voice hard (click) before the
+    // fade plays. The last source's onended runs cleanup; gcVoices is the backstop.
+    v.end = now + 0.05;
+    dying.push(v);
   }
 
   function rateLimited(name, now) {
@@ -412,13 +421,19 @@ export function createAudioEngine(deps = {}) {
 
   // ---- ducking / deferred -------------------------------------------------
 
+  let duckUntil = 0;               // end of the current duck's release ramp (ctx time)
   function duckMusic(t, dur) {
     const f = buses.musicLP.frequency;
-    f.cancelScheduledValues(t);
-    f.setValueAtTime(20000, t);
+    const active = t < duckUntil;
+    // Re-entry inside an active duck (chain of capital deaths) must not snap the
+    // filter back to 20 kHz: hold the current value and extend the hold instead.
+    if (active && typeof f.cancelAndHoldAtTime === 'function') f.cancelAndHoldAtTime(t);
+    else f.cancelScheduledValues(t);
+    if (!active) f.setValueAtTime(20000, t);
     f.exponentialRampToValueAtTime(600, t + 0.05);
     f.setValueAtTime(600, t + 0.05 + dur);
     f.exponentialRampToValueAtTime(20000, t + 0.05 + dur + 0.35);
+    duckUntil = t + 0.05 + dur + 0.35;
   }
 
   function defer(dt, name, opts) {

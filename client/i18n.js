@@ -70,12 +70,14 @@ export const T = {
     builder: { random: 'frota aleatória', preset: 'frota predefinida', counter: 'frota de contra-ataque' },
     build: 'Montar frota →',
     quickPlay: 'Jogar com a última frota',
+    // {pct} = |budgetMul − 1| in percent, filled by difficultyDescription() from AI_PROFILES
     diffDesc: {
-      facil: 'Bots lentos e desorganizados. Orçamento inimigo reduzido.',
+      facil: 'Bots lentos e desorganizados. Orçamento inimigo reduzido em {pct}%.',
       normal: 'Bots competentes com frotas predefinidas.',
-      dificil: 'Bots coordenados que montam frotas contra a sua.',
-      especialista: 'Bots perfeitos com 30% a mais de orçamento. Boa sorte.',
+      dificil: 'Bots coordenados que montam frotas contra a sua, com {pct}% a mais de orçamento.',
+      especialista: 'Bots perfeitos com {pct}% a mais de orçamento. Boa sorte.',
     },
+    diffDescSameBudget: { facil: 'Bots lentos e desorganizados.', dificil: 'Bots coordenados que montam frotas contra a sua.', especialista: 'Bots perfeitos. Boa sorte.' },
   },
 
   builder: {
@@ -329,9 +331,9 @@ export const T = {
     title: 'Como jogar',
     steps: [
       { title: '1. Escolha uma facção', text: 'Cada facção tem 8 naves, um tipo de casco e uma passiva. Terranos são blindados e disciplinados; Vorrax regeneram e vêm em número; Lúmen têm escudos enormes e cascos frágeis; Ferrix se reconstroem e atravessam blindagens.' },
-      { title: '2. Monte a frota dentro do orçamento', text: 'Cada nave custa pontos. O orçamento padrão é 1500. Há limites por classe de tamanho (1 nave-mãe, 2 capitais, 4 grandes, 12 médias, 24 pequenas, 24 minúsculas) e no máximo 40 naves. Use as predefinições como ponto de partida.' },
+      { title: '2. Monte a frota dentro do orçamento', text: 'Cada nave custa pontos. O orçamento padrão é 1500. Há limites por classe de tamanho (1 nave-mãe, 2 capitais, 4 grandes, 12 médias, 24 pequenas, 24 minúsculas — 32 para Vorrax) e no máximo 40 naves. Use as predefinições como ponto de partida.' },
       { title: '3. A batalha é automática', text: 'As naves escolhem alvos, se posicionam e usam habilidades sozinhas. Você assiste, acelera o tempo (x2, x4) e aprende o que funciona. Vence quem destruir todas as naves compradas do inimigo.' },
-      { title: '4. Morte súbita e tempo', text: 'Aos 150 s a regeneração desliga e o dano cresce 20% a cada 15 s. Aos 240 s a batalha termina: vence quem tiver mais valor de frota restante.' },
+      { title: '4. Morte súbita e tempo', text: 'Aos 150 s a regeneração desliga e o dano cresce 20% a cada 15 s. Aos 240 s a batalha termina: vence quem tiver mais valor de frota restante; se a diferença for de até 2%, vence quem causou mais dano.' },
       { title: '5. Tipos de dano importam', text: 'Lasers derretem escudos e cascos orgânicos; cinéticos e torpedos castigam blindagem e cristal; plasma e bioácido corroem nanitos; pulsos iônicos apagam escudos e interrompem regeneração.' },
       { title: '6. Multijogador', text: 'Crie uma sala, envie o código (ou o link) aos amigos, montem as frotas em segredo e marquem "Pronto". Vagas vazias podem ser preenchidas por bots. O servidor simula e todos assistem à mesma batalha.' },
     ],
@@ -366,7 +368,7 @@ export const T = {
     gameplay: 'Jogo',
     name: 'Nome do jogador',
     resetProgress: 'Apagar progresso',
-    resetConfirm: 'Apagar todo o progresso de um jogador?',
+    resetConfirm: 'Apagar todo o progresso do modo Um jogador?',
     resetDone: 'Progresso apagado.',
     saved: 'Opções salvas.',
     audioNote: 'O áudio é ativado após o primeiro clique ou tecla.',
@@ -379,6 +381,7 @@ export const T = {
     RATE_LIMITED: 'Calma! Muitas mensagens em pouco tempo.',
     ROOM_NOT_FOUND: 'Sala não encontrada. Confira o código.',
     ROOM_FULL: 'A sala está cheia.',
+    ROOM_LIMIT: 'O servidor atingiu o limite de salas. Tente novamente mais tarde.',
     NOT_HOST: 'Somente o anfitrião pode fazer isso.',
     WRONG_PHASE: 'Essa ação não é possível nesta fase da sala.',
     BAD_TEAM_SIZE: 'Formato de time inválido.',
@@ -419,18 +422,25 @@ export function fmt(s, params) {
  * @returns {string}
  */
 export function errorMessage(code, detail) {
-  if (code && T.fleetErr[code] !== undefined) return fleetErrorMessage(code, detail);
+  if (isFleetCode(code)) return fleetErrorMessage(code, detail);
+  // the server also answers ROOM_FULL when it cannot create another room (detail 'server' | 'codes')
+  if (code === 'ROOM_FULL' && (detail === 'server' || detail === 'codes')) return T.err.ROOM_LIMIT;
   const s = T.err[code];
   if (!s) return fmt(T.err.UNKNOWN, { code: code || '?' });
   let d = '';
   if (detail !== undefined && detail !== null) {
     if (typeof detail === 'string') d = detail;
     else if (detail.missing && Array.isArray(detail.missing)) d = fmt(T.lobby.missing, { list: detail.missing.map(missingLabel).join(', ') });
-    else if (detail.code && T.fleetErr[detail.code] !== undefined) d = fleetErrorMessage(detail.code, detail.detail);
+    else if (isFleetCode(detail.code)) d = fleetErrorMessage(detail.code, detail.detail);
     else if (detail.code) d = String(detail.code);
     else d = '';
   }
   return fmt(s, { detail: d }).replace(/\s+$/, '');
+}
+
+/** Fleet validation codes (shared/fleet.js FLEET_ERR); FLEET_SHIP_COUNT is rendered through its _MIN/_MAX variants. */
+function isFleetCode(code) {
+  return !!code && (code === 'FLEET_SHIP_COUNT' || T.fleetErr[code] !== undefined);
 }
 
 function missingLabel(m) {
@@ -471,6 +481,21 @@ export function fleetErrorMessage(code, detail) {
 }
 
 /** Difficulty display name. */
+/**
+ * Difficulty blurb for the single-player setup. The budget percentage is derived
+ * from the AI profile's `budgetMul` (shared/aiProfiles.js) so the text cannot drift.
+ * @param {string} id
+ * @param {number} [budgetMul]  AI_PROFILES[id].budgetMul (1 = same budget as the player)
+ */
+export function difficultyDescription(id, budgetMul) {
+  const tpl = T.sp.diffDesc[id];
+  if (!tpl) return '';
+  const mul = Number.isFinite(budgetMul) ? budgetMul : 1;
+  const pct = Math.round(Math.abs(mul - 1) * 100);
+  if (pct === 0 && /\{pct\}/.test(tpl)) return T.sp.diffDescSameBudget[id] || tpl.replace(/\s*\S*\{pct\}[^.]*\.?/, '').trim();
+  return fmt(tpl, { pct });
+}
+
 export function difficultyName(id) {
   return T.difficulty[id] || id || '';
 }

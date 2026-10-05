@@ -98,7 +98,7 @@ export const ABILITY_REGISTRY = {
     },
     cast(ctx) {
       const p = P('afterburner');
-      addEffect(ctx.me, ctx.tick + dur('afterburner'), { speedMul: p.speedMul, turnMul: p.turnMul, boosted: true });
+      addEffect(ctx.me, ctx.tick + dur('afterburner'), { speedMul: p.speedMul, turnMul: p.turnMul, boosted: true }, 'afterburner');
       emitCast(ctx, 0, ctx.me.x, ctx.me.y);
     },
   },
@@ -150,7 +150,7 @@ export const ABILITY_REGISTRY = {
       const me = ctx.me, p = P('flak_curtain');
       me.curtainUntil = ctx.tick + dur('flak_curtain');
       me.curtainLeft = p.intercepts;
-      addEffect(me, me.curtainUntil, { wt: 'flak', wDmgMul: p.damageMul, boosted: true });
+      addEffect(me, me.curtainUntil, { wt: 'flak', wDmgMul: p.damageMul, boosted: true }, 'flak_curtain');
       emitCast(ctx, 0, me.x, me.y);
     },
   },
@@ -164,7 +164,7 @@ export const ABILITY_REGISTRY = {
     },
     cast(ctx) {
       const p = P('barrage_fire');
-      addEffect(ctx.me, ctx.tick + dur('barrage_fire'), { wt: 'missile', wSalvoMul: p.salvoMul, wCdMul: p.cooldownMul, boosted: true });
+      addEffect(ctx.me, ctx.tick + dur('barrage_fire'), { wt: 'missile', wSalvoMul: p.salvoMul, wCdMul: p.cooldownMul, boosted: true }, 'barrage_fire');
       emitCast(ctx, 0, ctx.me.x, ctx.me.y);
     },
   },
@@ -175,7 +175,7 @@ export const ABILITY_REGISTRY = {
     },
     cast(ctx) {
       const p = P('reactive_armor');
-      addEffect(ctx.me, ctx.tick + dur('reactive_armor'), { drAdd: p.drAdd, shieldRegenMul: p.shieldRegenMul });
+      addEffect(ctx.me, ctx.tick + dur('reactive_armor'), { drAdd: p.drAdd, shieldRegenMul: p.shieldRegenMul }, 'reactive_armor');
       emitCast(ctx, 0, ctx.me.x, ctx.me.y);
     },
   },
@@ -200,7 +200,7 @@ export const ABILITY_REGISTRY = {
       alliesWithin(state, me, p.radius, buf);
       buf.push(me);
       const until = ctx.tick + dur('siege_protocol');
-      for (let i = 0; i < buf.length; i++) addEffect(buf[i], until, { dmgMul: p.damageMul, fireRateMul: p.fireRateMul, boosted: true });
+      for (let i = 0; i < buf.length; i++) addEffect(buf[i], until, { dmgMul: p.damageMul, fireRateMul: p.fireRateMul, boosted: true }, 'siege_protocol'); // keyed: overlapping casters refresh, never stack
       state.events.push(['aoe', Math.round(me.x), Math.round(me.y), p.radius, 'siege_protocol']);
       emitCast(ctx, 0, me.x, me.y);
     },
@@ -212,7 +212,7 @@ export const ABILITY_REGISTRY = {
     trigger(ctx) { return recentAllyDeathsNear(ctx.state, ctx.me, th(ctx, 150), 10, 'vorrax') >= 1 ? 1 : 0; },
     cast(ctx) {
       const p = P('frenzy');
-      addEffect(ctx.me, ctx.tick + dur('frenzy'), { fireRateMul: p.fireRateMul, speedMul: p.speedMul, boosted: true });
+      addEffect(ctx.me, ctx.tick + dur('frenzy'), { fireRateMul: p.fireRateMul, speedMul: p.speedMul, boosted: true }, 'frenzy');
       emitCast(ctx, 0, ctx.me.x, ctx.me.y);
     },
   },
@@ -274,7 +274,7 @@ export const ABILITY_REGISTRY = {
       heal(state, me.id, me, me.hpMax * p.healFrac, 'hull');
       me.dots.length = 0;
       if (me.disruptedUntil > ctx.tick) { me.disruptedUntil = 0; me.disruptImmuneUntil = ctx.tick + 2 * TICK_RATE; }
-      addEffect(me, ctx.tick + dur('molt'), { regenMul: p.regenMul });
+      addEffect(me, ctx.tick + dur('molt'), { regenMul: p.regenMul }, 'molt');
       emitCast(ctx, 0, me.x, me.y);
     },
   },
@@ -289,7 +289,7 @@ export const ABILITY_REGISTRY = {
       alliesWithin(state, me, p.radius, buf);
       buf.push(me);
       const until = ctx.tick + dur('war_pheromone');
-      for (let i = 0; i < buf.length; i++) addEffect(buf[i], until, { dmgMul: p.damageMul, regenMul: p.regenMul, boosted: true });
+      for (let i = 0; i < buf.length; i++) addEffect(buf[i], until, { dmgMul: p.damageMul, regenMul: p.regenMul, boosted: true }, 'war_pheromone'); // keyed: overlapping casters refresh, never stack
       state.events.push(['aoe', Math.round(me.x), Math.round(me.y), p.radius, 'war_pheromone']);
       emitCast(ctx, 0, me.x, me.y);
     },
@@ -374,7 +374,7 @@ export const ABILITY_REGISTRY = {
     trigger(ctx) { return countEnemies(ctx.state, ctx.me, th(ctx, 520), 3) >= 1 ? 1 : 0; },
     cast(ctx) {
       const p = P('prismatic_focus');
-      addEffect(ctx.me, ctx.tick + dur('prismatic_focus'), { w: p.weaponIndex, wDmgMul: p.damageMul, wRangeAdd: p.rangeAdd, boosted: true });
+      addEffect(ctx.me, ctx.tick + dur('prismatic_focus'), { w: p.weaponIndex, wDmgMul: p.damageMul, wRangeAdd: p.rangeAdd, boosted: true }, 'prismatic_focus');
       emitCast(ctx, 0, ctx.me.x, ctx.me.y);
     },
   },
@@ -455,7 +455,7 @@ export const ABILITY_REGISTRY = {
       for (let i = 0; i < buf.length; i++) {
         const a = buf[i];
         heal(state, me.id, a, p.shieldRestore, 'shield');
-        addEffect(a, until, { shieldRegenMul: p.shieldRegenMul });
+        addEffect(a, until, { shieldRegenMul: p.shieldRegenMul }, 'aurora'); // keyed: overlapping casters refresh, never stack
       }
       state.events.push(['aoe', Math.round(me.x), Math.round(me.y), p.radius, 'aurora']);
       emitCast(ctx, 0, me.x, me.y);
@@ -488,7 +488,7 @@ export const ABILITY_REGISTRY = {
       return n >= th(ctx, 3) ? 1 : 0;
     },
     cast(ctx) {
-      addEffect(ctx.me, ctx.tick + dur('overclock'), { fireRateMul: P('overclock').fireRateMul, boosted: true });
+      addEffect(ctx.me, ctx.tick + dur('overclock'), { fireRateMul: P('overclock').fireRateMul, boosted: true }, 'overclock');
       emitCast(ctx, 0, ctx.me.x, ctx.me.y);
     },
   },
@@ -502,7 +502,7 @@ export const ABILITY_REGISTRY = {
       const me = ctx.me, p = P('turret_mode');
       const until = ctx.tick + dur('turret_mode');
       me.stationaryUntil = until;
-      addEffect(me, until, { rangeMul: p.rangeMul, dmgMul: p.damageMul, boosted: true });
+      addEffect(me, until, { rangeMul: p.rangeMul, dmgMul: p.damageMul, boosted: true }, 'turret_mode');
       emitCast(ctx, 0, me.x, me.y);
     },
   },
@@ -604,7 +604,7 @@ export const ABILITY_REGISTRY = {
     },
     cast(ctx) {
       const p = P('emp_storm'), until = ctx.tick + dur('emp_storm');
-      shieldPulse(ctx, p.radius, p.shieldDamage, p.disruptSeconds, (e) => addEffect(e, until, { cdMul: p.cooldownMul }));
+      shieldPulse(ctx, p.radius, p.shieldDamage, p.disruptSeconds, (e) => addEffect(e, until, { cdMul: p.cooldownMul }, 'emp_storm'));
     },
   },
 };

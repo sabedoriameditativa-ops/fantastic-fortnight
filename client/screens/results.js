@@ -1,7 +1,7 @@
 // Results: winner, reason, per-player table, MVP ship, actions (SP: play
 // again / next level / edit fleet / menu; MP: rematch votes / leave).
 
-import { T, fmt, difficultyName } from '../i18n.js';
+import { T, fmt, difficultyName, errorMessage } from '../i18n.js';
 import { h, clear, button, add } from '../util/dom.js';
 import { num, ticksToClock } from '../util/format.js';
 import { animateShip } from '../util/shipCanvas.js';
@@ -19,6 +19,7 @@ export function mount(root, props, ctx) {
   const mode = props.mode || 'sp';
   const stops = [];
   const offs = [];
+  let disposed = false;
   ctx.setArena('dimmed');
   if (!r) { ctx.go('menu'); return { unmount() {} }; }
 
@@ -80,14 +81,26 @@ export function mount(root, props, ctx) {
       const n = room && Array.isArray(room.rematchVotes) ? room.rematchVotes.length : 0;
       return n > 0 ? fmt(T.results.rematchVotes, { n, total }) : T.results.rematch;
     };
-    const rematchBtn = button(votesLabel(), { test: 'rematch', primary: true, onClick: () => { rematchBtn.disabled = true; net.rematch().catch((e) => { rematchBtn.disabled = false; ctx.toast(e.code || 'erro', 'error'); }); } });
-    add(actions, rematchBtn, button(T.results.leave, { test: 'leave-room', class: 'btn-danger', onClick: async () => { try { await net.leaveRoom(); } catch { /* ignore */ } ctx.go('lobby'); } }));
+    const spectator = myTeam === null || myTeam === undefined;
+    // Spectators cannot vote (the server answers SLOT_INVALID): no rematch button for them.
+    const rematchBtn = spectator ? null : button(votesLabel(), { test: 'rematch', primary: true, onClick: () => { rematchBtn.disabled = true; net.rematch().catch((e) => { rematchBtn.disabled = false; ctx.toast(errorMessage(e && e.code || 'UNKNOWN', e && e.detail), 'error'); }); } });
+    let leaving = false;
+    add(actions, rematchBtn, button(T.results.leave, { test: 'leave-room', class: 'btn-danger', onClick: async () => {
+      leaving = true;
+      try { await net.leaveRoom(); } catch { /* ignore */ }
+      if (!disposed) ctx.go('lobby');
+    } }));
     offs.push(net.onRoom((room) => {
-      rematchBtn.textContent = votesLabel();
+      if (rematchBtn) rematchBtn.textContent = votesLabel();
       if (room.phase === 'lobby') ctx.go('lobby');
     }));
-    offs.push(net.onLeft(() => { ctx.toast(T.lobby.roomClosed, 'warn'); ctx.go('lobby'); }));
-    offs.push(net.feed.onStart(() => ctx.go('battle', { mode: 'mp' })));
+    offs.push(net.onLeft((reason) => {
+      if (disposed || leaving) return; // our own 'Sair': the click handler navigates
+      if (reason === 'room_closed') ctx.toast(T.lobby.roomClosed, 'warn');
+      else if (reason === 'kicked') ctx.toast(T.lobby.kicked, 'warn');
+      ctx.go('lobby');
+    }));
+    offs.push(net.feed.onStart(() => { if (!disposed) ctx.go('battle', { mode: 'mp' }); }));
   } else {
     add(actions, button(T.results.menu, { test: 'result-menu', onClick: () => ctx.go('menu') }));
   }
@@ -113,5 +126,5 @@ export function mount(root, props, ctx) {
   );
   root.appendChild(el);
   try { ctx.audio.setScene(r.winner === -1 ? 'menu' : won ? 'victory' : 'defeat'); } catch { /* ignore */ }
-  return { unmount() { for (const s of stops) s(); for (const off of offs) off(); } };
+  return { unmount() { disposed = true; for (const s of stops) s(); for (const off of offs) off(); } };
 }

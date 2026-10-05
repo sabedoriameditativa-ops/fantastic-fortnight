@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createBattle, stepBattle } from '../../shared/sim/battle.js';
-import { applyDamage, queueDamage, applyDamageQueue, disrupt, tickDots } from '../../shared/sim/damage.js';
+import { applyDamage, queueDamage, applyDamageQueue, disrupt, tickDots, heal } from '../../shared/sim/damage.js';
+import { spawnUnits } from '../../shared/sim/effects.js';
 import { DAMAGE_MULT, COMBAT } from '../../shared/catalog.js';
 import { TICK_RATE } from '../../shared/constants.js';
 import { config1v1 } from './helpers.js';
@@ -124,7 +125,7 @@ test('sudden death ramp multiplies damage; Terran coordination adds 10% kinetic'
   assert.ok(Math.abs(before - t.hp - 14.3) < 1e-9);
 });
 
-test('shields regenerate after the delay, organic hulls always, nanite after 3 s without hull damage', () => {
+test('shields regenerate after the delay, organic hulls always, nanite after 2 s without hull damage', () => {
   const a = { faction: 'vorrax', ships: [{ cls: 'vor_mandibula', count: 1 }] };
   const b = { faction: 'ferrix', ships: [{ cls: 'fer_bastiao', count: 1 }] };
   const state = createBattle(config1v1(a, b, 'regen', 'especialista', { maxTicks: 10 }));
@@ -136,7 +137,7 @@ test('shields regenerate after the delay, organic hulls always, nanite after 3 s
   fer.lastHullHitTick = 0;
   stepBattle(state);
   assert.ok(vor.hp > 100, 'organic regen');
-  assert.equal(fer.hp, 100, 'nanite waits 3 s');
+  assert.equal(fer.hp, 100, 'nanite waits 2 s');
   fer.lastHullHitTick = -1000;
   stepBattle(state);
   assert.ok(fer.hp > 100, 'nanite repairs after the delay');
@@ -144,4 +145,69 @@ test('shields regenerate after the delay, organic hulls always, nanite after 3 s
   const hp = fer.hp;
   stepBattle(state);
   assert.equal(fer.hp, hp, 'no repair while disrupted');
+});
+
+test('Vorrax hunger heals only on purchased kills and never in sudden death', () => {
+  const a = { faction: 'vorrax', ships: [{ cls: 'vor_mandibula', count: 1 }] };
+  const b = { faction: 'terran', ships: [{ cls: 'ter_vespa', count: 3 }] };
+  const state = createBattle(config1v1(a, b, 'hunger', 'especialista', { maxTicks: 5000, suddenDeathTick: 4000 }));
+  const vor = state.ships[0];
+  const [v1, v2, v3] = state.ships.slice(1);
+  for (const s of state.ships) { s.x = s.team === 0 ? 100 : 2700; for (const w of s.weapons) w.readyAt = 1e9; s.ability.readyAt = 1e9; }
+  vor.hp = 0.5 * vor.hpMax;
+  const expect = vor.hpMax * COMBAT.vorraxHungerHeal;
+  // purchased kill → heal
+  let hp = vor.hp;
+  v1.hp = 0; v1.killerId = vor.id;
+  stepBattle(state);
+  assert.ok(Math.abs(vor.hp - (hp + expect + vor.regen * (1 / TICK_RATE))) < 1e-6, 'purchased kill heals 5% (plus one tick of organic regen)');
+  // spawned (free) victim → no heal
+  const spawned = state.ships[spawnUnits(state, v2, 'ter_vespa', 1, 12, 40) > 0 ? state.ships.length - 1 : 0];
+  assert.equal(spawned.purchased, false);
+  spawned.x = 2700;
+  hp = vor.hp;
+  spawned.hp = 0; spawned.killerId = vor.id;
+  stepBattle(state);
+  assert.ok(Math.abs(vor.hp - (hp + vor.regen * (1 / TICK_RATE))) < 1e-6, 'spawned kill gives nothing');
+  // sudden death → no heal even for a purchased kill
+  state.tick = state.suddenDeathTick;
+  stepBattle(state);
+  assert.ok(state.suddenDeath);
+  hp = vor.hp;
+  v2.hp = 0; v2.killerId = vor.id;
+  stepBattle(state);
+  assert.equal(vor.hp, hp, 'no hunger heal in sudden death');
+  assert.ok(v3.alive);
+});
+
+test('sudden death ends the reconstruction heal-over-time and the leech drain heal; one-shot ability heals still apply', () => {
+  const a = { faction: 'vorrax', ships: [{ cls: 'vor_carrapato', count: 1 }] };
+  const b = { faction: 'ferrix', ships: [{ cls: 'fer_bastiao', count: 1 }] };
+  const state = createBattle(config1v1(a, b, 'sd-heal', 'especialista', { maxTicks: 5000, suddenDeathTick: 4000 }));
+  const car = state.ships[0], bas = state.ships[1];
+  for (const s of state.ships) { for (const w of s.weapons) w.readyAt = 1e9; s.ability.readyAt = 1e9; }
+  car.x = 100; car.y = 100; bas.x = 2700; bas.y = 1400;
+  // heal over time works before sudden death
+  bas.hp = 100;
+  bas.hot = { perTick: 2, until: state.tick + 1000, owner: 'p2' };
+  stepBattle(state);
+  assert.ok(bas.hp >= 102, 'hot ticks before sudden death');
+  state.tick = state.suddenDeathTick;
+  stepBattle(state);
+  assert.ok(state.suddenDeath);
+  assert.equal(bas.hot, null, 'hot dropped at sudden death');
+  const hp = bas.hp;
+  stepBattle(state);
+  assert.equal(bas.hp, hp, 'no passive repair nor hot in sudden death');
+  // leech: the drain still damages the host, the parasite no longer heals
+  car.hp = 200;
+  car.latch = { hostId: bas.id, until: state.tick + 1000, ox: -(bas.radius + car.radius - 4), oy: 0, start: state.tick + 1 - 10 };
+  bas.latchedBy = 1;
+  const hostEhp = bas.hp + bas.shield, parHp = car.hp;
+  stepBattle(state); // (tick - start) % 10 === 0 on the next tick → one drain pulse
+  assert.ok(bas.hp + bas.shield < hostEhp, 'drain still hurts the host');
+  assert.equal(car.hp, parHp, 'no leech heal in sudden death');
+  // one-shot heals are allowed
+  heal(state, car.id, car, 50, 'hull');
+  assert.equal(car.hp, parHp + 50);
 });

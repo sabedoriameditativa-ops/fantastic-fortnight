@@ -50,7 +50,13 @@ export function createHud(root, o) {
     return r;
   }
   for (const s of start.ships || []) register(s.id, s.cls, s.team, s.owner, false);
-  if (Array.isArray(start.dead)) for (const id of start.dead) { const r = reg.get(id); if (r) { r.alive = false; const ps = pstats.get(r.owner); if (ps && !r.spawned) { ps.alive--; ps.losses++; } } }
+  function markDead(id) {
+    const r = reg.get(id);
+    if (!r || !r.alive) return;
+    r.alive = false;
+    if (!r.spawned) { const ps = pstats.get(r.owner); if (ps) { ps.alive = Math.max(0, ps.alive - 1); ps.losses++; } }
+  }
+  if (Array.isArray(start.dead)) for (const id of start.dead) markDead(id);
 
   const log = createEventLog({ lookup: (id) => reg.get(id), playerName: (id) => names.get(id) || id, myPlayerId: o.myPlayerId, max: 6, ttlMs: 7000 });
 
@@ -152,8 +158,7 @@ export function createHud(root, o) {
         else if (t === 'die') {
           const r = reg.get(e[1]);
           if (r && r.alive) {
-            r.alive = false;
-            if (!r.spawned) { const ps = pstats.get(r.owner); if (ps) { ps.losses++; ps.alive = Math.max(0, ps.alive - 1); } }
+            markDead(e[1]);
             const k = e[2] ? reg.get(e[2]) : null;
             if (k && !r.spawned) { const ks = pstats.get(k.owner); if (ks) ks.kills++; }
           }
@@ -225,6 +230,15 @@ export function createHud(root, o) {
     setPaused(b) { paused = !!b; updatePausedBanner(); },
     /** While the reveal overlay is up the clock is intentionally stopped: hide the pause banner. */
     setIntro(b) { intro = !!b; updatePausedBanner(); },
+    /**
+     * Reconnect to the same battle (idempotent): units in `start.ships` we never
+     * saw are spawned ones (their 'spawn' event was missed), `start.dead` lists
+     * the ids destroyed so far (missed 'die' events count as losses; kills are unknown).
+     */
+    resync(start) {
+      for (const s of (start && start.ships) || []) if (s && !reg.has(s.id)) register(s.id, s.cls, s.team, s.owner, true);
+      if (start && Array.isArray(start.dead)) for (const id of start.dead) markDead(id);
+    },
     /** @param {'ok'|'reconnecting'|'lost'} s */
     setStatus(s) {
       status = s;

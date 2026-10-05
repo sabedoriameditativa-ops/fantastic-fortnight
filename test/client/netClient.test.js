@@ -66,7 +66,7 @@ function fakeServer() {
         case 'ready': { const slot = sess.room.slots.flat().find((s) => s.playerId === sess.playerId); if (m.ready && !slot.hasFleet) { err('FLEET_MISSING'); break; } slot.ready = m.ready; ack(); pushRoom(sess.room); break; }
         case 'chat': { ack(); for (const s of sess.room.members) send(s.ws, { t: 'chat', from: sess.playerId, name: sess.name, text: m.text, ts: Date.now() }); break; }
         case 'ping': send(ws, { t: 'pong', c: m.c, s: Date.now() }); break;
-        case 'rematch': break; // deliberately never answered (timeout test)
+        case 'rematch': setTimeout(() => err('WRONG_PHASE'), 450); break; // answered only after the client's timeout (late error test)
         case 'start': {
           const room = sess.room;
           if (room.hostId !== sess.playerId) { err('NOT_HOST'); break; }
@@ -233,6 +233,38 @@ describe('NetClient', () => {
     c.reconnect();
     assert.equal(c.status, 'reconnecting');
     await until(() => c.status === 'lost', 3000);
+    c.dispose();
+  });
+
+  test('connect() after the backoff is exhausted rejects with CONNECT_FAILED instead of hanging', async () => {
+    const local = fakeServer();
+    await until(() => !!local.wss.address());
+    const c = createNetClient(local.url, { ...opts(), backoff: [20, 20] });
+    await c.connect('Ana');
+    await local.close();
+    await until(() => c.status === 'lost', 3000);
+    // the lobby's getNet() → connect() path after a lost connection
+    const t0 = Date.now();
+    await assert.rejects(c.connect('Ana'), (e) => e.code === 'CONNECT_FAILED');
+    assert.ok(Date.now() - t0 < 2000, 'settled by the backoff schedule');
+    assert.equal(c.status, 'lost');
+    // a waiter queued while reconnecting is rejected too, and dispose() settles the rest
+    const p = c.connect('Ana');
+    await until(() => c.status === 'reconnecting');
+    c.dispose();
+    await assert.rejects(p, (e) => e.code === 'DISCONNECTED' || e.code === 'CONNECT_FAILED');
+  });
+
+  test('a late error for a request that already timed out is surfaced as unsolicited (no rid)', async () => {
+    const c = createNetClient(srv.url, opts());
+    await c.connect('Ana');
+    await c.createRoom({ teamSize: 1, budget: 800 });
+    const errors = [];
+    c.onError((e) => errors.push(e));
+    await assert.rejects(c.rematch(), (e) => e.code === 'TIMEOUT');
+    await until(() => errors.some((e) => e.code === 'WRONG_PHASE'), 2000);
+    const late = errors.find((e) => e.code === 'WRONG_PHASE');
+    assert.equal(late.rid, undefined, 'orphan errors carry no rid so app.js toasts them');
     c.dispose();
   });
 

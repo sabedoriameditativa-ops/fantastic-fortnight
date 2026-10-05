@@ -165,7 +165,7 @@ export function tickLatches(state) {
     s.heading = Math.atan2(-L.oy, -L.ox);
     if ((tick - L.start) % PULSE === 0 && tick > L.start) {
       queueDamage(state, s.id, host.id, p.dps * 0.5, 'bio', LEECH_OPTS);
-      heal(state, s.id, s, p.healPerSec * 0.5, 'hull');
+      if (!state.suddenDeath) heal(state, s.id, s, p.healPerSec * 0.5, 'hull'); // continuous healing: off in sudden death (damage.js heal())
     }
   }
 }

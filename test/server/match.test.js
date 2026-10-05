@@ -95,3 +95,102 @@ describe('match runner', () => {
     assert.equal(hashState(st), hashState(direct));
   });
 });
+
+describe('match runner: robustness', () => {
+  /** A state whose stepBattle throws exactly once, on the third tick (an "edge case" in the sim). */
+  function throwingState() {
+    const st = createBattle(config(1000));
+    const ships = st.ships;
+    let armed = false;
+    // stepBattle reads state.ships on every tick; a proxy throws one time when armed.
+    st.ships = new Proxy(ships, {
+      get(target, prop, recv) {
+        if (armed && prop === 'length') {
+          armed = false;
+          throw new Error('boom');
+        }
+        return Reflect.get(target, prop, recv);
+      },
+    });
+    return { st, arm: () => { armed = true; } };
+  }
+
+  test('a simulation exception ends the match as a draw via onEnd and never escapes the timer callback', () => {
+    const timers = fakeTimers();
+    const warns = [];
+    const frames = [];
+    let result = null;
+    let aborted = null;
+    const { st, arm } = throwingState();
+    const run = startMatch({
+      config: config(1000), state: st, tickMs: 10, timers, log: { warn: (...a) => warns.push(a) },
+      onFrame: (s, f) => frames.push(f), onEnd: (r) => { result = r; }, onAbort: (e) => { aborted = e; },
+    });
+    timers.step(20);
+    assert.equal(run.state.tick, 2);
+    arm();
+    assert.doesNotThrow(() => timers.step(10));
+    assert.ok(result, 'onEnd fired');
+    assert.equal(result.reason, 'draw');
+    assert.equal(result.winner, -1);
+    assert.equal(typeof result.ticks, 'number');
+    assert.ok(result.players && typeof result.players === 'object');
+    assert.ok(Array.isArray(result.remainingValue));
+    assert.equal(aborted, null);
+    assert.equal(run.running(), false);
+    assert.equal(timers.active(), 0, 'interval cleared');
+    assert.equal(run.stats.errors, 1);
+    assert.ok(warns.some((w) => String(w[0]).includes('simulation error')));
+    const lastEv = frames[frames.length - 1].e;
+    assert.deepEqual(lastEv[lastEv.length - 1], ['end', -1, 'draw'], 'final frame carries the end event');
+    assert.equal(JSON.parse(run.lastFrame()).e.at(-1)[0], 'end');
+    timers.step(100);
+    assert.equal(run.stats.ticks, 2, 'stopped: no further ticks');
+  });
+
+  test('when no result can be built either, the loop stops and onAbort fires once', () => {
+    const timers = fakeTimers();
+    const st = createBattle(config(1000));
+    // Corrupt the state so that both stepBattle and buildResult throw.
+    st.ships = null;
+    let ends = 0;
+    const aborts = [];
+    const run = startMatch({
+      config: config(1000), state: st, tickMs: 10, timers, log: { warn() {} },
+      onFrame() {}, onEnd: () => { ends++; }, onAbort: (e) => aborts.push(e),
+    });
+    assert.doesNotThrow(() => timers.step(20));
+    assert.equal(ends, 0);
+    assert.equal(aborts.length, 1);
+    assert.ok(aborts[0] instanceof Error);
+    assert.equal(run.running(), false);
+    assert.equal(timers.active(), 0);
+    timers.step(100);
+    assert.equal(aborts.length, 1);
+  });
+
+  test('pause stops ticking without ending; resume continues from the same tick; no-ops after stop', () => {
+    const timers = fakeTimers();
+    const run = startMatch({ config: config(1000), tickMs: 10, timers, onFrame() {}, onEnd() {} });
+    timers.step(50);
+    assert.equal(run.state.tick, 5);
+    run.pause();
+    assert.equal(run.paused(), true);
+    assert.equal(run.running(), true, 'paused is not stopped');
+    assert.equal(timers.active(), 0, 'no interval while paused');
+    timers.step(1000);
+    assert.equal(run.state.tick, 5, 'no ticks while paused');
+    run.resume();
+    assert.equal(run.paused(), false);
+    assert.equal(timers.active(), 1);
+    timers.step(5);
+    assert.equal(run.state.tick, 5, 'first tick after resume is a full tickMs away (no catch-up for the pause)');
+    timers.step(5);
+    assert.equal(run.state.tick, 6);
+    assert.equal(run.stats.drops, 0);
+    run.stop();
+    run.resume();
+    assert.equal(timers.active(), 0);
+    assert.equal(run.paused(), false);
+  });
+});

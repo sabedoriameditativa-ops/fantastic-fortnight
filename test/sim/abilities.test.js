@@ -4,6 +4,7 @@ import { createBattle, stepBattle } from '../../shared/sim/battle.js';
 import { ABILITIES, FACTION_IDS, SHIPS } from '../../shared/catalog.js';
 import { ABILITY_REGISTRY, PASSIVE_ABILITIES, missingAbilities } from '../../shared/sim/abilities.js';
 import { config1v1, oneOfEachFleet } from './helpers.js';
+import { addEffect, updateStatus } from '../../shared/sim/ship.js';
 
 test('every catalog ability has a registry entry with trigger and cast', () => {
   assert.deepEqual(missingAbilities(), []);
@@ -136,4 +137,32 @@ test('leech latches a Carrapato onto a medium+ host and drains it', () => {
   }
   assert.ok(leechCasts >= 1);
   assert.ok(latchedTicks > 0);
+});
+
+test('keyed effects refresh instead of stacking: overlapping auras never multiply', () => {
+  const a = { faction: 'vorrax', ships: [{ cls: 'vor_rainha', count: 2 }, { cls: 'vor_zangao', count: 4 }] };
+  const b = { faction: 'terran', ships: [{ cls: 'ter_orion', count: 3 }] };
+  const state = createBattle(config1v1(a, b, 'aura', 'especialista', { maxTicks: 2400 }));
+  const z = state.ships.find((s) => s.cls === 'vor_zangao');
+  const p = ABILITIES.war_pheromone.params;
+  // unit: two casts of the same ability on one ship → one effect, the longer expiry wins, mods unchanged
+  addEffect(z, 100, { dmgMul: p.damageMul, regenMul: p.regenMul, boosted: true }, 'war_pheromone');
+  addEffect(z, 120, { dmgMul: p.damageMul, regenMul: p.regenMul, boosted: true }, 'war_pheromone');
+  assert.equal(z.fx.filter((f) => f.key === 'war_pheromone').length, 1);
+  assert.equal(z.fx.find((f) => f.key === 'war_pheromone').until, 120);
+  updateStatus(z, 50);
+  assert.ok(Math.abs(z.mod.dmgMul - p.damageMul) < 1e-9);
+  // unkeyed effects still stack (different abilities combine)
+  addEffect(z, 120, { dmgMul: 1.1 }, 'other');
+  updateStatus(z, 50);
+  assert.ok(Math.abs(z.mod.dmgMul - p.damageMul * 1.1) < 1e-9);
+  z.fx.length = 0;
+  // end to end: two Rainhas in the same fight never push an ally above a single pheromone's damage multiplier
+  let casts = 0, maxDmg = 1;
+  while (!state.ended) {
+    for (const e of stepBattle(state)) if (e[0] === 'cast' && e[2] === 'war_pheromone') casts++;
+    for (const s of state.ships) if (s.alive && s.team === 0) maxDmg = Math.max(maxDmg, s.mod.dmgMul);
+  }
+  assert.ok(casts >= 2, `pheromone casts ${casts}`);
+  assert.ok(maxDmg <= p.damageMul + 1e-9, `dmgMul reached ${maxDmg}`);
 });

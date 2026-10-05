@@ -131,3 +131,56 @@ describe('lobby', () => {
     clock.advance(1);
   });
 });
+
+describe('lobby: per-address room cap', () => {
+  test('a remote address may hold maxRoomsPerAddress rooms; sessions without an address are unlimited', () => {
+    const clock = createFakeClock();
+    const lobby = createLobby({
+      maxRooms: 50, maxRoomsPerAddress: 2, roomOptions: { clock, startMatch: () => ({ stop() {}, state: {} }) }, log: { warn() {} },
+    });
+    const mk = (id, addr) => {
+      const s = createFakeSession(id);
+      s.remoteAddress = addr;
+      return s;
+    };
+    const a1 = mk('a1', '10.0.0.1');
+    const a2 = mk('a2', '10.0.0.1');
+    const a3 = mk('a3', '10.0.0.1');
+    lobby.handleMessage(a1, { t: 'create_room', teamSize: 1, budget: 1500, rid: 1 });
+    assert.equal(a1.last('ack').rid, 1);
+    lobby.handleMessage(a2, { t: 'create_room', teamSize: 1, budget: 1500, rid: 1 });
+    assert.equal(a2.last('ack').rid, 1);
+    lobby.handleMessage(a3, { t: 'create_room', teamSize: 1, budget: 1500, rid: 1 });
+    assert.equal(a3.last('error').code, ERR.ROOM_FULL);
+    assert.equal(a3.last('error').detail, 'address');
+    assert.equal(lobby.rooms.size, 2);
+    // another address is independent
+    const b1 = mk('b1', '10.0.0.2');
+    lobby.handleMessage(b1, { t: 'create_room', teamSize: 1, budget: 1500, rid: 1 });
+    assert.equal(b1.last('ack').rid, 1);
+    // re-creating from a room you are alone in replaces it (the old one dies on leave) instead of counting twice
+    const first = a1.roomCode;
+    lobby.handleMessage(a1, { t: 'create_room', teamSize: 1, budget: 1500, rid: 2 });
+    assert.equal(a1.last('ack').rid, 2);
+    assert.notEqual(a1.roomCode, first);
+    assert.equal(lobby.rooms.has(first), false);
+    assert.equal(lobby.rooms.size, 3);
+    // destroying a room frees the quota
+    lobby.handleMessage(a2, { t: 'leave_room', rid: 3 });
+    assert.equal(a2.last('ack').rid, 3);
+    lobby.handleMessage(a3, { t: 'create_room', teamSize: 1, budget: 1500, rid: 2 });
+    assert.equal(a3.last('ack').rid, 2);
+    // no address → never limited
+    const n1 = createFakeSession('n1');
+    const n2 = createFakeSession('n2');
+    const n3 = createFakeSession('n3');
+    for (const s of [n1, n2, n3]) {
+      lobby.handleMessage(s, { t: 'create_room', teamSize: 1, budget: 1500, rid: 1 });
+      assert.equal(s.last('ack').rid, 1, s.id);
+    }
+    // closeAll clears the address bookkeeping
+    lobby.closeAll();
+    lobby.handleMessage(a1, { t: 'create_room', teamSize: 1, budget: 1500, rid: 9 });
+    assert.equal(a1.last('ack').rid, 9);
+  });
+});

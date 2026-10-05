@@ -67,6 +67,17 @@ export function createRenderer(canvas, o) {
   }
   for (const s of start.ships || []) register(s.id, s.cls, s.team, s.owner);
   const info = (id) => infos.get(id) || null;
+  /** Idempotent: register ships not yet known (spawned units from a reconnect start, or a frame's spawn events). */
+  function registerShips(ships) {
+    const fresh = new Set();
+    for (const s of ships || []) {
+      if (!s || infos.has(s.id)) continue;
+      const inf = register(s.id, s.cls, s.team, s.owner);
+      if (inf) fresh.add(inf.cls);
+    }
+    if (fresh.size) { try { sprites.warm([...fresh], [0.5, 0.71], [0, 1]); } catch (e) { /* ignore in exotic environments */ } }
+    return fresh;
+  }
 
   // ---- subsystems ----
   const interp = createInterpolator({
@@ -346,22 +357,27 @@ export function createRenderer(canvas, o) {
     ctx.save();
     ctx.beginPath(); ctx.rect(vp.x, vp.y, vp.w, vp.h); ctx.clip();
 
-    // 3. passes
+    // 3. passes (restore is in a finally: a throwing pass must not leave the save stack growing every frame)
     let tp = lap('sim', t0);
-    background.draw(ctx, camera, now, { grid: options.grid, quality: effects.quality.density, reducedMotion: options.reducedMotion });
-    tp = lap('bg', tp);
-    effects.drawArea(ctx, camera, dpr, now);
-    tp = lap('area', tp);
-    effects.drawTrails(ctx, camera, dpr, now);
-    tp = lap('trails', tp);
-    drawShips(now, zoom);
-    tp = lap('ships', tp);
-    effects.drawProjectiles(ctx, camera, dpr, now);
-    tp = lap('proj', tp);
-    effects.drawEffects(ctx, camera, dpr, now);
-    tp = lap('fx', tp);
-    drawWorldUI(now, zoom);
-    ctx.restore();
+    try {
+      background.draw(ctx, camera, now, { grid: options.grid, quality: effects.quality.density, reducedMotion: options.reducedMotion });
+      tp = lap('bg', tp);
+      effects.drawArea(ctx, camera, dpr, now);
+      tp = lap('area', tp);
+      effects.drawTrails(ctx, camera, dpr, now);
+      tp = lap('trails', tp);
+      drawShips(now, zoom);
+      tp = lap('ships', tp);
+      effects.drawProjectiles(ctx, camera, dpr, now);
+      tp = lap('proj', tp);
+      effects.drawEffects(ctx, camera, dpr, now);
+      tp = lap('fx', tp);
+      drawWorldUI(now, zoom);
+    } finally {
+      ctx.restore();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    }
     lap('ui', tp);
     background.drawVignette(ctx, vp.x, vp.y, vp.w, vp.h, effects.suddenDeath ? 0.6 : 0);
 
@@ -393,8 +409,23 @@ export function createRenderer(canvas, o) {
     /** Push a frame { k, s, e, at } from the feed. */
     onFrame(frame) {
       if (frame.at === undefined) frame = { ...frame, at: typeof performance !== 'undefined' ? performance.now() : lastNow };
+      // Register spawned units before the interpolator creates their views, so
+      // newShip() finds cls/team/size for drones, broods and larvae.
+      if (frame.e && frame.e.length) {
+        for (const e of frame.e) if (e && e[0] === 'spawn' && !infos.has(e[1])) registerShips([{ id: e[1], cls: e[2], team: e[3], owner: e[4] }]);
+      }
       interp.push(frame);
     },
+    /**
+     * Reconnect to the same battle: `start.ships` carries the initial ships plus the
+     * units spawned meanwhile, `start.dead` the ids destroyed so far. Idempotent;
+     * resets the interpolator so the next frame snaps the presentation clock.
+     */
+    resync(start) {
+      registerShips((start && start.ships) || []);
+      interp.reset();
+    },
+    registerShips,
     draw,
     resize,
     /** @param {{ showNames?: boolean, grid?: boolean, reducedMotion?: boolean, quality?: 'auto'|'low'|'medium'|'high' }} opts */

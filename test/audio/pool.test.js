@@ -25,6 +25,42 @@ describe('voice pool, coalescing, rate limits', () => {
     const ev = victim.gain.gain.events;
     assert.ok(ev.some((e) => e.m === 'cancel') && ev.at(-1).m === 'tgt' && ev.at(-1).v === 0, 'victim faded out');
     assert.ok(victim.sources.every((s) => s.stopped !== null && s.stopped <= ctx.currentTime + 0.06));
+    // the stolen voice stays wired until its fade has played: no synchronous disconnect (click)
+    assert.equal(victim.gain.disconnected, false, 'victim graph still connected right after the steal');
+    assert.ok(victim.v.nodes.length > 0, 'nodes retained for the fade');
+    ctx.advance(0.06);  // sources stop at now+0.05 → onended → cleanup
+    assert.equal(victim.gain.disconnected, true, 'victim released after the fade');
+    assert.equal(victim.v.nodes.length, 0);
+    // gcVoices is the backstop when onended never fires
+    engine.play('death', { x: 1, y: 1, size: 4, faction: 'vorrax', seed: 100 });
+    const v2 = engine.voices.reduce((a, b) => (b.priority < a.priority ? b : a));
+    engine.play('death', { x: 2, y: 2, size: 4, faction: 'lumen', seed: 101 });
+    if (!engine.voices.includes(v2)) {
+      for (const s of v2.sources) s.onended = null;
+      ctx.advance(0.3); engine.tick();
+      assert.equal(v2.gain.disconnected, true, 'gc cleans a stolen voice whose onended never fired');
+    }
+  });
+
+  test('duck re-entry: a second capital death inside an active duck does not snap the music filter back to 20 kHz', async () => {
+    const { engine, ctx } = await makeEngine();
+    engine.setScene('battle');
+    const lookup = (id) => ({ cls: 'x', faction: 'terran', sizeClass: 'capital', team: 0, x: 1, y: 1 });
+    const f = engine.buses.musicLP.frequency;
+    engine.consumeEvents([['die', 1, 0, 1, 1]], lookup);
+    const n0 = f.events.length;
+    assert.ok(f.events.slice(0, n0).some((e) => e.m === 'set' && e.v === 20000), 'first duck starts from 20 kHz');
+    ctx.advance(0.15); engine.tick();
+    engine.consumeEvents([['die', 2, 0, 1, 1]], lookup);
+    const second = f.events.slice(n0);
+    assert.ok(second.length > 0, 'second duck scheduled');
+    assert.ok(!second.some((e) => e.m === 'set' && e.v === 20000), `re-entry must not jump to 20 kHz: ${JSON.stringify(second)}`);
+    assert.ok(second.some((e) => e.m === 'exp' && e.v === 20000), 'release ramp rescheduled');
+    // after the duck is over a new death starts a fresh duck from 20 kHz again
+    ctx.advance(2); engine.tick();
+    const n1 = f.events.length;
+    engine.consumeEvents([['die', 3, 0, 1, 1]], lookup);
+    assert.ok(f.events.slice(n1).some((e) => e.m === 'set' && e.v === 20000));
   });
 
   test('coalescing: 40 cannon shots within 30 ms → one voice boosted ≤ 2.2×; 31 ms apart → two voices', async () => {

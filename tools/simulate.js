@@ -22,16 +22,34 @@ import { AI_PROFILES } from '../shared/aiProfiles.js';
 // Args
 // ---------------------------------------------------------------------------
 
+/** Thrown for bad command-line input; reported as `error: …` + usage, exit code 2. */
+class UsageError extends Error {}
+
+/**
+ * Parse argv. Every value-taking flag must be followed by a value (not another
+ * flag); --seeds/--budget/--maxTicks must be positive integers and --ai one of
+ * the AI_PROFILES ids — a typo must not silently fall back to another profile
+ * (shared/aiProfiles.js getAiProfile) or run zero battles with a success summary.
+ */
 function parseArgs(argv) {
   const o = { seeds: 10, budget: DEFAULT_BUDGET, ai: 'especialista', json: false, out: join(tmpdir(), 'frota-estelar') };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    const next = () => argv[++i];
+    const next = () => {
+      const v = argv[++i];
+      if (v === undefined || /^--?[a-zA-Z]/.test(v)) throw new UsageError(`${a} needs a value`);
+      return v;
+    };
+    const posInt = () => {
+      const v = next();
+      if (!/^\d+$/.test(v) || parseInt(v, 10) <= 0) throw new UsageError(`${a} must be a positive integer, got "${v}"`);
+      return parseInt(v, 10);
+    };
     switch (a) {
       case '--a': o.a = next(); break;
       case '--b': o.b = next(); break;
-      case '--seeds': o.seeds = parseInt(next(), 10); break;
-      case '--budget': o.budget = parseInt(next(), 10); break;
+      case '--seeds': o.seeds = posInt(); break;
+      case '--budget': o.budget = posInt(); break;
       case '--ai': o.ai = next(); break;
       case '--json': o.json = true; break;
       case '--matrix': o.matrix = true; break;
@@ -39,11 +57,12 @@ function parseArgs(argv) {
       case '--difficulty': o.difficulty = true; break;
       case '--dump': o.dump = next(); break;
       case '--out': o.out = next(); break;
-      case '--maxTicks': o.maxTicks = parseInt(next(), 10); break;
+      case '--maxTicks': o.maxTicks = posInt(); break;
       case '--help': case '-h': o.help = true; break;
-      default: throw new Error(`Unknown argument: ${a}`);
+      default: throw new UsageError(`Unknown argument: ${a}`);
     }
   }
+  if (!AI_PROFILES[o.ai]) throw new UsageError(`--ai must be one of ${Object.keys(AI_PROFILES).join(', ')}, got "${o.ai}"`);
   return o;
 }
 
@@ -199,20 +218,36 @@ function printPace(runs) {
 
 // ---------------------------------------------------------------------------
 
-const o = parseArgs(process.argv.slice(2));
-if (o.help || (!o.matrix && !o.factions && !o.difficulty && !(o.a && o.b))) {
-  console.log(`Usage:
-  node tools/simulate.js --a <preset|cls:n,...> --b <...> [--seeds N] [--budget P] [--ai facil|normal|dificil|especialista] [--json]
+function usage() {
+  return `Usage:
+  node tools/simulate.js --a <preset|cls:n,...> --b <...> [--seeds N] [--budget P] [--ai ${Object.keys(AI_PROFILES).join('|')}] [--json]
   node tools/simulate.js --matrix --seeds N
   node tools/simulate.js --factions --seeds N
   node tools/simulate.js --difficulty --seeds N
   node tools/simulate.js --a ... --b ... --dump <seed> [--out <dir>]
-Presets: ${PRESET_LIST.map((p) => p.id).join(', ')}`);
-  process.exit(o.help ? 0 : 1);
+  (--seeds, --budget and --maxTicks are positive integers; --dump needs the seed)
+Presets: ${PRESET_LIST.map((p) => p.id).join(', ')}`;
 }
+
+/** Usage errors (bad flags, unknown preset/class, …) → `error: …` + usage on stderr, exit 2. */
+function fail(message) {
+  console.error(`error: ${message}\n${usage()}`);
+  process.exit(2);
+}
+
+let o;
+try { o = parseArgs(process.argv.slice(2)); } catch (e) { fail(e.message); }
+if (o.help) { console.log(usage()); process.exit(0); }
+if (!o.matrix && !o.factions && !o.difficulty && !(o.a && o.b)) fail('choose a mode: --a/--b, --matrix, --factions or --difficulty');
 const t0 = performance.now();
-if (o.matrix) modeMatrix(o);
-else if (o.factions) modeFactions(o);
-else if (o.difficulty) modeDifficulty(o);
-else modeSingle(o);
+try {
+  if (o.matrix) modeMatrix(o);
+  else if (o.factions) modeFactions(o);
+  else if (o.difficulty) modeDifficulty(o);
+  else modeSingle(o);
+} catch (e) {
+  // fleet parsing problems (unknown preset/class, mixed factions, bad count) are input errors, not crashes
+  if (/^(Unknown class|Bad count|Fleet must be single faction|Unknown preset)/.test(e && e.message)) fail(e.message);
+  throw e;
+}
 if (!o.json) console.log(`(${((performance.now() - t0) / 1000).toFixed(1)} s)`);

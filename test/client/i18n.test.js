@@ -1,6 +1,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { T, fmt, errorMessage, fleetErrorMessage, difficultyName } from '../../client/i18n.js';
+import { T, fmt, errorMessage, fleetErrorMessage, difficultyName, difficultyDescription } from '../../client/i18n.js';
+import { AI_PROFILES } from '../../shared/aiProfiles.js';
+import { FLEET_LIMITS } from '../../shared/constants.js';
 import { ERR } from '../../shared/protocol.js';
 import { FLEET_ERR } from '../../shared/fleet.js';
 import { DIFFICULTIES } from '../../shared/constants.js';
@@ -32,6 +34,40 @@ describe('i18n', () => {
     assert.match(errorMessage('FLEET_INVALID', { code: 'FLEET_OVER_BUDGET', detail: { cost: 900, budget: 800 } }), /100 pts/);
     // fleet codes passed directly to errorMessage
     assert.match(errorMessage('FLEET_CLASS_CAP', { sizeClass: 'mothership', cap: 1, count: 2 }), /nave-mãe/);
+    // FLEET_SHIP_COUNT has no direct T.fleetErr entry (rendered via _MIN/_MAX) but is a fleet code
+    assert.match(errorMessage('FLEET_SHIP_COUNT', { count: 41, min: 1, max: 40 }), /no máximo 40/);
+    assert.match(errorMessage('FLEET_INVALID', { code: 'FLEET_SHIP_COUNT', detail: { count: 0, min: 1, max: 40 } }), /pelo menos 1 nave/);
+    assert.doesNotMatch(errorMessage('FLEET_INVALID', { code: 'FLEET_SHIP_COUNT', detail: { count: 0, min: 1, max: 40 } }), /FLEET_SHIP_COUNT/);
+  });
+
+  test('ROOM_FULL with the server-limit details is not "room is full"', () => {
+    assert.equal(errorMessage('ROOM_FULL'), T.err.ROOM_FULL);
+    assert.equal(errorMessage('ROOM_FULL', 'server'), T.err.ROOM_LIMIT);
+    assert.equal(errorMessage('ROOM_FULL', 'codes'), T.err.ROOM_LIMIT);
+    assert.notEqual(T.err.ROOM_LIMIT, T.err.ROOM_FULL);
+  });
+
+  test('difficulty descriptions derive the budget percentage from AI_PROFILES', () => {
+    for (const d of DIFFICULTIES) {
+      const txt = difficultyDescription(d, AI_PROFILES[d].budgetMul);
+      assert.ok(txt.length > 10, d);
+      assert.ok(!/\{pct\}/.test(txt), `${d}: placeholder filled`);
+      const pct = Math.round(Math.abs(AI_PROFILES[d].budgetMul - 1) * 100);
+      if (pct > 0) assert.match(txt, new RegExp(`${pct}%`), `${d}: mentions ${pct}%`);
+      else assert.doesNotMatch(txt, /%/, `${d}: no percentage when the budget is the same`);
+    }
+    assert.match(difficultyDescription('especialista', 1.2), /20% a mais/);
+    assert.doesNotMatch(difficultyDescription('especialista', 1.2), /30%/);
+    assert.doesNotMatch(difficultyDescription('dificil', 1), /%/);
+    assert.equal(difficultyDescription('nope', 1), '');
+  });
+
+  test('how-to text matches the shared rules (Vorrax tiny cap, damage tiebreak) and reset wording', () => {
+    const step2 = T.howto.steps[1].text;
+    assert.match(step2, new RegExp(`${FLEET_LIMITS.maxPerSizeClass.tiny} minúsculas`));
+    assert.match(step2, new RegExp(`${FLEET_LIMITS.tinyCapByFaction.vorrax} para Vorrax`));
+    assert.match(T.howto.steps[3].text, /2%.*dano/);
+    assert.match(T.options.resetConfirm, /modo Um jogador/);
   });
 
   test('NOT_ALL_READY lists the missing players', () => {

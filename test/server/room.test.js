@@ -17,7 +17,11 @@ function fakeStartMatch() {
     const handle = {
       o,
       stopped: false,
+      isPaused: false,
       stop() { handle.stopped = true; },
+      pause() { if (!handle.stopped) handle.isPaused = true; },
+      resume() { if (!handle.stopped) handle.isPaused = false; },
+      abort(err) { o.onAbort(err); },
       state: o.state,
       frame(k, e = []) { o.onFrame(JSON.stringify({ t: 'f', k, s: [], e }), { t: 'f', k, s: [], e }); },
       end(result) { o.onEnd(result); },
@@ -509,7 +513,46 @@ describe('room: disconnects, host migration, destruction', () => {
     assert.equal(s2.destroyed[0], 'ABCD');
   });
 
-  test('battle keeps running when all humans drop; destroy stops the match and notifies', () => {
+  test('battle pauses while nobody is connected, resumes on reconnect/join, and an abandoned battle is destroyed after 60 s', () => {
+    const { room, host, clock, startMatch, destroyed } = setup();
+    const b = createFakeSession('b');
+    room.join(b);
+    readyUp(room, host);
+    readyUp(room, b, VORRAX);
+    room.start(host);
+    clock.advance(5000);
+    const run = startMatch.calls[0];
+    room.onDisconnect(host);
+    assert.equal(run.isPaused, false, 'one human still watching: the sim continues');
+    room.onDisconnect(b);
+    assert.equal(run.isPaused, true, 'nobody connected: the loop is paused (no CPU for an empty audience)');
+    assert.equal(run.stopped, false);
+    clock.advance(59_000);
+    assert.equal(room.phase, 'battle');
+    assert.equal(room.destroyed, false);
+    assert.equal(room.memberCount, 2, 'seats are held');
+    room.onReconnect(b);
+    assert.equal(run.isPaused, false, 'reconnect resumes the battle');
+    clock.advance(10_000);
+    assert.equal(room.destroyed, false, 'reconnect cancelled the destruction');
+    room.onDisconnect(b);
+    assert.equal(run.isPaused, true);
+    const spec = createFakeSession('spec');
+    assert.equal(room.join(spec).ok, true);
+    assert.equal(run.isPaused, false, 'a spectator joining resumes the battle');
+    room.leave(spec);
+    assert.equal(run.isPaused, true);
+    room.onSessionExpired(b);
+    assert.equal(room.toState('h').slots[1][0].kind, 'human', 'expired seat kept during battle');
+    clock.advance(60_000);
+    assert.equal(room.destroyed, true, 'abandoned battle: room destroyed after emptyRoomMs');
+    assert.equal(run.stopped, true, 'match loop stopped with the room');
+    assert.deepEqual(destroyed, ['ABCD']);
+    assert.equal(host.roomCode, null);
+    assert.equal(b.roomCode, null);
+  });
+
+  test('battle ends normally while everybody is away: room destroyed at battle end', () => {
     const { room, host, clock, startMatch, destroyed } = setup();
     const b = createFakeSession('b');
     room.join(b);
@@ -519,16 +562,46 @@ describe('room: disconnects, host migration, destruction', () => {
     clock.advance(5000);
     room.onDisconnect(host);
     room.onDisconnect(b);
-    clock.advance(60_000);
-    assert.equal(room.phase, 'battle', 'battle continues to the end');
-    assert.equal(startMatch.calls[0].stopped, false);
-    assert.equal(room.memberCount, 2, 'seats are held until the battle ends');
-    assert.equal(room.toState('h').slots[1][0].kind, 'human');
-    room.onSessionExpired(b);
-    assert.equal(room.toState('h').slots[1][0].kind, 'human');
+    clock.advance(1000);
     startMatch.calls[0].end({ winner: 0, reason: 'elimination', ticks: 1, remainingValue: [1, 0], players: {}, mvp: null });
-    assert.equal(room.destroyed, true, 'nobody left: room destroyed at battle end');
+    assert.equal(room.phase, 'results');
+    assert.equal(room.destroyed, false, 'seats kept for the grace period so a returning player sees the results');
+    clock.advance(59_000);
+    assert.equal(room.destroyed, true, 'nobody came back: room destroyed by the empty-room timer');
     assert.deepEqual(destroyed, ['ABCD']);
+
+    // everybody expired during the battle → destroyed right at battle end
+    const s2 = setup();
+    const b2 = createFakeSession('b2');
+    s2.room.join(b2);
+    readyUp(s2.room, s2.host);
+    readyUp(s2.room, b2, VORRAX);
+    s2.room.start(s2.host);
+    s2.clock.advance(5000);
+    s2.room.onDisconnect(s2.host);
+    s2.room.onDisconnect(b2);
+    s2.room.onSessionExpired(s2.host);
+    s2.room.onSessionExpired(b2);
+    assert.equal(s2.room.destroyed, false);
+    s2.startMatch.calls[0].end({ winner: 0, reason: 'elimination', ticks: 1, remainingValue: [1, 0], players: {}, mvp: null });
+    assert.equal(s2.room.destroyed, true, 'no members left at battle end');
+  });
+
+  test('match runner abort (simulation error without a result) closes the room with left{room_closed}', () => {
+    const { room, host, clock, startMatch, destroyed } = setup();
+    const b = createFakeSession('b');
+    room.join(b);
+    readyUp(room, host);
+    readyUp(room, b, VORRAX);
+    room.start(host);
+    clock.advance(5000);
+    assert.equal(room.phase, 'battle');
+    startMatch.calls[0].abort(new Error('sim exploded'));
+    assert.equal(room.destroyed, true);
+    assert.equal(host.last('left').reason, 'room_closed');
+    assert.equal(b.last('left').reason, 'room_closed');
+    assert.deepEqual(destroyed, ['ABCD']);
+    assert.equal(host.roomCode, null);
   });
 
   test('explicit destroy sends left{room_closed} to everybody and stops the match', () => {

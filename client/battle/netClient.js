@@ -127,12 +127,15 @@ export function createNetClient(url, opts = {}) {
       }
       case S2C.ERROR: {
         const err = netError(msg.code || 'UNKNOWN', msg.detail);
-        if (msg.rid !== undefined && pending.has(msg.rid)) pending.get(msg.rid).reject(err);
+        const owned = msg.rid !== undefined && pending.has(msg.rid);
+        if (owned) pending.get(msg.rid).reject(err);
         if (msg.code === 'VERSION_MISMATCH' || msg.code === 'BAD_NAME') {
           for (const w of connectWaiters) w.reject(err);
           connectWaiters = [];
         }
-        ev.error.emit({ code: msg.code || 'UNKNOWN', detail: msg.detail, rid: msg.rid });
+        // A late error (after a client-side TIMEOUT, or after a room push already
+        // settled the request) has no owner: surface it as unsolicited so the app toasts it.
+        ev.error.emit({ code: msg.code || 'UNKNOWN', detail: msg.detail, rid: owned ? msg.rid : undefined });
         break;
       }
       case S2C.ROOM: {
@@ -207,20 +210,30 @@ export function createNetClient(url, opts = {}) {
     sock.onclose = () => failed();
   }
 
+  function rejectConnectWaiters(code) {
+    if (!connectWaiters.length) return;
+    const err = netError(code);
+    const ws_ = connectWaiters; connectWaiters = [];
+    for (const w of ws_) w.reject(err);
+  }
+
   function onClosed() {
     ws = null;
     stopPing();
     rejectAll('DISCONNECTED');
-    if (disposed || intentionalClose) { setStatus('closed'); return; }
+    if (disposed || intentionalClose) { rejectConnectWaiters('DISCONNECTED'); setStatus('closed'); return; }
     if (!everWelcomed) {
       // initial connection failed
-      const err = netError('CONNECT_FAILED');
-      for (const w of connectWaiters) w.reject(err);
-      connectWaiters = [];
+      rejectConnectWaiters('CONNECT_FAILED');
       setStatus('lost');
       return;
     }
-    if (attempt >= backoff.length) { setStatus('lost'); return; }
+    if (attempt >= backoff.length) {
+      // backoff exhausted: anyone awaiting connect() (lobby → getNet) must learn it, not hang
+      rejectConnectWaiters('CONNECT_FAILED');
+      setStatus('lost');
+      return;
+    }
     setStatus('reconnecting');
     const delay = backoff[Math.min(attempt, backoff.length - 1)];
     attempt++;
@@ -305,6 +318,7 @@ export function createNetClient(url, opts = {}) {
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       stopPing();
       rejectAll('DISCONNECTED');
+      rejectConnectWaiters('DISCONNECTED');
       const s = ws; ws = null;
       if (s) { try { s.onclose = null; s.close(); } catch { /* ignore */ } }
       setStatus('closed');

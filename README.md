@@ -31,8 +31,10 @@ completa de cada nave, arma e habilidade.
 
 ## Instalação e execução
 
-Requisitos: **Node.js 18 ou superior** (desenvolvido com o Node 22). A única
-dependência é o pacote `ws` (WebSocket).
+Requisitos: **Node.js 22 ou superior** (`npm test` usa o descobridor de testes por
+glob e os *loader hooks* do Node 22). A única dependência de runtime é o pacote `ws`
+(WebSocket); o Playwright, usado só pelos testes ponta a ponta, é uma dependência
+de desenvolvimento.
 
 ```bash
 npm install
@@ -122,8 +124,9 @@ concluído por dificuldade) fica salvo no navegador.
 
 - Vence quem destruir todas as naves **compradas** do inimigo (unidades geradas por
   habilidades não contam).
-- **Morte súbita aos 150 s**: regeneração e reparo desligam, recuo acaba e o dano
-  cresce 20% a cada 15 s.
+- **Morte súbita aos 150 s**: regeneração passiva, reparo, recarga de escudos, curas
+  contínuas e a cura por abate desligam (curas instantâneas de habilidades ainda
+  funcionam), recuo acaba e o dano cresce 20% a cada 15 s.
 - **Limite de 240 s**: vence quem tiver mais valor de frota restante (custo × vida
   restante); empate dentro de 2% é decidido pelo dano causado.
 
@@ -151,6 +154,19 @@ npm run e2e                  # ponta a ponta no Chromium (Playwright): sobe o se
                              # numa porta livre e joga partidas reais pelo navegador
 npm run simulate -- --help   # simulador headless (frota × frota, matrizes, dificuldade)
 ```
+
+Os testes ponta a ponta precisam do Chromium do Playwright. `npm install` instala o
+pacote `playwright`; baixe o navegador uma vez com:
+
+```bash
+npx playwright install chromium
+```
+
+(O runner também aceita um Chromium já instalado via `PLAYWRIGHT_BROWSERS_PATH`.
+Se o Playwright não puder ser importado, `npm run e2e` imprime o comando acima.)
+O simulador valida seus argumentos (`--ai` precisa ser um perfil de
+`shared/aiProfiles.js`; `--seeds`, `--budget` e `--maxTicks` são inteiros positivos)
+e sai com código 2 em caso de erro de uso.
 
 Exemplos do simulador (`tools/simulate.js`):
 

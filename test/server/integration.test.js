@@ -88,8 +88,7 @@ describe('integration: real server', () => {
     await v.open;
     const mismatch = await v.hello({ version: 99 });
     assert.equal(mismatch.code, 'VERSION_MISMATCH');
-    await sleep(50);
-    assert.equal(v.closed && v.closed.code, 4000);
+    assert.equal((await v.waitClosed()).code, 4000);
   });
 
   test('1v1: create/join, fleets, ready, start → countdown → battle_start → frames → battle_end, identical frames', async () => {
@@ -257,8 +256,7 @@ describe('integration: real server', () => {
     for (let i = 0; i < 200; i++) z.send({ t: 'ping', c: i });
     const err = await z.next((m) => m.t === 'error' && m.code === 'RATE_LIMITED');
     assert.equal(err.code, 'RATE_LIMITED');
-    await sleep(100);
-    assert.equal(z.closed && z.closed.code, 4008, 'socket closed after repeated violations');
+    assert.equal((await z.waitClosed()).code, 4008, 'socket closed after repeated violations');
     assert.ok(z.all('pong').length <= 41);
     await a2.request({ t: 'leave_room' });
   });
@@ -267,9 +265,9 @@ describe('integration: real server', () => {
     const c = await connectHello('Max');
     const big = { t: 'chat', text: 'x'.repeat(20_000), rid: 1 };
     c.send(big);
-    await sleep(150);
-    assert.ok(c.closed, 'ws closes the connection for frames above maxPayload');
-    assert.equal(c.closed.code, 1009);
+    const closed = await c.waitClosed();
+    assert.ok(closed, 'ws closes the connection for frames above maxPayload');
+    assert.equal(closed.code, 1009);
   });
 
   test('server process prints "listening <port>" and exits cleanly on SIGTERM', async () => {
@@ -300,8 +298,120 @@ describe('integration: real server', () => {
     child.kill('SIGTERM');
     const code = await Promise.race([exit, sleep(5000).then(() => 'timeout')]);
     assert.equal(code, 0);
-    await sleep(20);
-    assert.ok(c.closed, 'clients are closed on shutdown');
-    assert.equal(c.closed.code, 1001);
+    const closed = await c.waitClosed();
+    assert.ok(closed, 'clients are closed on shutdown');
+    assert.equal(closed.code, 1001);
+  });
+
+  test('server process reports a busy port in one line and exits 1; invalid PORT is reported', async () => {
+    const busy = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
+      env: { ...process.env, PORT: String(server.port) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    let err = '';
+    busy.stdout.on('data', (d) => { out += d.toString(); });
+    busy.stderr.on('data', (d) => { err += d.toString(); });
+    const code = await Promise.race([
+      new Promise((resolve) => busy.on('exit', resolve)),
+      sleep(8000).then(() => 'timeout'),
+    ]);
+    assert.equal(code, 1);
+    assert.ok(!out.includes('listening'), out);
+    assert.match(err, new RegExp(`porta ${server.port} em uso`));
+    assert.equal(err.trim().split('\n').length, 1, 'exactly one line, no stack traces: ' + err);
+
+    const bad = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
+      env: { ...process.env, PORT: 'abc', FE_MAX_TICKS: '50' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let badErr = '';
+    bad.stderr.on('data', (d) => { badErr += d.toString(); });
+    const exited = new Promise((resolve) => bad.on('exit', resolve));
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no listening/exit: ' + badErr)), 8000);
+      let o = '';
+      bad.stdout.on('data', (d) => { o += d.toString(); if (/listening \d+/.test(o)) { clearTimeout(timer); resolve(); } });
+      bad.on('exit', () => { clearTimeout(timer); resolve(); });
+    });
+    bad.kill('SIGTERM');
+    await Promise.race([exited, sleep(5000)]);
+    assert.match(badErr, /PORT inválido/);
+  });
+});
+
+describe('integration: abuse caps (dedicated servers)', () => {
+  const quiet = { log() {}, warn() {} };
+
+  test('a socket that never sends hello is closed with 4002 after the handshake timeout', async () => {
+    const s = await startServer({ port: 0, handshakeMs: 300, log: quiet });
+    try {
+      const silent = createTestClient(`ws://127.0.0.1:${s.port}/`, 'Silent');
+      await silent.open;
+      const closed = await silent.waitClosed(5000);
+      assert.equal(closed.code, 4002);
+      assert.equal(s.sessions.size, 0);
+      // a prompt hello is unaffected and the session survives past the timeout
+      const prompt = createTestClient(`ws://127.0.0.1:${s.port}/`, 'Prompt');
+      await prompt.open;
+      assert.equal((await prompt.hello()).t, 'welcome');
+      await sleep(400);
+      assert.equal(prompt.closed, null);
+      await prompt.close();
+    } finally {
+      await s.close();
+    }
+  });
+
+  test('per-address socket cap: the N+1th concurrent socket gets RATE_LIMITED and 4003; closing one frees a slot', async () => {
+    const s = await startServer({ port: 0, maxSocketsPerAddress: 3, log: quiet });
+    try {
+      const url = `ws://127.0.0.1:${s.port}/`;
+      const ok = [];
+      for (let i = 0; i < 3; i++) {
+        const c = createTestClient(url, `C${i}`);
+        await c.open;
+        assert.equal((await c.hello()).t, 'welcome');
+        ok.push(c);
+      }
+      const extra = createTestClient(url, 'Extra');
+      await extra.open;
+      const e = await extra.next((m) => m.t === 'error', 5000, { rejectOnClose: false });
+      assert.equal(e.code, 'RATE_LIMITED');
+      assert.equal(e.detail, 'connections');
+      assert.equal((await extra.waitClosed()).code, 4003);
+      await ok[0].close();
+      const again = createTestClient(url, 'Again');
+      await again.open;
+      assert.equal((await again.hello()).t, 'welcome');
+      assert.equal(again.closed, null);
+      for (const c of [...ok.slice(1), again]) await c.close();
+    } finally {
+      await s.close();
+    }
+  });
+
+  test('per-address room cap: ROOM_FULL{address} beyond the quota while the global cap still has space', async () => {
+    const s = await startServer({ port: 0, maxRooms: 50, maxRoomsPerAddress: 2, log: quiet });
+    try {
+      const url = `ws://127.0.0.1:${s.port}/`;
+      const cs = [];
+      for (let i = 0; i < 3; i++) {
+        const c = createTestClient(url, `R${i}`);
+        await c.open;
+        assert.equal((await c.hello()).t, 'welcome');
+        cs.push(c);
+      }
+      await cs[0].request({ t: 'create_room', teamSize: 1, budget: 1500 });
+      await cs[1].request({ t: 'create_room', teamSize: 1, budget: 1500 });
+      await assert.rejects(cs[2].request({ t: 'create_room', teamSize: 1, budget: 1500 }), (e) => e.code === 'ROOM_FULL' && e.detail === 'address');
+      assert.equal(s.lobby.rooms.size, 2);
+      await cs[0].request({ t: 'leave_room' });
+      await cs[2].request({ t: 'create_room', teamSize: 1, budget: 1500 });
+      assert.equal(s.lobby.rooms.size, 2);
+      for (const c of cs) await c.close();
+    } finally {
+      await s.close();
+    }
   });
 });

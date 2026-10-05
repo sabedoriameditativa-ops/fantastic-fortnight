@@ -161,7 +161,7 @@ async function getNet() {
     // chat history lives on the app state so it survives screen changes (lobby ↔ fleet builder ↔ results)
     if (!state.mpChat) state.mpChat = [];
     state.net.onChat((m) => { state.mpChat.push(m); if (state.mpChat.length > 80) state.mpChat.shift(); });
-    state.net.onLeft(() => { state.mpChat.length = 0; });
+    state.net.onLeft(() => { state.mpChat.length = 0; state.mpFleet = null; });
   }
   if (!state.net.connected) await state.net.connect(name);
   return state.net;

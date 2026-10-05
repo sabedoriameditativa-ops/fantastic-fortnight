@@ -43,6 +43,52 @@ describe('music engine', () => {
     }
   });
 
+  test('victory stinger: the reverb send hangs off the voice, not the theme bus (no leak per stinger)', async () => {
+    const { engine, ctx } = await makeEngine();
+    engine.setScene('victory');
+    const bus = engine.music.current.bus;
+    run(engine, ctx, 4);
+    engine.setScene('menu');
+    run(engine, ctx, 1);
+    engine.setScene('victory');
+    run(engine, ctx, 4);
+    for (const th of [bus, engine.music.current.bus]) {
+      for (const o of th.outputs) assert.ok(!o.disconnected, `theme bus still feeds a released node ${o.kind}#${o.id}`);
+    }
+  });
+
+  test('retire(): switching scene while the old theme is still fading in continues its ramp instead of popping to 1', async () => {
+    const { engine, ctx } = await makeEngine();
+    // battle: fade-in 2 s, but its bar (128 BPM) is 1.875 s → the first bar boundary lands inside the fade-in
+    engine.setScene('battle');
+    run(engine, ctx, 1.0);
+    const old = engine.music.current;
+    const g = old.bus.gain;
+    engine.setScene('menu');
+    const ev = g.events;
+    const i = ev.map((e) => e.m).lastIndexOf('cancel');
+    assert.ok(i >= 0, 'fade-in re-anchored');
+    const tail = ev.slice(i + 1);
+    assert.equal(tail[0].m, 'set');
+    const expectedNow = Math.max(0, Math.min(1, (ctx.currentTime - old.startAt) / 2));
+    assert.ok(Math.abs(tail[0].v - expectedNow) < 1e-6, `holds the fade-in value ${tail[0].v} vs ${expectedNow}`);
+    assert.ok(tail[0].v < 0.6, 'still well inside the fade-in');
+    assert.equal(tail[1].m, 'lin');
+    const expectedSwitch = Math.max(0, Math.min(1, (tail[1].t - old.startAt) / 2));
+    assert.ok(Math.abs(tail[1].v - expectedSwitch) < 1e-6, 'ramp continues to the value at tSwitch');
+    assert.ok(tail[1].v < 1, 'never forced to 1');
+    assert.equal(tail[2].m, 'lin'); assert.equal(tail[2].v, 0);
+    assert.ok(!tail.some((e) => e.m === 'set' && e.v === 1));
+    // a fully faded-in theme retires from 1
+    const { engine: e2, ctx: c2 } = await makeEngine();
+    e2.setScene('builder');
+    run(e2, c2, 4);
+    const g2 = e2.music.current.bus.gain;
+    e2.setScene('menu');
+    const t2 = g2.events.slice(g2.events.map((e) => e.m).lastIndexOf('cancel') + 1);
+    assert.equal(t2[0].v, 1); assert.equal(t2[1].v, 1); assert.equal(t2[2].v, 0);
+  });
+
   test('layers: hysteresis and progression B only on 4-bar boundaries', async () => {
     const { engine, ctx } = await makeEngine();
     engine.setScene('battle');
@@ -91,7 +137,9 @@ describe('music engine', () => {
     const newEv = next.bus.gain.events.filter((e) => e.m === 'lin').at(-1);
     assert.equal(oldEv.v, 0); assert.equal(newEv.v, 1);
     assert.ok(Math.abs(oldEv.t - newEv.t) < 1e-9, 'same crossfade time');
-    const tSwitch = old.bus.gain.events.find((e) => e.m === 'set' && e.v === 1).t;
+    const lins = old.bus.gain.events.filter((e) => e.m === 'lin');
+    const tSwitch = lins.at(-2).t; // retire(): ramp to the fade-in value at tSwitch, then lin → 0
+    assert.equal(lins.at(-2).v, 1, 'menu fade-in (3 s) is complete at its first bar boundary (3.33 s)');
     const bar = 16 * 60 / 72 / 4;
     const k = (tSwitch - old.startAt) / bar;
     assert.ok(Math.abs(k - Math.round(k)) < 1e-6, `switch at bar boundary (k=${k})`);

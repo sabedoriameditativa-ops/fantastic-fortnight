@@ -185,6 +185,20 @@ export function createTestClient(url, name) {
         ws.close(code);
       });
     },
+    /**
+     * Resolve with `{code, reason}` once the server (or anyone) closed the
+     * socket; immediately when it already is. Rejects after `ms`.
+     */
+    waitClosed(ms = 5000) {
+      return new Promise((resolve, reject) => {
+        if (closed) return resolve(closed);
+        const timer = setTimeout(() => reject(new Error(`${name}: timeout waiting for close`)), ms);
+        ws.once('close', () => {
+          clearTimeout(timer);
+          resolve(closed);
+        });
+      });
+    },
   };
   return client;
 }
