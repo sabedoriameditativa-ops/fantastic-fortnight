@@ -178,7 +178,7 @@ async function main() {
     throw err;
   }
   console.log(`listening ${server.port}`);
-  if (process.env.FE_OPEN_BROWSER === '1') openBrowser(`http://localhost:${server.port}`);
+  if (process.env.FE_OPEN_BROWSER === '1' || process.argv.includes('--open')) openBrowser(`http://localhost:${server.port}`);
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
