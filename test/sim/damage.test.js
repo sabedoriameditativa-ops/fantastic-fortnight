@@ -121,8 +121,8 @@ test('sudden death ramp multiplies damage; Terran coordination adds 10% kinetic'
   state.suddenDeath = false; state.sdMul = 1;
   t.targetedByTerran = 3;
   const before = t.hp;
-  applyDamage(state, 1, 2, 10, 'kinetic', null); // 10 × 1.1 × 1.3 crystalline = 14.3
-  assert.ok(Math.abs(before - t.hp - 14.3) < 1e-9);
+  applyDamage(state, 1, 2, 10, 'kinetic', null); // 10 × 1.1 × 1.2 crystalline = 13.2
+  assert.ok(Math.abs(before - t.hp - 13.2) < 1e-9);
 });
 
 test('shields regenerate after the delay, organic hulls always, nanite after 2 s without hull damage', () => {
