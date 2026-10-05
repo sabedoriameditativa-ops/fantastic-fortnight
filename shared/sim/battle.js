@@ -17,9 +17,17 @@ import { fireWeapons, advanceProjectiles, flakCurtains } from './weapons.js';
 import { applyDamageQueue, tickDots, regenPhase, processDeaths } from './damage.js';
 import { tickAreas, tickLatches, tickKamikaze, registerShip } from './effects.js';
 import { makeTeamState, recomputeTargeting, teamThink, decide, executePendingCasts, computeDesired } from './ai.js';
+import { orderedShips } from './queries.js';
 import { makeStats, checkEnd } from './stats.js';
 
 export { AI_PROFILES };
+
+/** Well-mixed bit of the tick number (balanced over any stride of 1..16 ticks). */
+function tickBit(t) {
+  let h = Math.imul(t ^ (t >>> 16), 0x45d9f3b);
+  h ^= h >>> 16;
+  return h & 1;
+}
 
 /**
  * Validate a BattleConfig (throws on structural errors).
@@ -62,12 +70,16 @@ export function createBattle(config) {
     maxTicks: config.maxTicks ?? MAX_TICKS, suddenDeathTick: config.suddenDeathTick ?? SUDDEN_DEATH_TICK,
     profiles, dmgQueue: [], dmgCount: 0, recentDeaths: [],
     auraSources: [], curtains: [], latchers: [], kamikazes: [], initialShips: [],
+    firstTeam: 0, orderBuf: [], // per-tick processing order (alternates; see stepBattle / orderedShips)
   };
   const placed = planDeployment(players, world);
   for (const d of placed) {
     const id = state.nextId++;
-    const s = makeShip({ id, cls: d.cls, owner: d.owner, team: d.team, x: d.x, y: d.y, heading: d.a, tick: 0 });
-    s.ai.nextThink = id % profiles[d.owner].thinkInterval;
+    // slot = team-local deployment index: weapon cooldown offsets and the orbit side derive from it (not from
+    // the global id) so that mirrored fleets get identical staggers on both sides (SPEC §8.2)
+    const slot = state.alive[d.team].length;
+    const s = makeShip({ id, cls: d.cls, owner: d.owner, team: d.team, x: d.x, y: d.y, heading: d.a, tick: 0, slot });
+    s.ai.nextThink = slot % profiles[d.owner].thinkInterval;
     state.ships.push(s);
     state.alive[d.team].push(id);
     state.alivePurchased[d.team]++;
@@ -126,6 +138,10 @@ export function stepBattle(state) {
   state.events = events;
   state.tick++;
   const tick = state.tick, ships = state.ships;
+  // the team that decides / casts / fires / moves first (and whose damage applies first) alternates from tick to
+  // tick, so neither side has a systematic within-tick ordering edge (SPEC §8.2 mirror symmetry). A hashed tick bit
+  // (not tick parity) so that it still alternates for ships that think every 4 / 8 / 16 ticks.
+  state.firstTeam = tickBit(tick);
   rebuildGrid(state);
   recomputeTargeting(state);
   if (tick % 10 === 0) { teamThink(state, 0); teamThink(state, 1); } // both teams on the same tick: a staggered think let one side switch phase/leash first on every seed
@@ -134,9 +150,10 @@ export function stepBattle(state) {
     state.sdMul = 1 + SUDDEN_DEATH_RAMP * Math.floor((tick - state.suddenDeathTick) / SUDDEN_DEATH_RAMP_TICKS);
   }
   for (let i = 0; i < ships.length; i++) { const s = ships[i]; if (s.alive) updateStatus(s, tick); }
-  for (let i = 0; i < ships.length; i++) {
-    const s = ships[i];
-    if (s.alive && s.ai.nextThink <= tick && s.stunUntil <= tick) decide(state, s);
+  const ord = orderedShips(state);
+  for (let i = 0; i < ord.length; i++) {
+    const s = ord[i];
+    if (s.ai.nextThink <= tick && s.stunUntil <= tick) decide(state, s);
   }
   executePendingCasts(state);
   moveShips(state, computeDesired);

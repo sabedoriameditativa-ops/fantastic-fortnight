@@ -31,7 +31,7 @@ function neutralWeaponMod(m) {
  * @param {number} [o.source]        spawner id (spawned units)
  * @param {number} [o.lifetimeEnd]   tick at which a spawned unit expires (0 = never)
  * @param {number} [o.tick]          creation tick
- * @param {number} [o.slot]          team-local index (0-based) used for the cooldown stagger; defaults to id
+ * @param {number} [o.slot]          team-local index (0-based) used for the cooldown stagger and orbit side; defaults to id
  */
 export function makeShip(o) {
   const def = SHIPS[o.cls];
@@ -41,11 +41,12 @@ export function makeShip(o) {
   const clsIdx = CLASS_INDEX[o.cls];
   const spawned = !!o.source;
   const tick = o.tick || 0;
+  const slot = o.slot ?? o.id;
   const weapons = def.weapons.map((w, idx) => {
     const cdTicks = Math.max(1, Math.round(w.cooldown * TICK_RATE));
     return {
       idx, def: w, cdTicks,
-      readyAt: tick + (((o.slot ?? o.id) * 7) % cdTicks), // staggered by the team-local slot so mirrored fleets get identical offsets
+      readyAt: tick + ((slot * 7) % cdTicks), // staggered by the team-local slot so mirrored fleets get identical offsets
       charging: 0,        // target id while charging a heavy beam
       chargeUntil: 0,
       mod: neutralWeaponMod({}),
@@ -85,7 +86,9 @@ export function makeShip(o) {
     ai: {
       targetId: 0, targetSince: 0, assignedId: 0, assignedScore: 0, protecteeId: 0,
       mode: 'idleAdvance', px: 0, py: 0, retreating: false, nextThink: tick,
-      lastJumpTick: -1000, slotDx: 0, slotDy: 0, orbitSign: (o.id & 1) ? 1 : -1,
+      // orbit / strafe / escort side: alternates by team-local slot and is flipped for team 1 so that the chosen
+      // tangent is the x-mirror of team 0's choice (keeps mirrored fleets symmetric, SPEC §8.2)
+      lastJumpTick: -1000, slotDx: 0, slotDy: 0, orbitSign: ((slot & 1) ? 1 : -1) * (o.team === 0 ? 1 : -1),
       fleeX: 0, fleeY: 0, lastTargetId: 0, holdOverride: 0, retreatSince: 0,
     },
     targetedBy: 0, targetedByTerran: 0, allocDps: 0, incoming: 0, incomingInterceptables: 0,

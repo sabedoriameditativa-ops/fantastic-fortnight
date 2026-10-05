@@ -6,6 +6,20 @@ import { isTargetable } from './ship.js';
 
 const scratch = [];
 
+/**
+ * Alive ships in this tick's processing order: the ships of `state.firstTeam`
+ * (id ascending) then the other team's (id ascending). The first team alternates
+ * every tick (see stepBattle) so neither side systematically acts first within a
+ * tick (SPEC §8.2 mirror symmetry). Reuses state.orderBuf.
+ */
+export function orderedShips(state) {
+  const ships = state.ships, out = state.orderBuf, ft = state.firstTeam;
+  out.length = 0;
+  for (let i = 0; i < ships.length; i++) { const s = ships[i]; if (s.alive && s.team === ft) out.push(s); }
+  for (let i = 0; i < ships.length; i++) { const s = ships[i]; if (s.alive && s.team !== ft) out.push(s); }
+  return out;
+}
+
 /** Alive enemies of `s` within r (targetable only unless `all`). */
 export function enemiesWithin(state, s, r, out, all = false) {
   queryCircle(state.grid, state.ships, s.x, s.y, r, out, 1 - s.team);
@@ -70,6 +84,7 @@ export function densestPoint(state, s, searchR, clusterR, res) {
   res.x = s.x; res.y = s.y; res.count = 0; res.medPlus = 0; res.cost = 0;
   const n = Math.min(dpBuf.length, 24);
   const r2 = clusterR * clusterR;
+  let bestD2 = Infinity; // ties (count, cost) go to the center nearest to `s`: grid order is x-sorted and would favour one side
   for (let i = 0; i < n; i++) {
     const c = dpBuf[i];
     let count = 0, med = 0, cost = 0;
@@ -78,8 +93,9 @@ export function densestPoint(state, s, searchR, clusterR, res) {
       const d2 = (e.x - c.x) * (e.x - c.x) + (e.y - c.y) * (e.y - c.y);
       if (d2 <= r2) { count++; cost += e.cost; if (e.sizeIdx >= 2) med++; }
     }
-    if (count > res.count || (count === res.count && cost > res.cost)) {
-      res.count = count; res.medPlus = med; res.cost = cost; res.x = c.x; res.y = c.y;
+    const dc = (c.x - s.x) * (c.x - s.x) + (c.y - s.y) * (c.y - s.y);
+    if (count > res.count || (count === res.count && (cost > res.cost || (cost === res.cost && dc < bestD2)))) {
+      res.count = count; res.medPlus = med; res.cost = cost; res.x = c.x; res.y = c.y; bestD2 = dc;
     }
   }
   return res;

@@ -6,6 +6,7 @@ import { SIZE_CLASS } from '../catalog.js';
 import { angleDiff, clamp, wrapAngle } from './math.js';
 import { queryBox } from './spatial.js';
 import { maxSpeed } from './ship.js';
+import { orderedShips } from './queries.js';
 
 const LATERAL_DRAG = 4;        // per second
 const SEP_GAIN = 1.4;
@@ -34,8 +35,8 @@ export function separation(state, s, out) {
     if (d2 >= sep * sep) continue;
     let d = Math.sqrt(d2);
     let nx, ny;
-    if (d < 1e-6) { // exact overlap: deterministic direction from id parity
-      d = 1e-6; nx = (s.id > o.id) ? 1 : -1; ny = 0;
+    if (d < 1e-6) { // exact overlap: deterministic direction (the higher id is pushed toward its own facing)
+      d = 1e-6; nx = ((s.id > o.id) ? 1 : -1) * (s.team === 0 ? 1 : -1); ny = 0;
     } else { nx = dx / d; ny = dy / d; }
     const w = (1 - d / sep) * (1 - d / sep) * (o.mass / (s.mass + o.mass)) * SEP_GAIN;
     px += nx * w; py += ny * w;
@@ -99,10 +100,11 @@ export function clampToArena(s, w, h) {
  * @param {(state: object, s: object, out: {dx:number,dy:number,speed:number}) => void} desiredFn
  */
 export function moveShips(state, desiredFn) {
-  const ships = state.ships, tick = state.tick;
+  const tick = state.tick;
   const w = state.world.w, h = state.world.h;
-  for (let i = 0; i < ships.length; i++) {
-    const s = ships[i];
+  const ord = orderedShips(state); // this tick's team order (alternates per tick)
+  for (let i = 0; i < ord.length; i++) {
+    const s = ord[i];
     if (!s.alive) continue;
     if (s.latch) continue; // positioned by the latch host
     const cap = maxSpeed(s, tick);
@@ -149,7 +151,7 @@ export function resolveOverlaps(state) {
       const d2 = dx * dx + dy * dy;
       if (d2 >= minD * minD) continue;
       let d = Math.sqrt(d2), nx, ny;
-      if (d < 1e-6) { d = 1e-6; nx = 1; ny = 0; } else { nx = dx / d; ny = dy / d; }
+      if (d < 1e-6) { d = 1e-6; nx = s.team === 0 ? 1 : -1; ny = 0; } else { nx = dx / d; ny = dy / d; } // exact overlap: push along the lower id's facing
       const overlap = minD - d;
       const tot = s.mass + o.mass;
       const fs = o.mass / tot, fo = s.mass / tot;

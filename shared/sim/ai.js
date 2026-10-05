@@ -8,7 +8,7 @@ import { clamp, noise } from './math.js';
 import { queryCircle } from './spatial.js';
 import { getTables } from './tables.js';
 import { isTargetable, ehp, maxSpeed } from './ship.js';
-import { enemiesWithin, alliesWithin, nearestEnemy, nearestEnemyGlobal } from './queries.js';
+import { enemiesWithin, alliesWithin, nearestEnemy, nearestEnemyGlobal, orderedShips } from './queries.js';
 import { ABILITY_REGISTRY } from './abilities.js';
 import { ABILITIES } from '../catalog.js';
 
@@ -248,6 +248,10 @@ export function teamThink(state, team) {
       const a = qbuf[k];
       if (s.role === 'support' && (a.role === 'anchor' || a.role === 'carrier') && qbuf.length > 1) continue; // supports follow the fighting line
       if (!best || a.cost > best.cost) best = a;
+      else if (a.cost === best.cost) { // ties: nearest (grid order is x-sorted and would favour one side)
+        const da = (a.x - s.x) * (a.x - s.x) + (a.y - s.y) * (a.y - s.y), db = (best.x - s.x) * (best.x - s.x) + (best.y - s.y) * (best.y - s.y);
+        if (da < db) best = a;
+      }
     }
     if (!best && qbuf.length > 0) best = qbuf[0];
     s.ai.protecteeId = best ? best.id : (T.anchorId && T.anchorId !== s.id ? T.anchorId : 0);
@@ -444,8 +448,9 @@ function safePoint(state, s, T) {
 /** Execute scheduled ability casts whose delay elapsed (re-validating the trigger). */
 export function executePendingCasts(state) {
   const ships = state.ships, tick = state.tick;
-  for (let i = 0; i < ships.length; i++) {
-    const s = ships[i];
+  const ord = orderedShips(state); // this tick's team order (alternates per tick)
+  for (let i = 0; i < ord.length; i++) {
+    const s = ord[i];
     if (!s.alive) continue;
     const ab = s.ability;
     if (ab.pendingAt < 0 || ab.pendingAt > tick) continue;
@@ -532,7 +537,7 @@ export function computeDesired(state, s, out) {
       ex /= ed; ey /= ed;
       const front = s.role === 'escort' ? 1 : -1;
       const off = a.radius + s.radius + 60;
-      const side = ((s.id & 1) ? 1 : -1) * (s.radius + 16);
+      const side = ai.orbitSign * (s.radius + 16); // team-local, mirror-symmetric side (see makeShip)
       const sx = a.x + ex * off * front - ey * side, sy = a.y + ey * off * front + ex * side;
       dx = sx - s.x; dy = sy - s.y;
       const d = Math.sqrt(dx * dx + dy * dy);

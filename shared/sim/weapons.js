@@ -9,6 +9,7 @@ import { queryCircle } from './spatial.js';
 import { getTables } from './tables.js';
 import { isTargetable } from './ship.js';
 import { queueDamage } from './damage.js';
+import { orderedShips } from './queries.js';
 
 const buf = [];
 const coneBuf = [];
@@ -74,8 +75,9 @@ function bestShootable(state, s, w) {
 /** Fire every ready weapon of every alive ship (id order). */
 export function fireWeapons(state) {
   const ships = state.ships, tick = state.tick;
-  for (let i = 0; i < ships.length; i++) {
-    const s = ships[i];
+  const ord = orderedShips(state); // this tick's team order (alternates per tick)
+  for (let i = 0; i < ord.length; i++) {
+    const s = ord[i];
     if (!s.alive || s.stunUntil > tick) continue;
     const target = s.ai.targetId > 0 ? ships[s.ai.targetId - 1] : null;
     const ws = s.weapons;

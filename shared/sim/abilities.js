@@ -117,7 +117,14 @@ export const ABILITY_REGISTRY = {
       const w = me.weapons[0];
       if (w.readyAt > ctx.tick + 2 * TICK_RATE) return 0;
       enemiesWithin(state, me, th(ctx, 700), buf);
-      for (let i = 0; i < buf.length; i++) if (buf[i].sizeIdx >= 3) { me.ability.castTarget = buf[i].id; return 1; }
+      let best = null, bd = Infinity; // nearest large+ (grid order is x-sorted: "first found" would favour one side)
+      for (let i = 0; i < buf.length; i++) {
+        const e = buf[i];
+        if (e.sizeIdx < 3) continue;
+        const d = dist(me, e);
+        if (d < bd) { bd = d; best = e; }
+      }
+      if (best) { me.ability.castTarget = best.id; return 1; }
       return 0;
     },
     cast(ctx) {
@@ -349,7 +356,7 @@ export const ABILITY_REGISTRY = {
         const a = buf[i];
         if (a.sizeIdx < 2 || a.shieldMax <= 0 || a.extraShield > 0) continue;
         if (a.shield >= frac * a.shieldMax) continue;
-        if (!best || a.cost > best.cost) best = a;
+        if (!best || a.cost > best.cost || (a.cost === best.cost && dist(me, a) < dist(me, best))) best = a; // ties: nearest
       }
       if (!best) return 0;
       me.ability.castTarget = best.id;
@@ -397,7 +404,10 @@ export const ABILITY_REGISTRY = {
       if (sfrac > th(ctx, 0.8) && countEnemies(state, me, 480) === 0) {
         enemiesWithin(state, me, 900, buf);
         let best = null;
-        for (let i = 0; i < buf.length; i++) if (buf[i].sizeIdx >= 4 && (!best || buf[i].cost > best.cost)) best = buf[i];
+        for (let i = 0; i < buf.length; i++) {
+          const e = buf[i];
+          if (e.sizeIdx >= 4 && (!best || e.cost > best.cost || (e.cost === best.cost && dist(me, e) < dist(me, best)))) best = e; // ties: nearest
+        }
         if (best) {
           const dx = best.x - me.x, dy = best.y - me.y;
           const d = Math.sqrt(dx * dx + dy * dy) || 1;

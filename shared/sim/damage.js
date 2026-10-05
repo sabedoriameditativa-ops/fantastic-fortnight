@@ -22,17 +22,20 @@ const DOT_INTERVAL = TICK_RATE / 2; // DoT ticks every 0.5 s
 export function queueDamage(state, srcId, dstId, amount, type, o) {
   const q = state.dmgQueue;
   let e = q[state.dmgCount];
-  if (!e) { e = { srcId: 0, dstId: 0, amount: 0, type: '', ignoreDr: false, dot: null, shieldOnly: false, fromAbility: false, disruptSeconds: 0, seq: 0 }; q[state.dmgCount] = e; }
+  if (!e) { e = { srcId: 0, dstId: 0, amount: 0, type: '', ignoreDr: false, dot: null, shieldOnly: false, fromAbility: false, disruptSeconds: 0, seq: 0, key: 0 }; q[state.dmgCount] = e; }
   e.srcId = srcId; e.dstId = dstId; e.amount = amount; e.type = type;
   e.ignoreDr = !!(o && o.ignoreDr); e.dot = (o && o.dot) || null; e.shieldOnly = !!(o && o.shieldOnly);
   e.fromAbility = !!(o && o.fromAbility); e.disruptSeconds = (o && o.disruptSeconds) || 0;
   e.seq = state.dmgCount;
+  // sort key: sources of the tick's first team before the other team's, then srcId (sequence preserved by the stable sort)
+  e.key = srcId > 0 && state.ships[srcId - 1].team !== state.firstTeam ? SECOND_TEAM_KEY + srcId : srcId;
   state.dmgCount++;
 }
 
-const keySrc = (e) => e.srcId;
+const SECOND_TEAM_KEY = 1 << 24;
+const keySrc = (e) => e.key;
 
-/** Apply all queued damage in (srcId, sequence) order and clear the queue. */
+/** Apply all queued damage in (first team of the tick, srcId, sequence) order and clear the queue. */
 export function applyDamageQueue(state) {
   const n = state.dmgCount;
   if (n === 0) return;

@@ -130,6 +130,7 @@ test('shields regenerate after the delay, organic hulls always, nanite after 3 s
   const state = createBattle(config1v1(a, b, 'regen', 'especialista', { maxTicks: 10 }));
   const vor = state.ships[0], fer = state.ships[1];
   vor.hp = 100; fer.hp = 100;
+  vor.ability.readyAt = 1e9; fer.ability.readyAt = 1e9; // passive regen only: no molt / reactive nanites heals
   // keep them apart so no damage is exchanged
   vor.x = 100; vor.y = 100; fer.x = 2700; fer.y = 1400;
   fer.lastHullHitTick = 0;

@@ -76,8 +76,9 @@ export function spawnUnits(state, caster, cls, count, maxAlive, lifetimeSec) {
   const tick = state.tick;
   const ring = caster.radius + def.radius + 12;
   const spread = Math.PI * 0.8;
+  const mirror = caster.team === 0 ? 1 : -1; // team 1 sweeps the arc the other way round: x-mirror of team 0's ring
   for (let i = 0; i < n; i++) {
-    const ang = caster.heading + (n === 1 ? 0 : -spread / 2 + (spread * i) / (n - 1));
+    const ang = caster.heading + mirror * (n === 1 ? 0 : -spread / 2 + (spread * i) / (n - 1));
     let x = caster.x + Math.cos(ang) * ring, y = caster.y + Math.sin(ang) * ring;
     x = Math.min(state.world.w - def.radius, Math.max(def.radius, x));
     y = Math.min(state.world.h - def.radius, Math.max(def.radius, y));
@@ -127,7 +128,7 @@ export function teleportShip(state, s, x, y) {
       const d2 = dx * dx + dy * dy;
       if (d2 >= minD * minD) continue;
       const d = Math.sqrt(d2);
-      if (d < 1e-6) { x += minD; } else { x += (dx / d) * (minD - d); y += (dy / d) * (minD - d); }
+      if (d < 1e-6) { x += s.team === 0 ? -minD : minD; } else { x += (dx / d) * (minD - d); y += (dy / d) * (minD - d); } // exact overlap: back toward the own side
       moved = true;
     }
     x = Math.min(w - s.radius, Math.max(s.radius, x));
