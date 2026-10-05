@@ -28,8 +28,5 @@ echo "  Para jogar em rede local, os outros abrem http://SEU-IP:$PORT"
 echo "  Pressione Ctrl+C para encerrar o servidor."
 echo
 
-if [ -z "$NO_BROWSER" ]; then
-  URL="http://localhost:$PORT"
-  ( sleep 1.5; if command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL" >/dev/null 2>&1 || true; elif command -v open >/dev/null 2>&1; then open "$URL" || true; fi ) &
-fi
+if [ -z "$NO_BROWSER" ]; then export FE_OPEN_BROWSER=1; fi
 exec node server/index.js

@@ -21,6 +21,12 @@ própria. Você assiste, acelera o tempo e aprende o que funciona.
 3. **Abra o jogo**: dê dois cliques em `iniciar.bat` (Windows) ou rode `./iniciar.sh`
    (macOS/Linux). O script instala a única dependência (`ws`), inicia o servidor e abre
    `http://localhost:3000` no navegador. Para encerrar, feche a janela (ou Ctrl+C).
+   No macOS/Linux, se o arquivo perdeu a permissão de execução (ZIP), use `bash iniciar.sh`.
+
+Se o navegador mostrar "não consigo chegar a esta página", o servidor não está rodando:
+olhe a janela preta do script (ela fica aberta e mostra o motivo). Caminho manual no
+Windows: abra a pasta do jogo, clique na barra de endereço do Explorador, digite `cmd` e
+Enter; na janela que abre rode `node server\index.js` e depois acesse `http://localhost:3000`.
 
 Para jogar com amigos na mesma rede, eles abrem `http://SEU-IP:3000` (o IP do computador
 que rodou o script; veja com `ipconfig` no Windows ou `ifconfig`/`ip a` no macOS/Linux) e

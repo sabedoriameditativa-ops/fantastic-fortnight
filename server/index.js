@@ -5,6 +5,7 @@
 // MAX_ROOMS (global), MAX_SOCKETS_PER_IP, MAX_ROOMS_PER_IP (0 = unlimited).
 
 import http from 'node:http';
+import { exec } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -154,6 +155,16 @@ export async function startServer(o = {}) {
   return { port, httpServer, wss, lobby, sessions, close };
 }
 
+/** Best-effort: open the default browser on the given URL (used by the one-click launchers). */
+function openBrowser(url) {
+  try {
+    const cmd = process.platform === 'win32' ? `start "" "${url}"`
+      : process.platform === 'darwin' ? `open "${url}"`
+        : `xdg-open "${url}"`;
+    exec(cmd, () => {});
+  } catch { /* ignore */ }
+}
+
 async function main() {
   const cfg = envConfig();
   let server;
@@ -167,6 +178,7 @@ async function main() {
     throw err;
   }
   console.log(`listening ${server.port}`);
+  if (process.env.FE_OPEN_BROWSER === '1') openBrowser(`http://localhost:${server.port}`);
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
