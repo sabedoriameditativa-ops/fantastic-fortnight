@@ -13,6 +13,23 @@ própria. Você assiste, acelera o tempo e aprende o que funciona.
 - **Sem dependências de build**: JavaScript moderno (ES modules), Canvas 2D e Web Audio.
   Toda a arte e todo o som são gerados por código; não há arquivos de mídia.
 
+## Testar agora (3 passos)
+
+1. **Instale o Node.js** (versão LTS) em <https://nodejs.org> — só uma vez.
+2. **Baixe o jogo**: no GitHub clique em *Code → Download ZIP* e descompacte, ou
+   `git clone https://github.com/sabedoriameditativa-ops/fantastic-fortnight.git`.
+3. **Abra o jogo**: dê dois cliques em `iniciar.bat` (Windows) ou rode `./iniciar.sh`
+   (macOS/Linux). O script instala a única dependência (`ws`), inicia o servidor e abre
+   `http://localhost:3000` no navegador. Para encerrar, feche a janela (ou Ctrl+C).
+
+Para jogar com amigos na mesma rede, eles abrem `http://SEU-IP:3000` (o IP do computador
+que rodou o script; veja com `ipconfig` no Windows ou `ifconfig`/`ip a` no macOS/Linux) e
+entram com o código da sala. Pela internet é preciso liberar a porta 3000 no roteador ou
+usar um túnel (por exemplo `ngrok http 3000`).
+
+Dica: `npm install --omit=dev` instala só o necessário para jogar; o `npm install` completo
+também traz o Playwright (usado pelos testes ponta a ponta), que é bem maior.
+
 ## Facções
 
 | Facção | Raça | Casco | Estilo | Passiva |
