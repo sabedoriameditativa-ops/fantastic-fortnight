@@ -1,5 +1,7 @@
 O Frota Estelar tem um executável para Windows com Node e dependências incluídos: um duplo clique inicia o servidor local e abre o navegador.
 
+**Também disponível: [jogar a demonstração individual no navegador](https://sabedoriameditativa-ops.github.io/fantastic-fortnight/)**, sem instalar ou executar arquivos. Essa demonstração foi atualizada separadamente do executável desta publicação e salva o progresso neste navegador e endereço; não oferece multiplayer nem perfil no servidor e não importa automaticamente o progresso do `.exe`. Consulte os [termos da demonstração](https://sabedoriameditativa-ops.github.io/fantastic-fortnight/LICENSE.txt), que preservam as licenças das versões anteriores e dos componentes de terceiros.
+
 > **Limitação confirmada no Windows 11:** esta pré-versão não tem assinatura digital. O Controle Inteligente de Aplicativos (Smart App Control) pode bloquear sua execução por completo, como foi relatado com esta versão. Esse recurso não oferece liberação por aplicativo; a correção exige uma assinatura de código de um fornecedor confiável. Baixar novamente o mesmo `.exe` não resolve. Os testes do runner Windows não verificaram a aceitação pelo Smart App Control. Uma versão assinada ainda não está disponível. [Orientação oficial da Microsoft](https://support.microsoft.com/en-us/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions).
 
 ## Para jogar

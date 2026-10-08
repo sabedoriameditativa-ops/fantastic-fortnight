@@ -6,6 +6,11 @@ frota dentro de um orçamento de pontos e, quando todos estão prontos, as frota
 lutam sozinhas: cada nave escolhe alvos, se posiciona e usa habilidades por conta
 própria. Você assiste, acelera o tempo e aprende o que funciona.
 
+**[Jogar agora no navegador](https://sabedoriameditativa-ops.github.io/fantastic-fortnight/)** —
+demonstração gratuita para um jogador, sem instalação. A campanha, as frotas e as
+preferências ficam salvas nesse navegador. Multiplayer e progressão verificada
+exigem servidor. Consulte [recursos, publicação e limites da versão web](docs/WEB.md).
+
 - **Um jogador**: 15 níveis com chefes e níveis infinitos depois, 4 dificuldades,
   formatos de 1v1 até 6v6 com aliados controlados pelo computador.
 - **Multijogador**: salas com código de 4 letras, de 1v1 até 6v6, bots preenchem as
@@ -37,11 +42,10 @@ fica em `dist/FrotaEstelar.exe`.
    `http://localhost:3000` no navegador. Para encerrar, feche a janela (ou Ctrl+C).
    No macOS/Linux, se o arquivo perdeu a permissão de execução (ZIP), use `bash iniciar.sh`.
 
-**Windows 11 com "Controle de Aplicativo Inteligente"**: ele bloqueia o `iniciar.bat` baixado da
-internet. Duas saídas: (a) antes de extrair, clique com o botão direito no ZIP → Propriedades →
-marque **Desbloquear** → OK, e extraia de novo; ou (b) sem usar o `.bat`: abra a pasta do jogo,
-clique na barra de endereço do Explorador, digite `cmd` e Enter, e na janela rode
-`npm run setup` (só na primeira vez) e depois `npm run play`. O navegador abre sozinho.
+**Windows 11 com "Controle de Aplicativo Inteligente"**: o Smart App Control pode
+bloquear scripts baixados e executáveis sem assinatura reconhecida. Nesse caso,
+use a [demonstração no navegador](https://sabedoriameditativa-ops.github.io/fantastic-fortnight/).
+Consulte [assinatura e limitações do pacote Windows](docs/WINDOWS.md).
 
 Se o navegador mostrar "não consigo chegar a esta página", o servidor não está rodando:
 olhe a janela preta do script (ela fica aberta e mostra o motivo). Caminho manual no

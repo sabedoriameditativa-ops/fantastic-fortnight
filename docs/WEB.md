@@ -1,5 +1,7 @@
 # Jogar pelo navegador
 
+**[Abrir Frota Estelar](https://sabedoriameditativa-ops.github.io/fantastic-fortnight/)**
+
 Esta versão é uma demonstração gratuita para partidas individuais. O navegador
 executa a simulação, gráficos, sons e controles; não é necessário instalar Node
 ou executar um aplicativo Windows.
@@ -40,6 +42,12 @@ O workflow `web-preview.yml` prepara, testa e publica o artefato usando GitHub
 Pages. A habilitação inicial de Pages exige permissão administrativa específica
 do repositório. Em Settings > Pages, a origem deve ser **GitHub Actions**.
 Habilitar esse serviço não altera a branch `main`.
+
+Em **Settings > Environments > github-pages > Deployment branches and tags**,
+selecione **Selected branches and tags** e adicione uma regra do tipo **Branch**
+para `codex/frota-estelar-evolucao`. Preserve as regras existentes, incluindo a
+permissão de `main` quando já configurada. Essa regra permite que o workflow da
+branch de evolução publique no ambiente; não exige merge nem alteração de `main`.
 
 Esta publicação é uma demonstração gratuita, com partidas locais no navegador.
 Os [limites do GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)
