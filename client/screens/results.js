@@ -150,7 +150,7 @@ export function mount(root, props, ctx) {
       mvpPanel,
     ),
     report, rewardEl,
-    h('div.row.gap.wrap', actions, button('Perfil e pontos', { test: 'result-profile', onClick: () => ctx.go('profile') })),
+    h('div.row.gap.wrap', actions, button(ctx.isStatic ? 'Progresso local' : 'Perfil e pontos', { test: 'result-profile', onClick: () => ctx.go('profile') })),
   );
   root.appendChild(el);
   try { ctx.audio.setScene(r.winner === -1 ? 'menu' : won ? 'victory' : 'defeat'); } catch { /* ignore */ }

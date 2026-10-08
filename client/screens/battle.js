@@ -34,7 +34,8 @@ export function mount(root, props, ctx) {
   let hud = null;
   let pilotControls = null;
   let chatter = null;
-  const reward = { status: isLocal ? (props.runId ? 'pending' : 'practice') : 'server', runId: props.runId, promise: null };
+  const runId = ctx.isStatic ? null : props.runId;
+  const reward = { status: isLocal ? (runId ? 'pending' : 'practice') : 'server', runId, promise: null };
   let raf = 0;
   let lastHud = 0;
   let disposed = false;
@@ -236,10 +237,10 @@ export function mount(root, props, ctx) {
     if (disposed || !r) return;
     result = r;
     chatter?.onEnd(r);
-    if (isLocal && props.runId && !reward.promise) {
+    if (isLocal && runId && !reward.promise) {
       const inputs = feed.controls.getPilotReplay?.() || [];
-      reward.promise = ctx.profile.completeRun(props.runId, { inputs }).then(value => { reward.status = 'verified'; reward.value = value; return value; }).catch(error => { reward.status = 'error'; reward.error = error; return null; });
-    } else if (!isLocal) ctx.profile.refresh().catch(() => {});
+      reward.promise = ctx.profile.completeRun(runId, { inputs }).then(value => { reward.status = 'verified'; reward.value = value; return value; }).catch(error => { reward.status = 'error'; reward.error = error; return null; });
+    } else if (!isLocal && !ctx.isStatic) ctx.profile.refresh().catch(() => {});
     if (isLocal && props.meta && r.winner === 0) {
       ctx.markLevelCleared(props.meta.setup.difficulty, props.meta.setup.level);
       clearedLevel = true;

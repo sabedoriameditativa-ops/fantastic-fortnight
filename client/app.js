@@ -29,7 +29,8 @@ import * as options from './screens/options.js';
 import * as profile from './screens/profile.js';
 
 const screens = { menu, howto, spSetup, fleetBuilder, lobby, battle, results, codex, options, profile };
-const profileClient = createProfileClient();
+const isStatic = document.documentElement.dataset.deployment === 'static';
+const profileClient = isStatic ? null : createProfileClient();
 
 const root = document.getElementById('app');
 const arena = document.getElementById('arena');
@@ -155,6 +156,7 @@ function wsUrl() {
 
 /** Connected NetClient (creates + connects on first use). */
 async function getNet() {
+  if (isStatic) throw new Error('O multijogador exige um servidor e não está disponível nesta versão.');
   const name = validateName(state.playerName) || 'Comandante';
   if (!state.net) {
     state.net = createNetClient(wsUrl());
@@ -179,7 +181,7 @@ async function getNet() {
 // ---------------------------------------------------------------------------
 
 const ctx = {
-  state, params, T, toast, audio, ambient, reducedMotion, applySettings, persistSettings, getNet, reportError,
+  state, params, T, toast, audio, ambient, reducedMotion, applySettings, persistSettings, getNet, reportError, isStatic,
   profile: profileClient,
   go: (name, props) => go(name, props),
   setArena(mode) { setArena(mode); },
@@ -217,7 +219,7 @@ const ctx = {
       go('battle', { mode: 'sp', config: battle.config, meta: battle.meta, rated, runId, speed: speed ?? state.settings.speed });
     };
     // Explicit seeds and the automated harness remain reproducible practice.
-    if (params.autotest || practice || params.seed != null) start(built, false);
+    if (isStatic || params.autotest || practice || params.seed != null) start(built, false);
     else {
       toast('Preparando partida…', 'ok', 1800);
       profileClient.beginRun({ setup, fleet, playerName: state.playerName || 'Comandante' }).then(run => start(run, true, run.runId)).catch(() => {
@@ -242,6 +244,10 @@ function setArena(mode) {
 }
 
 function go(name, props = {}) {
+  if (isStatic && props.mode === 'mp' && ['fleetBuilder', 'battle', 'results'].includes(name)) {
+    name = 'lobby';
+    props = {};
+  }
   const mod = screens[name];
   if (!mod) { reportError(new Error(`unknown screen ${name}`)); return; }
   state.pendingLaunch = null;
@@ -305,7 +311,7 @@ function boot() {
     if (!ctx.startSinglePlayer(setup, fleet, { seed: params.seed ?? randomSeed(), speed })) go('menu');
     return;
   }
-  if (params.sala) {
+  if (params.sala && !isStatic) {
     go('lobby', { joinCode: params.sala });
     return;
   }

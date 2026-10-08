@@ -1,0 +1,40 @@
+FROTA ESTELAR — CONDIÇÕES DAS NOVAS CONTRIBUIÇÕES
+
+Copyright (c) 2026 Pedro Tiago Corrêa Faria.
+Todos os direitos reservados, observadas as exceções abaixo.
+
+1. Escopo
+
+Estas condições se aplicam às novas contribuições próprias introduzidas a partir
+da versão 0.2.0-preview.2. Não revogam, substituem nem restringem licenças válidas
+sobre código anterior ou componentes de terceiros. O histórico até o commit
+109eba56d1253a2e127ef2f3acdd96e9dc44c04d já continha declarações de licença MIT;
+os direitos decorrentes dessas declarações devem ser respeitados. Consulte
+THIRD_PARTY_NOTICES.md.
+
+2. Uso da demonstração oficial
+
+É permitido executar a demonstração oficial gratuitamente para uso pessoal,
+não comercial e de avaliação, incluindo as cópias técnicas necessárias ao
+funcionamento do navegador. Esta autorização não transfere a titularidade
+das novas contribuições.
+
+3. Direitos reservados sobre as novas contribuições
+
+Sem autorização escrita de Pedro Tiago Corrêa Faria, não é concedida licença
+para redistribuir, sublicenciar, vender, explorar comercialmente ou incorporar
+essas novas contribuições em outros produtos. Permissões decorrentes de lei,
+das licenças anteriores, de licenças de terceiros ou dos termos aplicáveis
+à hospedagem do repositório permanecem preservadas.
+
+4. Componentes e versões anteriores
+
+Estas condições não conferem exclusividade sobre componentes de terceiros nem
+eliminam direitos já concedidos sobre versões anteriores. As respectivas
+licenças e avisos devem acompanhar as cópias que os utilizem.
+
+5. Garantias
+
+A demonstração é fornecida no estado em que se encontra, sem garantia de
+disponibilidade ou adequação a uma finalidade específica, na medida permitida
+pela legislação aplicável. Direitos legalmente irrenunciáveis são preservados.

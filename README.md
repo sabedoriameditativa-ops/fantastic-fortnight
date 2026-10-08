@@ -332,4 +332,17 @@ runtime é o pacote `ws`. As fontes Orbitron e Exo 2 são distribuídas localmen
 sob a licença SIL Open Font License; os textos completos e a proveniência estão
 em `client/fonts`. Textos da interface em português do Brasil.
 
-Licença: MIT.
+## Distribuição e direitos das novas versões
+
+As novas contribuições a partir de `0.2.0-preview.2` reservam direitos a
+**Pedro Tiago Corrêa Faria**, com permissão para avaliação pessoal da demonstração
+oficial. Consulte [LICENSE.txt](LICENSE.txt).
+
+As versões anteriores declaravam MIT; esta alteração não revoga permissões
+anteriores nem modifica as licenças de terceiros. Os avisos preservados estão em
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Antes da exploração comercial,
+convém revisar juridicamente o histórico de licenças e a titularidade.
+
+A demonstração pelo navegador é preparada com `npm run build:web` e validada
+com `npm run e2e:static`. Consulte [WEB.md](docs/WEB.md) para os recursos locais,
+persistência e limites de hospedagem.

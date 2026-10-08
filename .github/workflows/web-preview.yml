@@ -1,0 +1,94 @@
+name: Frota Estelar - demonstracao web
+
+on:
+  push:
+    branches: [codex/frota-estelar-evolucao]
+    paths:
+      - '.github/workflows/web-preview.yml'
+      - 'client/**'
+      - 'shared/**'
+      - 'tools/build-web.js'
+      - 'test-e2e/static-site.js'
+      - 'test/tools/webPackage.test.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'LICENSE.txt'
+      - 'THIRD_PARTY_NOTICES.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frota-estelar-web-preview
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      pages-ready: ${{ steps.pages.outputs.ready }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - name: Instalar dependencias do desenvolvimento
+        run: npm ci --include=dev --no-audit --no-fund
+      - name: Testar jogo e empacotamento
+        run: npm test
+      - name: Preparar somente os arquivos publicos
+        run: npm run build:web
+      - name: Testar o site no navegador sob o prefixo do projeto
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: npm run e2e:static
+      - name: Guardar o site validado para publicacao
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: dist/web
+          retention-days: 14
+      - name: Verificar se Pages foi habilitado
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/pages" > "$RUNNER_TEMP/pages.json" 2> "$RUNNER_TEMP/pages-error.txt"; then
+            if jq -e '.build_type == "workflow"' "$RUNNER_TEMP/pages.json" > /dev/null; then
+              echo 'ready=true' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo 'Pages existe, mas a origem precisa ser GitHub Actions.' >> "$GITHUB_STEP_SUMMARY"
+          elif rg -q 'HTTP 404' "$RUNNER_TEMP/pages-error.txt"; then
+            echo 'O site foi testado, mas Pages ainda nao esta habilitado.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            cat "$RUNNER_TEMP/pages-error.txt" >&2
+            exit 1
+          fi
+          echo 'ready=false' >> "$GITHUB_OUTPUT"
+          echo "Ative Settings > Pages > Source: GitHub Actions em https://github.com/$GITHUB_REPOSITORY/settings/pages e execute novamente este workflow." >> "$GITHUB_STEP_SUMMARY"
+          echo 'Nenhum link publico foi publicado nesta execucao.' >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.pages-ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publicar o artefato validado
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

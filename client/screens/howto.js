@@ -11,7 +11,11 @@ const STEP_SHIPS = ['ter_prometeu', 'vor_rainha', 'lum_serafim', 'fer_ariete', '
 
 export function mount(root, props, ctx) {
   const stops = [];
-  const steps = T.howto.steps.map((s, i) => {
+  const instructions = ctx.isStatic ? [
+    ...T.howto.steps.slice(0, -1),
+    { title: '6. Jogue e continue depois', text: 'Enfrente os bots na campanha. Seus níveis concluídos, frotas e preferências ficam neste navegador. Salas online e chat exigem a versão com servidor.' },
+  ] : T.howto.steps;
+  const steps = instructions.map((s, i) => {
     const cv = h('canvas', { width: 260, height: 90 });
     stops.push(animateShip(cv, STEP_SHIPS[i % STEP_SHIPS.length], { angle: -0.3, pad: 6, maxZoom: 1.6 }));
     return h('div.panel.howto-step', cv, h('h2', { text: s.title }), h('p.small', { text: s.text }));

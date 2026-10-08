@@ -83,6 +83,8 @@ export async function buildWindows() {
   for (const file of files) entries[`app/${file}`] = new Uint8Array(readFileSync(join(ROOT, file)));
   entries['LICENSES/ws.txt'] = new Uint8Array(readFileSync(join(ROOT, 'node_modules/ws/LICENSE')));
   entries['LICENSES/Go.txt'] = new Uint8Array(readFileSync(join(goRoot, 'LICENSE')));
+  entries['app/LICENSE.txt'] = new Uint8Array(readFileSync(join(ROOT, 'LICENSE.txt')));
+  entries['app/THIRD_PARTY_NOTICES.md'] = new Uint8Array(readFileSync(join(ROOT, 'THIRD_PARTY_NOTICES.md')));
   entries['LEIA-ME.txt'] = strToU8('Frota Estelar\n\nAbra FrotaEstelar.exe. O navegador abre automaticamente.\nUse Encerrar na janela do jogo para parar o servidor.\nDados: %LOCALAPPDATA%\\FrotaEstelar\\data\nO Node e todas as dependências de execução já estão incluídos.\n');
   // Stable order and timestamps allow comparing builds with the same toolchain.
   const zipped = Object.fromEntries(Object.keys(entries).sort().map(name => [name, [entries[name], { mtime: new Date('2026-01-01T00:00:00Z') }]]));

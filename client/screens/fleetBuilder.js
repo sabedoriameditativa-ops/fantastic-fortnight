@@ -83,7 +83,7 @@ export function mount(root, props, ctx) {
   const pilotCheck = h('input', { type: 'checkbox', test: 'fleet-pilot', checked: pilot, disabled: mode === 'mp', onChange: () => { pilot = pilotCheck.checked; budget = matchBudget - (pilot ? PILOT_COST : 0); refresh(); } });
   const pilotPanel = h('div.panel.stack', h('label.check', pilotCheck, 'Pilotar a nave especial'),
     h('p.tiny.muted', `Reserva ${PILOT_COST} pontos para uma nave especial da sua facção. A frota continua automática. Setas movem; F dispara, E usa a habilidade e P alterna o piloto automático. Remapeie em Opções.`),
-    h('p.tiny.muted', mode === 'mp' ? 'A disponibilidade é definida para os dois times pelo anfitrião; a licença do Perfil é necessária.' : 'Experimente no treino local. A licença do Perfil é necessária para partidas verificadas e pontos.'));
+    h('p.tiny.muted', ctx.isStatic ? 'Disponível no treino local, sem desbloqueio online. Você pode deixar o piloto automático comandar quando preferir.' : mode === 'mp' ? 'A disponibilidade é definida para os dois times pelo anfitrião; a licença do Perfil é necessária.' : 'Experimente no treino local. A licença do Perfil é necessária para partidas verificadas e pontos.'));
   const libraryPanel = createFleetLibraryPanel({ getFleet: fleet, onLoad: f => {
     selectFaction(f.faction);
     if (mode === 'sp') { pilot = !!f.pilot; pilotCheck.checked = pilot; budget = matchBudget - (pilot ? PILOT_COST : 0); }

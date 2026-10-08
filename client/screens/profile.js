@@ -1,8 +1,34 @@
 import { h, button, clear, add } from '../util/dom.js';
 import { num } from '../util/format.js';
-import { errorMessage } from '../i18n.js';
+import { errorMessage, difficultyName } from '../i18n.js';
+import { DIFFICULTIES } from '/shared/constants.js';
+
+function mountLocalProgress(root, ctx) {
+  const rows = DIFFICULTIES.map(difficulty => {
+    const saved = ctx.state.progress[difficulty]?.cleared;
+    const cleared = Array.isArray(saved) ? [...new Set(saved.filter(level => Number.isInteger(level) && level > 0))] : [];
+    return h('tr', h('td', difficultyName(difficulty)), h('td.n', String(cleared.length)), h('td.n', cleared.length ? String(cleared.reduce((max, level) => Math.max(max, level), 0)) : '—'));
+  });
+  root.appendChild(h('div.screen.narrow', { test: 'local-progress' },
+    h('div.screen-head', h('h1', 'Progresso local'), button('Voltar', { test: 'back', onClick: () => ctx.go('menu') })),
+    h('div.stack',
+      h('div.panel.stack', h('h2', 'Salvo neste navegador'),
+        h('p', 'Níveis concluídos, biblioteca de frotas e preferências ficam salvos neste navegador. Use o mesmo navegador e endereço para continuar.'),
+        h('p.small.muted', 'Eles não são sincronizados com outros navegadores, dispositivos ou sites. Apagar os dados do site também apaga esse progresso.'),
+        h('div.row.gap.wrap',
+          button('Biblioteca de frotas', { test: 'local-fleets', onClick: () => ctx.go('fleetBuilder', { mode: 'sp', fleet: ctx.state.lastFleet }) }),
+          button('Preferências', { test: 'local-options', onClick: () => ctx.go('options') }))),
+      h('div.panel.table-wrap', h('h2', 'Campanha'),
+        h('table.table', { test: 'local-progress-table' }, h('thead', h('tr', h('th', 'Dificuldade'), h('th.n', 'Níveis concluídos'), h('th.n', 'Maior nível'))), h('tbody', rows)),
+        button('Jogar campanha', { test: 'local-campaign', primary: true, onClick: () => ctx.go('spSetup') })),
+      h('div.panel', h('h2', 'Conteúdo do treino local'),
+        h('p', 'As cinco facções, suas naves e os pilotos especiais estão disponíveis para experimentar. O orçamento e os limites da frota continuam valendo.'),
+        h('p.small.muted', 'Esta versão não oferece perfil de servidor, histórico verificado, pontos ou desbloqueios online.')))));
+  return { unmount() {} };
+}
 
 export function mount(root, props, ctx) {
+  if (ctx.isStatic) return mountLocalProgress(root, ctx);
   let disposed = false, busy = false;
   const body = h('div.stack', { test: 'profile-content' }, h('p', 'Carregando perfil…'));
   root.appendChild(h('div.screen.narrow', h('div.screen-head', h('h1', 'Perfil do comandante'),

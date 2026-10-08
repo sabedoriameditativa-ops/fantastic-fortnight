@@ -15,6 +15,14 @@ const BUDGET_LIST = Object.values(BUDGETS);
 const ROLE_NAMES = { vanguard: 'Vanguarda', support: 'Suporte', striker: 'Ataque' };
 
 export function mount(root, props, ctx) {
+  if (ctx.isStatic) {
+    root.appendChild(h('div.screen.narrow', { test: 'static-multiplayer' },
+      h('div.screen-head', h('h1', 'Multijogador'), button(T.app.back, { test: 'back', onClick: () => ctx.go('menu') })),
+      h('div.panel.stack', h('p', 'Salas e chat precisam de um servidor. Esta versão oferece partidas individuais contra bots.'),
+        h('p.small.muted', 'Links de salas e endereços de servidor não ativam uma conexão nesta versão.'),
+        button('Jogar campanha', { primary: true, test: 'static-play', onClick: () => ctx.go('spSetup') }))));
+    return { unmount() {} };
+  }
   const { state } = ctx;
   let net = null;
   let disposed = false;

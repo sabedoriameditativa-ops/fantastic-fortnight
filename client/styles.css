@@ -265,6 +265,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .menu-name { width: min(92vw, 380px); }
 .menu-foot { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; }
 .menu-progress { color: var(--muted); font-size: 12.5px; }
+.menu-static-note { max-width: 440px; }
 
 /* ---- sp setup ---- */
 .sp-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
