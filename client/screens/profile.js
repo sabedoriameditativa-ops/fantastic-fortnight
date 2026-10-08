@@ -2,6 +2,7 @@ import { h, button, clear, add } from '../util/dom.js';
 import { num } from '../util/format.js';
 import { errorMessage, difficultyName } from '../i18n.js';
 import { DIFFICULTIES } from '/shared/constants.js';
+import { serverStorageNotice } from '../util/serverInfo.js';
 
 function mountLocalProgress(root, ctx) {
   const rows = DIFFICULTIES.map(difficulty => {
@@ -33,7 +34,7 @@ export function mount(root, props, ctx) {
   const body = h('div.stack', { test: 'profile-content' }, h('p', 'Carregando perfil…'));
   root.appendChild(h('div.screen.narrow', h('div.screen-head', h('h1', 'Perfil do comandante'),
     button('Voltar', { test: 'back', onClick: () => ctx.go('menu') })),
-    h('p.small.muted', 'Este perfil é persistido neste servidor e reconhecido pelo navegador. Não é uma conta entre dispositivos; apagar os cookies perde o vínculo. Suas frotas e o progresso antigo continuam guardados localmente.'), body));
+    h('p.small.muted', 'Este perfil associa seus dados neste servidor ao navegador. Não é uma conta entre dispositivos; apagar os cookies perde o vínculo. Suas frotas e o progresso antigo continuam guardados localmente.'), serverStorageNotice(ctx), body));
   const render = p => {
     if (!p || disposed) return;
     clear(body);
@@ -43,7 +44,7 @@ export function mount(root, props, ctx) {
         h('p.small', { test: 'inactivity-policy', text: p.inactivity?.warning || 'Consulte as regras de inatividade do servidor.' }),
         h('p.tiny.muted', `Uma partida válida rende ${policy.participation ?? 8} pontos de participação, até ${policy.performanceCap ?? 6} de desempenho e ${policy.victory ?? 14} de vitória. Derrotas têm perda líquida de pelo menos ${policy.minimumDefeatLoss ?? 2}; desempenho baixo pode descontar mais ${policy.poorPerformanceLoss ?? 2}. Limites diários: +${policy.dailyGainCap ?? 180} / −${policy.dailyLossCap ?? 30}.`),
         h('p.tiny.muted', 'A contribuição inclui dano efetivo e reparos em relação ao seu time. Apenas resultados verificados recebem pontos; repetir o envio não repete a recompensa. Inatividade mede dias sem concluir partidas, nunca ausência de teclas na batalha automática.')),
-      h('div.panel.stack', h('h2', 'Desbloqueios permanentes'),
+      h('div.panel.stack', h('h2', 'Desbloqueios deste perfil'),
         (p.unlockCatalog || []).map(item => {
           const unlocked = p.unlocks?.includes(item.id);
           const required = Array.isArray(item.requires) ? item.requires : item.requires ? [item.requires] : [];

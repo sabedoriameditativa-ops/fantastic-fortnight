@@ -75,11 +75,24 @@ try {
       await page.locator(t('rm-on')).click();
       await page.locator(t('chatter-frequency')).selectOption('rare');
       await page.locator(t('chatter-subtitles')).uncheck();
+      await page.locator(t('music-theme')).selectOption('arcade');
+      await page.locator(t('sound-profile')).selectOption('tactical');
+      await page.locator(t('chatter-language')).selectOption('en-US');
+      await page.locator(t('chatter-preview-faction')).selectOption('ferrix');
+      await page.locator(t('chatter-test')).click();
+      assert.match(await page.locator(t('chatter-preview-text')).innerText(), /Fleet synchronized|Scrap probability/);
+      assert.deepEqual(await page.evaluate(() => {
+        const s = window.__fe.audio.getSettings();
+        return [s.musicTheme, s.soundProfile];
+      }), ['arcade', 'tactical']);
       await page.reload();
       assert.deepEqual(await page.evaluate(() => {
         const s = window.__fe.state.settings;
-        return [s.pilotBindings.fire, s.reducedEffects, s.highContrast, s.reducedMotion, s.chatter.frequency, s.chatter.subtitles];
-      }), ['KeyH', true, true, 'on', 'rare', false]);
+        return [s.pilotBindings.fire, s.reducedEffects, s.highContrast, s.reducedMotion, s.chatter.frequency, s.chatter.subtitles, s.musicTheme, s.soundProfile, s.chatter.language];
+      }), ['KeyH', true, true, 'on', 'rare', false, 'arcade', 'tactical', 'en-US']);
+      await page.locator(t('menu-options')).click();
+      assert.equal(await page.locator(t('music-theme')).inputValue(), 'arcade');
+      assert.equal(await page.locator(t('chatter-language')).inputValue(), 'en-US');
     }],
     ['pilot moves, fires directionally, follows camera and releases on pause/focus', async page => {
       await page.goto(`${base}/?debug=1`);

@@ -10,6 +10,7 @@ import { TEAM_SIZES, BUDGETS, DIFFICULTIES, DEFAULT_BUDGET } from '/shared/const
 import { FACTIONS, FACTION_IDS, shipsOfFaction } from '/shared/catalog.js';
 import { isRoomCode, normalizeRoomCode, TEAM_ROLES } from '/shared/protocol.js';
 import { fleetSummary } from '/shared/fleet.js';
+import { serverStorageNotice } from '../util/serverInfo.js';
 
 const BUDGET_LIST = Object.values(BUDGETS);
 const ROLE_NAMES = { vanguard: 'Vanguarda', support: 'Suporte', striker: 'Ataque' };
@@ -134,6 +135,7 @@ export function mount(root, props, ctx) {
     }
     add(container, 
       head(T.mp.title, T.mp.subtitle),
+      serverStorageNotice(ctx),
       errorText ? h('div.validation.error', { style: { marginBottom: '12px' } }, errorText, ' ', button('↻', { test: 'retry-connect', class: 'btn-sm', onClick: () => ensureNet().then((n) => { if (n) renderEntry(); }) })) : null,
       h('div.small.muted', { test: 'conn-status', style: { marginBottom: '10px' }, text: net && net.connected ? fmt(T.mp.connected, { name: net.name }) : '' }),
       h('div.sp-grid',

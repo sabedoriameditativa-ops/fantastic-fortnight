@@ -89,7 +89,9 @@ export function createRenderer(canvas, o) {
   const background = createBackground({ seed: start.seed ?? 1, world, dpr, planet: o.background ? o.background.planet !== false : true });
   const effects = createEffects({ info, view, cam: camera, teamColors: TEAM_COLORS, seed: typeof start.seed === 'number' ? start.seed : 7 });
   const sprites = createSpriteCache({ dpr, teamColors: TEAM_COLORS });
-  const spriteQuality = { anims: true, glow: true };
+  const spriteQuality = { anims: true, glow: true, reducedMotion: false };
+  const backgroundOptions = { grid: false, quality: 1, reducedMotion: false, reducedEffects: false, highContrast: false };
+  const shipPresentation = {};
 
   let phaseCb = null, endCb = null, phaseName = 'advance';
   effects.onPhase((name) => { phaseName = name; if (phaseCb) phaseCb(name); });
@@ -244,13 +246,16 @@ export function createRenderer(canvas, o) {
     for (const v of interp.ships.values()) order.push(v);
     order.sort((a, b) => (a.size - b.size) || (a.id - b.id));
     const q = effects.quality;
+    spriteQuality.anims = q.anims;
+    spriteQuality.glow = q.glow;
+    spriteQuality.reducedMotion = q.reducedMotion;
     for (const v of order) {
       const inf = infos.get(v.id);
       if (!inf) continue;
       const size = inf.def.size;
       if (!camera.isVisible(v.x, v.y, size)) continue;
       const sx = camera.worldToScreenX(v.x), sy = camera.worldToScreenY(v.y);
-      const st = effects.shipState(v, inf, now, myTeam);
+      const st = effects.shipState(v, inf, now, myTeam, shipPresentation);
       const lod = lodFor(size * bucket);
       const cos = Math.cos(v.a), sin = Math.sin(v.a);
       if (lod === 0) {
@@ -263,7 +268,7 @@ export function createRenderer(canvas, o) {
         blitShip(ctx, spr, sx, sy, cos, sin, zoom * st.spawnScale, dpr, st.alpha, scaleY);
         if (lod === 2 && st.spawnScale === 1) {
           if (st.alpha !== 1) ctx.globalAlpha = st.alpha;
-          drawShipDetails(ctx, inf.def, inf.pal, sx, sy, cos, sin, zoom, dpr, st, now, { anims: spriteQuality.anims && q.anims, glow: q.glow, reducedMotion: q.reducedMotion });
+          drawShipDetails(ctx, inf.def, inf.pal, sx, sy, cos, sin, zoom, dpr, st, now, spriteQuality);
           ctx.globalAlpha = 1;
         }
       }
@@ -387,7 +392,12 @@ export function createRenderer(canvas, o) {
     // 3. passes (restore is in a finally: a throwing pass must not leave the save stack growing every frame)
     let tp = lap('sim', t0);
     try {
-      background.draw(ctx, camera, now, { grid: options.grid, quality: effects.quality.density, reducedMotion: effects.quality.reducedMotion, highContrast: options.highContrast });
+      backgroundOptions.grid = options.grid;
+      backgroundOptions.quality = effects.quality.density;
+      backgroundOptions.reducedMotion = effects.quality.reducedMotion;
+      backgroundOptions.reducedEffects = effects.quality.reducedEffects;
+      backgroundOptions.highContrast = options.highContrast;
+      background.draw(ctx, camera, now, backgroundOptions);
       tp = lap('bg', tp);
       effects.drawArea(ctx, camera, dpr, now);
       tp = lap('area', tp);

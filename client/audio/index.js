@@ -13,12 +13,12 @@
 import { SHIPS, SIZE_CLASS, ABILITIES } from '/shared/catalog.js';
 import { createRng } from '/shared/rng.js';
 import {
-  RECIPES, SFX_NAMES, RATE_LIMITS, priorityOf, makeRnd, createVoiceContext, applyFlavor, finalizeVoice, runRecipe, MIN_GAIN,
+  RECIPES, SFX_NAMES, RATE_LIMITS, ABILITY_SOUNDS, priorityOf, makeRnd, createVoiceContext, applyFlavor, finalizeVoice, runRecipe, MIN_GAIN,
 } from './recipes.js';
-import { createMusicEngine, computeIntensity } from './music.js';
+import { createMusicEngine, computeIntensity, MUSIC_THEMES, SOUND_PROFILES, DEFAULT_MUSIC_THEME, DEFAULT_SOUND_PROFILE, normalizeMusicTheme, normalizeSoundProfile } from './music.js';
 
 export const SETTINGS_KEY = 'frotaEstelar.audio.v1';
-export const DEFAULT_SETTINGS = Object.freeze({ master: 0.8, music: 0.7, sfx: 0.9, ui: 0.8, muted: false });
+export const DEFAULT_SETTINGS = Object.freeze({ master: 0.8, music: 0.7, sfx: 0.9, ui: 0.8, muted: false, musicTheme: DEFAULT_MUSIC_THEME, soundProfile: DEFAULT_SOUND_PROFILE });
 export const MAX_VOICES = 24;
 export const COALESCE_WINDOW = 0.03;
 export const COALESCE_MAX_MUL = 2.2;
@@ -46,6 +46,8 @@ export function normalizeAudioSettings(raw) {
     if (Number.isFinite(v)) s[k] = clamp(v, 0, 1);
   }
   s.muted = !!raw.muted;
+  s.musicTheme = normalizeMusicTheme(raw.musicTheme);
+  s.soundProfile = normalizeSoundProfile(raw.soundProfile);
   return s;
 }
 
@@ -157,12 +159,12 @@ export function createAudioEngine(deps = {}) {
   let timer = null;
   let buses = null;
   let noiseBank = null;
-  let reverbIn = null;
   let music = null;
   let settings = loadSettings();
   let scene = 'none';
   let factionHint = null;
   let hidden = false;
+  let speechDucking = false;
   const cam = { cx: 0, cy: 0, hw: 1400, aspect: 16 / 9, set: false };
   const voices = [];                 // active SFX voices (pooled)
   const dying = [];                  // stolen voices fading out (cleaned up by gcVoices)
@@ -189,14 +191,25 @@ export function createAudioEngine(deps = {}) {
     try { if (D.storage) D.storage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* quota / private mode */ }
   }
 
-  function applySettings() {
+  function applySettings(speechTransition = false) {
     if (!ctx || !buses) return;
     const now = ctx.currentTime;
     const m = settings.muted;
+    const profile = SOUND_PROFILES[settings.soundProfile];
+    const musicGain = settings.music * settings.music * MUSIC_TRIM * profile.music;
+    const sfxGain = settings.sfx * settings.sfx * profile.sfx;
+    const fade = speechTransition ? (speechDucking ? 0.045 : 0.22) : 0.02;
     buses.master.gain.setTargetAtTime(m ? 0 : settings.master * settings.master, now, 0.02);
-    buses.music.gain.setTargetAtTime(hidden ? 0 : settings.music * settings.music * MUSIC_TRIM, now, 0.02);
-    buses.sfx.gain.setTargetAtTime(settings.sfx * settings.sfx, now, 0.02);
+    buses.music.gain.setTargetAtTime(hidden ? 0 : musicGain * (speechDucking ? 0.32 : 1), now, fade);
+    buses.sfx.gain.setTargetAtTime(sfxGain * (speechDucking ? 0.58 : 1), now, fade);
     buses.ui.gain.setTargetAtTime(settings.ui * settings.ui, now, 0.02);
+    // Wet audio must obey the same sliders as its source; it previously bypassed
+    // them by entering the common reverb directly before the master bus.
+    buses.musicSend.gain.setTargetAtTime(hidden ? 0 : musicGain, now, 0.02);
+    buses.sfxSend.gain.setTargetAtTime(sfxGain, now, 0.02);
+    buses.reverbReturn.gain.setTargetAtTime(profile.reverb * (speechDucking ? 0.4 : 1), now, fade);
+    buses.sfxComp.threshold.setTargetAtTime(profile.threshold, now, 0.04);
+    buses.sfxComp.ratio.setTargetAtTime(profile.ratio, now, 0.04);
   }
 
   // ---- graph --------------------------------------------------------------
@@ -224,9 +237,11 @@ export function createAudioEngine(deps = {}) {
     const reverbReturn = ctx.createGain();
     reverbReturn.gain.value = 0.18;
     reverb.connect(reverbReturn); reverbReturn.connect(master);
+    const musicSend = ctx.createGain(), sfxSend = ctx.createGain();
+    musicSend.gain.value = 0; sfxSend.gain.value = 0;
+    musicSend.connect(reverb); sfxSend.connect(reverb);
 
-    buses = { master, limiter, sfx, sfxComp, ui, music: musicBus, musicLP, reverb, reverbReturn };
-    reverbIn = reverb;
+    buses = { master, limiter, sfx, sfxComp, ui, music: musicBus, musicLP, reverb, reverbReturn, musicSend, sfxSend };
     for (const b of [master, sfx, ui, musicBus]) b.gain.value = 0;
   }
 
@@ -248,7 +263,7 @@ export function createAudioEngine(deps = {}) {
     buildBuses();
     noiseBank = buildNoiseBank(ctx, rng);
     try { buses.reverb.buffer = buildReverbIR(ctx, rng); } catch { /* some mocks have no buffer */ }
-    music = createMusicEngine({ ctx, out: buses.music, noise: noiseBank, reverbIn, rng: createRng(String(D.seed) + ':music') });
+    music = createMusicEngine({ ctx, out: buses.music, noise: noiseBank, reverbIn: buses.musicSend, musicTheme: settings.musicTheme, rng: createRng(String(D.seed) + ':music') });
     ready = true;
     applySettings();
     timer = D.setInterval(tick, TICK_MS);
@@ -267,6 +282,7 @@ export function createAudioEngine(deps = {}) {
     if (hidden) {
       buses.music.gain.cancelScheduledValues(now);
       buses.music.gain.setTargetAtTime(0, now, 0.1);
+      buses.musicSend.gain.setTargetAtTime(0, now, 0.1);
       music.pause();
       for (const b of beds) if (b) b.gain.gain.setTargetAtTime(0, now, 0.1);
     } else {
@@ -373,7 +389,7 @@ export function createAudioEngine(deps = {}) {
 
     const v = createVoiceContext(ctx, {
       t, out: vg, gain: base, size, faction: o.faction, rnd: makeRnd(o.seed ?? 1), count: o.count, dur: o.dur,
-      noise: noiseBank, reverbIn, kind: name.split('.')[0],
+      noise: noiseBank, reverbIn: buses.sfxSend, kind: name.split('.')[0],
     });
     v.shieldPct = o.shieldPct;
     v.nodes.push(...nodes);
@@ -455,6 +471,7 @@ export function createAudioEngine(deps = {}) {
       case 'vorrax': return { type: 'sine', hz: 44 };
       case 'lumen': return { type: 'triangle', hz: 55 };
       case 'ferrix': return { type: 'square', hz: 30 };
+      case 'astral': return { type: 'sine', hz: 49 };
       default: return { type: 'sawtooth', hz: 38 };
     }
   }
@@ -540,6 +557,7 @@ export function createAudioEngine(deps = {}) {
 
   function shotName(w) {
     if (!w) return 'shot.kinetic';
+    if (w.directional) return 'shot.pilot';
     if (w.type === 'kinetic') return (w.id.includes('autocannon') || w.id.includes('_pd') || (w.salvo >= 2 && w.damage <= 8)) ? 'shot.autocannon' : 'shot.kinetic';
     return 'shot.' + w.type;
   }
@@ -628,7 +646,7 @@ export function createAudioEngine(deps = {}) {
             const ab = ABILITIES[e[2]];
             const kind = ab ? ab.kind : 'buff';
             if (kind === 'passive') break;
-            const name = RECIPES['cast.' + kind] ? 'cast.' + kind : 'cast.buff';
+            const name = ABILITY_SOUNDS[e[2]] || (RECIPES['cast.' + kind] ? 'cast.' + kind : 'cast.buff');
             const x = Number.isFinite(e[4]) && e[4] !== 0 ? e[4] : (src ? src.x : 0);
             const y = Number.isFinite(e[5]) && e[5] !== 0 ? e[5] : (src ? src.y : 0);
             const o = { x, y, size: sizeOf(src), faction: src ? src.faction : null, seed: eventSeed(e[1], e[3], 5), delay, count: ab && ab.params ? (ab.params.count || 1) : 1, dur: ab ? ab.duration : 0 };
@@ -728,6 +746,25 @@ export function createAudioEngine(deps = {}) {
     applySettings();
   }
 
+  /** Patch settings without resetting unrelated sliders; works before init. */
+  function setSettings(patch = {}) {
+    if (!patch || typeof patch !== 'object') return;
+    const next = normalizeAudioSettings({ ...settings, ...patch });
+    if (Object.keys(DEFAULT_SETTINGS).every(key => next[key] === settings[key])) return;
+    settings = next;
+    saveSettings();
+    if (music) music.setTheme(settings.musicTheme);
+    applySettings();
+  }
+
+  /** Native speech lives outside WebAudio; make room without editing sliders. */
+  function setSpeechDucking(active) {
+    const next = !!active;
+    if (speechDucking === next) return;
+    speechDucking = next;
+    applySettings(true);
+  }
+
   /** @returns {{ master:number, music:number, sfx:number, ui:number, muted:boolean }} */
   function getSettings() { return { ...settings }; }
 
@@ -743,6 +780,7 @@ export function createAudioEngine(deps = {}) {
     voices.length = 0; recent.clear(); deferred.length = 0; projectiles.clear();
     if (ctx && typeof ctx.close === 'function') { try { ctx.close(); } catch { /* ignore */ } }
     ctx = null; ready = false; music = null; buses = null;
+    speechDucking = false;
   }
 
   return {
@@ -756,6 +794,8 @@ export function createAudioEngine(deps = {}) {
     setFactionHint,
     setVolume,
     setMuted,
+    setSettings,
+    setSpeechDucking,
     getSettings,
     suspend,
     resume,
@@ -765,7 +805,7 @@ export function createAudioEngine(deps = {}) {
     stats() {
       return {
         ...stats, voices: voices.length, scene, ctxState: ctx ? ctx.state : 'none',
-        music: music ? music.stats() : null, deferred: deferred.length, beds: beds.filter(Boolean).length,
+        music: music ? music.stats() : null, speechDucking, soundProfile: settings.soundProfile, deferred: deferred.length, beds: beds.filter(Boolean).length,
       };
     },
     getScene: () => scene,
@@ -784,4 +824,4 @@ export function createAudioEngine(deps = {}) {
 /** Browser singleton (ARCHITECTURE §5.4). */
 export const audio = createAudioEngine();
 export default audio;
-export { SFX_NAMES, computeIntensity };
+export { SFX_NAMES, computeIntensity, MUSIC_THEMES, SOUND_PROFILES };

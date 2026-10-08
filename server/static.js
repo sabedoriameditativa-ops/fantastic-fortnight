@@ -112,7 +112,7 @@ export function createStaticHandler({ clientDir, sharedDir, health = () => ({ ok
       } catch {
         body = { ok: false };
       }
-      return sendJson(res, 200, body);
+      return sendJson(res, body.ok === false ? 503 : 200, body);
     }
 
     let file;

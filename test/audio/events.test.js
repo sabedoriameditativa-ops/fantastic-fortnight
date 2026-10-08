@@ -33,6 +33,28 @@ function recordBattle(seed, a, b, maxFrames = 400) {
 }
 
 describe('consumeEvents with real simulation events', () => {
+  test('directional pilot weapons and signature abilities reach their new sounds through event mapping', async () => {
+    const { engine, ctx } = await makeEngine();
+    engine.setCamera(0, 0, 1000, 16 / 9);
+    const cases = [
+      ['ter_ace', 'afterburner', 'cast.boost'], ['vor_ace', 'molt', 'cast.regrow'],
+      ['lum_ace', 'shield_overload', 'cast.shield'], ['fer_ace', 'reactive_nanites', 'cast.repair'],
+      ['ast_ace', 'singularity', 'cast.gravity'], ['ast_ace', 'gravity_snare', 'cast.debuff'],
+      ['fer_ace', 'emp_pulse', 'cast.emp'],
+    ];
+    for (const [cls, ability, cue] of cases) {
+      const def = SHIPS[cls];
+      const lookup = () => ({ cls, faction: def.faction, sizeClass: def.sizeClass, team: 0, x: 10, y: 10 });
+      engine.consumeEvents([['proj', 100, 1, 0, 0, 10, 10], ['cast', 1, ability, 0, 10, 10]], lookup);
+      const played = engine.voices.map(voice => voice.name);
+      assert.ok(played.includes('shot.pilot'), `${cls}: directional gun uses the pilot cue`);
+      assert.ok(played.includes(cue), `${ability}: ${cue} is heard through the real event adapter`);
+      ctx.advance(4.1); engine.tick();
+    }
+    assert.equal(engine.stats().dropped, 0);
+    engine.dispose();
+  });
+
   test('a recorded battle produces sounds of every family, never throws, and stays within budget', async () => {
     const { frames, infos, world } = recordBattle(42, 'ter_linha', 'lum_coro');
     const total = frames.reduce((n, f) => n + f.events.length, 0);

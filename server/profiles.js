@@ -11,6 +11,7 @@ import { DEFAULT_BUDGET, TICK_MS, MAX_TICKS, TICK_RATE, worldSize } from '../sha
 import { validateFleet as validateFleetRules } from '../shared/fleet.js';
 import { validateName, validateMessage, C2S } from '../shared/protocol.js';
 import { DAY_MS, UNLOCKS, normalizeProgressionPolicy, requiredFleetUnlocks, matchReward, inactivityInfo } from '../shared/progression.js';
+import { createRequestPolicy } from './requestPolicy.js';
 
 const COOKIE = 'fe.profile';
 const RUN_TTL = 60 * 60_000;
@@ -34,7 +35,7 @@ function normalizeLegacy(raw) {
 }
 
 /** No database side effects occur at import time. */
-export function createProfileService({ dataDir = process.env.FE_DATA_DIR || path.join(os.homedir(), '.local', 'share', 'frota-estelar'), filename, now = Date.now, policy: rawPolicy = parse(process.env.FE_PROGRESSION_POLICY, {}) || {}, secureCookie = process.env.FE_COOKIE_SECURE === '1' } = {}) {
+export function createProfileService({ dataDir = process.env.FE_DATA_DIR || path.join(os.homedir(), '.local', 'share', 'frota-estelar'), filename, now = Date.now, policy: rawPolicy = parse(process.env.FE_PROGRESSION_POLICY, {}) || {}, secureCookie = process.env.FE_COOKIE_SECURE === '1', requestPolicy = createRequestPolicy({ secure: secureCookie }) } = {}) {
   const policy = normalizeProgressionPolicy(rawPolicy);
   const dbFile = filename || path.join(dataDir, 'profiles.sqlite');
   if (dbFile !== ':memory:') mkdirSync(path.dirname(dbFile), { recursive: true, mode: 0o700 });
@@ -101,7 +102,7 @@ export function createProfileService({ dataDir = process.env.FE_DATA_DIR || path
 
   function createIdentity(req, res) {
     const at = now();
-    const address = req.socket?.remoteAddress || 'unknown';
+    const address = requestPolicy.clientAddress(req);
     const previous = creationRates.get(address);
     if (previous && at - previous.at < 60_000 && previous.count >= 32) throw problem('PROFILE_RATE_LIMIT', 429);
     if (creationRates.size > 2048) for (const [ip, r] of creationRates) if (at - r.at >= 60_000) creationRates.delete(ip);
@@ -358,13 +359,8 @@ export function createProfileService({ dataDir = process.env.FE_DATA_DIR || path
     if (!pathname.startsWith('/api/profile')) return false;
     try {
       if (closed) throw problem('SERVER_CLOSED', 503);
-      const origin = req.headers.origin;
       if (req.headers['sec-fetch-site'] === 'cross-site') throw problem('ORIGIN_REJECTED', 403);
-      if (origin) {
-        let url;
-        try { url = new URL(origin); } catch { throw problem('ORIGIN_REJECTED', 403); }
-        if (!['http:', 'https:'].includes(url.protocol) || url.host !== req.headers.host) throw problem('ORIGIN_REJECTED', 403);
-      }
+      if (!requestPolicy.permitsOrigin(req)) throw problem('ORIGIN_REJECTED', 403);
       let id = authenticateRequest(req);
       if (pathname === '/api/profile' && req.method === 'GET') {
         if (!id) throw problem('PROFILE_REQUIRED', 401);
@@ -372,6 +368,7 @@ export function createProfileService({ dataDir = process.env.FE_DATA_DIR || path
       }
       if (req.method !== 'POST') throw problem('METHOD_NOT_ALLOWED', 405);
       const input = await body(req, pathname === '/api/profile/complete' ? 1_048_576 : 32_768);
+      if (closed) throw problem('SERVER_CLOSED', 503);
       if (pathname === '/api/profile') {
         if (!id) id = createIdentity(req, res);
         send(res, 200, { profile: getProfile(id) }); return true;
@@ -386,7 +383,7 @@ export function createProfileService({ dataDir = process.env.FE_DATA_DIR || path
     return true;
   }
 
-  return { handleHttp, authenticateRequest, getProfile, recordMatch, validateFleet, validatePilot, unlock, migrateLegacy, beginRun, completeRun,
+  return { persistence: dbFile === ':memory:' ? 'memory' : 'durable', handleHttp, authenticateRequest, getProfile, recordMatch, validateFleet, validatePilot, unlock, migrateLegacy, beginRun, completeRun,
     close() { if (closed) return; closed = true; for (const worker of workers) worker.terminate(); db.close(); },
   };
 }

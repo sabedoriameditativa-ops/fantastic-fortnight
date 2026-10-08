@@ -3,15 +3,35 @@
 
 import { T } from '../i18n.js';
 import { h, button, segmented, confirmDialog, select, add } from '../util/dom.js';
-import { normalizeChatterSettings } from '../battle/chatter.js';
+import { normalizeChatterSettings, CHATTER_LANGUAGES, speechStatus, createChatterPreview } from '../battle/chatter.js';
 import { DEFAULT_PILOT_BINDINGS, PILOT_ACTIONS, normalizePilotBindings, validPilotKey, pilotKeyLabel } from '../battle/pilotControls.js';
 import { MAX_NAME_LENGTH } from '/shared/constants.js';
+import { FACTIONS, FACTION_IDS } from '/shared/catalog.js';
+import { MUSIC_THEMES, SOUND_PROFILES } from '../audio/music.js';
 
 export function mount(root, props, ctx) {
   const { state } = ctx;
   const s = state.settings;
   s.chatter = normalizeChatterSettings(s.chatter);
   s.pilotBindings = normalizePilotBindings(s.pilotBindings);
+  let previewFaction = 'terran';
+  const voiceStatus = h('p.tiny.muted', { test: 'chatter-voice-status', role: 'status' });
+  const voiceSample = h('p.small', { test: 'chatter-preview-text', 'aria-live': 'polite' });
+  function updateVoiceStatus() {
+    const status = speechStatus(s.chatter.language);
+    voiceStatus.textContent = status.available
+      ? 'Voz local disponível. Durante a fala, música e efeitos baixam para destacar o rádio.'
+      : status.reason === 'unsupported'
+        ? 'Este navegador não oferece síntese de voz. As legendas continuam disponíveis no idioma escolhido.'
+        : 'Nenhuma voz local deste idioma está disponível. As legendas continuam; instale uma voz no sistema para ouvir as falas.';
+  }
+  const preview = createChatterPreview({ getSettings: () => s,
+    onSpeakingChange: active => ctx.audio.setSpeechDucking(active),
+    onLine: line => { voiceSample.textContent = line?.text || ''; },
+  });
+  const synth = globalThis.speechSynthesis;
+  synth?.addEventListener?.('voiceschanged', updateVoiceStatus);
+  updateVoiceStatus();
   const bindingButtons = new Map();
   let awaiting = null;
   const bindingHint = h('p.tiny.muted', { 'aria-live': 'polite', text: 'Selecione uma ação e pressione a nova tecla. Esc cancela. Mouse aponta e dispara; as teclas N/G/C, 1/2/4, Espaço e Esc ficam reservadas à batalha.' });
@@ -36,11 +56,15 @@ export function mount(root, props, ctx) {
   add(bindingPanel, button('Restaurar teclas', { test: 'bindings-reset', onClick: () => { s.pilotBindings = { ...DEFAULT_PILOT_BINDINGS }; awaiting = null; refreshBindings(); ctx.persistSettings(); } }),
     h('p.tiny.muted', 'Ao pausar, perder foco ou desconectar, a nave volta ao piloto automático. A frota segue lutando. Os tiros especiais são direcionais; os disparos comuns podem ser guiados.'));
   const chatterPanel = h('div.panel.stack', h('h3', 'Rádio das facções'),
+    h('label.field', h('span.lbl', 'Idioma das falas e legendas'), select(CHATTER_LANGUAGES, { value: s.chatter.language, test: 'chatter-language', onChange: e => { preview.cancel(); s.chatter.language = e.target.value; ctx.persistSettings(); updateVoiceStatus(); } })),
     h('label.field', h('span.lbl', 'Frequência'), select([{ value: 'normal', label: 'Normal' }, { value: 'rare', label: 'Rara' }, { value: 'off', label: 'Desligada' }], { value: s.chatter.frequency, test: 'chatter-frequency', onChange: e => { s.chatter.frequency = e.target.value; ctx.persistSettings(); } })),
     h('label.check', h('input', { type: 'checkbox', test: 'chatter-subtitles', checked: s.chatter.subtitles, onChange: e => { s.chatter.subtitles = e.target.checked; ctx.persistSettings(); } }), 'Legendas das falas'),
-    h('label.check', h('input', { type: 'checkbox', test: 'chatter-speech', checked: s.chatter.speech, onChange: e => { s.chatter.speech = e.target.checked; ctx.persistSettings(); } }), 'Voz em português instalada neste dispositivo'),
+    h('label.check', h('input', { type: 'checkbox', test: 'chatter-speech', checked: s.chatter.speech, onChange: e => { s.chatter.speech = e.target.checked; ctx.persistSettings(); } }), 'Ouvir as vozes durante a batalha'),
     h('label.field', h('span.lbl', 'Volume da voz'), h('input', { type: 'range', min: 0, max: 1, step: 0.05, test: 'chatter-volume', value: s.chatter.volume, onInput: e => { s.chatter.volume = Number(e.target.value); ctx.persistSettings(); } })),
-    h('p.tiny.muted', 'A voz é opcional e usa somente vozes locais disponíveis. Sem uma voz compatível, continuam as legendas. Nenhum áudio é enviado a serviços externos.'));
+    h('label.field', h('span.lbl', 'Experimentar uma facção'), select(FACTION_IDS.map(id => ({ value: id, label: FACTIONS[id].name })), { value: previewFaction, test: 'chatter-preview-faction', onChange: e => { preview.cancel(); previewFaction = e.target.value; } })),
+    button('Testar fala', { test: 'chatter-test', onClick: () => { preview.play(previewFaction); updateVoiceStatus(); } }),
+    voiceSample, voiceStatus,
+    h('p.tiny.muted', 'A voz respeita o volume geral e o silêncio. Usa apenas vozes locais do dispositivo; o timbre disponível varia conforme o navegador e o sistema. As opções de idioma se aplicam às falas, não aos menus.'));
 
   function slider(key, label) {
     const val = h('span.v', { text: `${Math.round(s[key] * 100)}%` });
@@ -53,6 +77,9 @@ export function mount(root, props, ctx) {
     h('div.screen-head', h('div.titles', h('h1', { text: T.options.title })), h('div.actions', button(T.app.back, { test: 'back', onClick: () => ctx.go('menu') }))),
     h('div.opt-grid',
       h('div.panel.stack', h('h3', { text: T.options.audio }),
+        h('label.field', h('span.lbl', 'Trilha sonora'), select(Object.values(MUSIC_THEMES).map(theme => ({ value: theme.id, label: theme.label })), { value: s.musicTheme, test: 'music-theme', onChange: e => { s.musicTheme = e.target.value; ctx.persistSettings(); } })),
+        h('p.tiny.muted', 'Três trilhas originais com variações por cena e facção. A troca acompanha a transição musical.'),
+        h('label.field', h('span.lbl', 'Mixagem dos efeitos'), select(Object.values(SOUND_PROFILES).map(profile => ({ value: profile.id, label: profile.label })), { value: s.soundProfile, test: 'sound-profile', onChange: e => { s.soundProfile = e.target.value; ctx.persistSettings(); } })),
         slider('master', T.options.master), slider('music', T.options.music), slider('sfx', T.options.sfx), slider('ui', T.options.ui),
         h('label.check', h('input', { type: 'checkbox', test: 'mute', checked: s.muted, onChange: (e) => { s.muted = e.target.checked; ctx.persistSettings(); } }), T.options.mute),
         h('div.tiny.muted', { text: T.options.audioNote }),
@@ -79,5 +106,8 @@ export function mount(root, props, ctx) {
     ),
   );
   root.appendChild(el);
-  return { unmount() {} };
+  return {
+    onSettingsChanged() { preview.updateSettings(); updateVoiceStatus(); },
+    unmount() { preview.dispose(); synth?.removeEventListener?.('voiceschanged', updateVoiceStatus); },
+  };
 }

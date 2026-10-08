@@ -1,6 +1,13 @@
 // Original faction radio lines. Presentation only: never consumes simulation RNG.
-// Speech is optional and restricted to Portuguese voices installed on the device.
-export const DEFAULT_CHATTER_SETTINGS = Object.freeze({ frequency: 'normal', subtitles: true, volume: 0.5, speech: false });
+// Speech is optional: only matching-language voices installed on the device.
+import { EN_BATTLE_LINES, ES_BATTLE_LINES } from './chatterLanguages.js';
+
+export const CHATTER_LANGUAGES = Object.freeze([
+  Object.freeze({ value: 'pt-BR', label: 'Português (Brasil)' }),
+  Object.freeze({ value: 'en-US', label: 'English' }),
+  Object.freeze({ value: 'es-ES', label: 'Español' }),
+]);
+export const DEFAULT_CHATTER_SETTINGS = Object.freeze({ frequency: 'normal', subtitles: true, volume: 0.85, speech: false, language: 'pt-BR' });
 
 export function normalizeChatterSettings(raw) {
   const s = { ...DEFAULT_CHATTER_SETTINGS };
@@ -8,6 +15,7 @@ export function normalizeChatterSettings(raw) {
   if (['off', 'rare', 'normal'].includes(raw.frequency)) s.frequency = raw.frequency;
   if (typeof raw.subtitles === 'boolean') s.subtitles = raw.subtitles;
   if (typeof raw.speech === 'boolean') s.speech = raw.speech;
+  if (CHATTER_LANGUAGES.some(option => option.value === raw.language)) s.language = raw.language;
   if (typeof raw.volume === 'number' && Number.isFinite(raw.volume)) s.volume = Math.max(0, Math.min(1, raw.volume));
   return s;
 }
@@ -65,62 +73,142 @@ export const BATTLE_LINES = Object.freeze({
   },
 });
 
-export function localPortugueseVoice(synth) {
-  try { return (synth?.getVoices?.() || []).find((v) => v.localService === true && /^pt(?:-|$)/i.test(v.lang)) || null; }
-  catch { return null; }
+export const LOCALIZED_BATTLE_LINES = Object.freeze({ 'pt-BR': BATTLE_LINES, 'en-US': EN_BATTLE_LINES, 'es-ES': ES_BATTLE_LINES });
+
+// Web Speech exposes pitch/rate, not a portable audio stream or a custom timbre.
+// These are original character directions, never an impersonation of a speaker.
+export const FACTION_VOICE_PROFILES = Object.freeze({
+  terran: Object.freeze({ rate: 1.02, pitch: 0.94 }),
+  vorrax: Object.freeze({ rate: 0.9, pitch: 0.65 }),
+  lumen: Object.freeze({ rate: 0.96, pitch: 1.24 }),
+  ferrix: Object.freeze({ rate: 0.87, pitch: 0.82 }),
+  astral: Object.freeze({ rate: 0.92, pitch: 1.06 }),
+});
+
+export function localVoice(language, synth = globalThis.speechSynthesis) {
+  const locale = normalizeChatterSettings({ language }).language.toLowerCase();
+  const base = locale.split('-')[0];
+  try {
+    const voices = (synth?.getVoices?.() || []).filter(voice => voice.localService === true
+      && String(voice.lang).replaceAll('_', '-').toLowerCase().split('-')[0] === base);
+    return voices.find(voice => String(voice.lang).replaceAll('_', '-').toLowerCase() === locale) || voices[0] || null;
+  } catch { return null; }
 }
 
-/** onLine receives {text,faction,event} or null to clear the subtitle. */
+export function localPortugueseVoice(synth) { return localVoice('pt-BR', synth); }
+
+/** No voice from another language, network voice, or guessed default is used. */
+export function speechStatus(language, synth = globalThis.speechSynthesis, Utterance = globalThis.SpeechSynthesisUtterance) {
+  language = normalizeChatterSettings({ language }).language;
+  if (typeof Utterance !== 'function' || typeof synth?.speak !== 'function') return { available: false, language, voice: null, reason: 'unsupported' };
+  const voice = localVoice(language, synth);
+  return { available: !!voice, language, voice, reason: voice ? 'ready' : 'missing-voice' };
+}
+
+/** onLine receives {text,faction,event,language,speechAvailable} or null.
+ * onSpeakingChange brackets actual speech so the caller can duck other audio.
+ * Call updateSettings on mute/option changes even when frames are paused.
+ */
 export function createBattleChatter(o = {}) {
   const faction = BATTLE_LINES[o.faction] ? o.faction : 'terran';
   const ships = new Map((o.ships || []).map((s) => [s.id, s]));
   const clock = o.now || (() => typeof performance !== 'undefined' ? performance.now() : Date.now());
   const schedule = o.schedule || setTimeout, cancel = o.cancel || clearTimeout;
-  const synth = o.speechSynthesis ?? globalThis.speechSynthesis;
-  const Utterance = o.Utterance ?? globalThis.SpeechSynthesisUtterance;
+  const synth = 'speechSynthesis' in o ? o.speechSynthesis : globalThis.speechSynthesis;
+  const Utterance = 'Utterance' in o ? o.Utterance : globalThis.SpeechSynthesisUtterance;
   const next = new Map();
-  let lastAt = -Infinity, lastText = '', lastTick = -1, timer = null, disposed = false, ended = false, started = false, speaking = false;
+  let lastAt = -Infinity, lastText = '', lastTick = -1, timer = null, speechTimer = null;
+  let disposed = false, ended = false, started = false, speaking = false, active = null, previousSettings = null, lastStatus = '';
+
+  function setSpeaking(value) {
+    if (speaking === value) return;
+    speaking = value;
+    o.onSpeakingChange?.(value);
+  }
+
+  function status(settings) {
+    const value = speechStatus(settings.language, synth, Utterance);
+    const key = `${value.language}:${value.reason}:${value.voice?.voiceURI || value.voice?.name || ''}`;
+    if (key !== lastStatus) { lastStatus = key; o.onStatus?.(value); }
+    return value;
+  }
 
   function clear() {
     if (timer !== null) { cancel(timer); timer = null; }
     o.onLine?.(null);
   }
-  function stopSpeech() { if (speaking) { try { synth?.cancel(); } catch { /* device service unavailable */ } speaking = false; } }
+  function stopSpeech() {
+    const pending = active;
+    active = null;
+    if (speechTimer !== null) { cancel(speechTimer); speechTimer = null; }
+    if (pending) { try { synth?.cancel(); } catch { /* device service unavailable */ } }
+    setSpeaking(false);
+  }
+
+  function settings() {
+    const all = o.getSettings?.() || {};
+    const chatter = normalizeChatterSettings(all.chatter || all);
+    const master = Number.isFinite(all.master) ? Math.max(0, Math.min(1, all.master)) : 0.8;
+    return { ...chatter, muted: !!all.muted, master };
+  }
+
+  function updateSettings() {
+    const s = settings();
+    if (disposed) return s;
+    if (previousSettings && (s.language !== previousSettings.language || s.speech !== previousSettings.speech
+      || s.volume !== previousSettings.volume || s.master !== previousSettings.master)) stopSpeech();
+    if (s.muted || s.master === 0 || s.volume === 0 || !s.speech || s.frequency === 'off') stopSpeech();
+    if (!s.subtitles || s.frequency === 'off' || (previousSettings && s.language !== previousSettings.language)) clear();
+    previousSettings = s;
+    status(s);
+    return s;
+  }
+
   function say(event, final = false) {
     if (disposed) return;
-    const all = o.getSettings?.() || {};
-    const s = normalizeChatterSettings(all.chatter || all);
+    const s = updateSettings();
     if (s.frequency === 'off') { clear(); stopSpeech(); return; }
     const at = clock();
     const interval = final ? 4000 : s.frequency === 'rare' ? 30000 : 16000;
     if (at - lastAt < interval) return;
-    const lines = BATTLE_LINES[faction][event];
+    const lines = LOCALIZED_BATTLE_LINES[s.language][faction][event];
     if (!lines?.length) return;
-    let i = next.get(event) || 0;
+    const key = `${s.language}:${event}`;
+    let i = next.get(key) || 0;
     if (lines[i % lines.length] === lastText && lines.length > 1) i++;
     const text = lines[i % lines.length];
-    next.set(event, i + 1);
+    next.set(key, i + 1);
     lastAt = at; lastText = text;
     clear();
+    const availability = status(s);
     if (s.subtitles) {
-      o.onLine?.({ text, faction, event });
+      o.onLine?.({ text, faction, event, language: s.language, speechAvailable: availability.available });
       timer = schedule(() => { timer = null; if (!disposed) o.onLine?.(null); }, 7000);
     }
     stopSpeech();
-    const voice = s.speech && !all.muted && s.volume > 0 && localPortugueseVoice(synth);
-    if (voice && typeof Utterance === 'function') {
+    if (s.speech && !s.muted && s.master > 0 && s.volume > 0 && availability.available) {
       try {
         const line = new Utterance(text);
-        line.voice = voice; line.lang = voice.lang;
-        line.volume = s.volume * (Number.isFinite(all.master) ? Math.max(0, Math.min(1, all.master)) : 0.8);
-        line.rate = faction === 'ferrix' ? 0.92 : 1;
-        line.onend = line.onerror = () => { speaking = false; };
-        speaking = true; synth.speak(line);
-      } catch { speaking = false; }
+        line.voice = availability.voice; line.lang = availability.voice.lang;
+        line.volume = s.volume * s.master;
+        Object.assign(line, FACTION_VOICE_PROFILES[faction]);
+        line.onstart = () => { if (!disposed && active === line) setSpeaking(true); };
+        line.onend = line.onerror = () => {
+          if (active !== line) return;
+          active = null;
+          if (speechTimer !== null) { cancel(speechTimer); speechTimer = null; }
+          setSpeaking(false);
+        };
+        active = line;
+        // A broken browser speech service must not keep music ducked forever.
+        speechTimer = schedule(() => { if (active === line) stopSpeech(); }, 20000);
+        synth.speak(line);
+      } catch { stopSpeech(); }
     }
   }
   return {
     onFrame(frame) {
+      updateSettings();
       if (disposed || ended || !Number.isFinite(frame?.k) || frame.k <= lastTick) return;
       lastTick = frame.k;
       let event = null, priority = 0;
@@ -142,6 +230,33 @@ export function createBattleChatter(o = {}) {
       say(result.winner === -1 ? 'draw' : result.winner === o.myTeam ? 'victory' : 'defeat', true);
     },
     silence() { clear(); stopSpeech(); },
+    updateSettings,
     dispose() { if (disposed) return; disposed = true; clear(); stopSpeech(); },
+  };
+}
+
+/** A user-requested one-line audition; it never changes stored preferences. */
+export function createChatterPreview(o = {}) {
+  let chatter = null, disposed = false;
+  function cancelPreview() { chatter?.dispose(); chatter = null; }
+  return {
+    play(faction = 'terran') {
+      cancelPreview();
+      const all = o.getSettings?.() || {};
+      const chosen = normalizeChatterSettings(all.chatter || all);
+      const availability = speechStatus(chosen.language,
+        'speechSynthesis' in o ? o.speechSynthesis : globalThis.speechSynthesis,
+        'Utterance' in o ? o.Utterance : globalThis.SpeechSynthesisUtterance);
+      if (disposed) return availability;
+      chatter = createBattleChatter({ ...o, faction, getSettings: () => {
+        const current = o.getSettings?.() || {};
+        return { ...current, chatter: { ...normalizeChatterSettings(current.chatter || current), frequency: 'normal', speech: true, subtitles: true } };
+      } });
+      chatter.onFrame({ k: 0, e: [] });
+      return availability;
+    },
+    cancel: cancelPreview,
+    updateSettings() { chatter?.updateSettings(); },
+    dispose() { disposed = true; cancelPreview(); },
   };
 }

@@ -436,6 +436,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 #hud:has(.hud-pilot:not(.hidden)) .battle-subtitle { bottom: 155px; }
 #hud:has(.hud-pilot:not(.hidden)) .hud-log { width: min(30%, 320px); }
 .hud-pilot button { margin-right: 10px; }
+.server-storage-notice { max-width: 680px; padding: 12px 16px; border: 1px solid #b69b52; border-radius: 8px; background: rgba(80, 62, 24, .24); color: #e4d8b8; line-height: 1.5; }
+.menu-screen > .server-storage-notice { margin: 12px auto; }
 .hud-decision { position: absolute; top: 95px; left: 12px; width: min(270px, 34%); background: rgba(5,7,12,.85); border-left: 2px solid var(--accent); padding: 9px; }
 .hud-decision .small { margin-top: 5px; color: var(--muted); }
 .hud-mission { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); max-width: 85%; text-align: center; background: rgba(5,7,12,.88); padding: 4px 10px; border-radius: 3px; font-size: 12px; }

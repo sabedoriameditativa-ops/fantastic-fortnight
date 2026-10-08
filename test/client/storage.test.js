@@ -27,11 +27,17 @@ describe('storage helpers', () => {
     assert.equal(n.master, 1); assert.equal(n.music, 0); assert.equal(n.sfx, 0.3); assert.equal(n.muted, true);
     assert.equal(n.reducedMotion, 'auto'); assert.equal(n.quality, 'low'); assert.equal(n.speed, 1); assert.equal(n.showNames, true);
     const s = memoryStore();
-    saveSettings({ ...DEFAULT_SETTINGS, speed: 4, quality: 'high', reducedEffects: true, highContrast: true }, s);
+    saveSettings({ ...DEFAULT_SETTINGS, speed: 4, quality: 'high', reducedEffects: true, highContrast: true, musicTheme: 'arcade', soundProfile: 'tactical', chatter: { ...DEFAULT_SETTINGS.chatter, language: 'en-US', volume: 0.35 } }, s);
     assert.equal(loadSettings(s).speed, 4);
     assert.equal(loadSettings(s).quality, 'high');
     assert.equal(loadSettings(s).reducedEffects, true);
     assert.equal(loadSettings(s).highContrast, true);
+    assert.equal(loadSettings(s).musicTheme, 'arcade');
+    assert.equal(loadSettings(s).soundProfile, 'tactical');
+    assert.equal(loadSettings(s).chatter.language, 'en-US');
+    assert.equal(loadSettings(s).chatter.volume, 0.35, 'preserves an existing chosen voice level');
+    assert.equal(normalizeSettings({ musicTheme: '__proto__', soundProfile: 'unknown' }).musicTheme, DEFAULT_SETTINGS.musicTheme);
+    assert.equal(normalizeSettings({ musicTheme: '__proto__', soundProfile: 'unknown' }).soundProfile, DEFAULT_SETTINGS.soundProfile);
   });
 
   test('progress: cleared levels per difficulty, max and best', () => {

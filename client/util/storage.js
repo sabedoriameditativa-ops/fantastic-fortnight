@@ -5,6 +5,7 @@
 
 import { DEFAULT_CHATTER_SETTINGS, normalizeChatterSettings } from '../battle/chatter.js';
 import { DEFAULT_PILOT_BINDINGS, normalizePilotBindings } from '../battle/pilotControls.js';
+import { normalizeMusicTheme, normalizeSoundProfile } from '../audio/music.js';
 
 export const KEYS = Object.freeze({
   name: 'fe.name',
@@ -69,6 +70,8 @@ export function writeString(store, key, value) {
 
 export const DEFAULT_SETTINGS = Object.freeze({
   master: 0.8, music: 0.6, sfx: 0.8, ui: 0.7, muted: false,
+  musicTheme: 'adventure',
+  soundProfile: 'balanced',
   reducedMotion: 'auto',   // 'auto' | 'on' | 'off'
   quality: 'auto',         // 'auto' | 'low' | 'medium' | 'high'
   reducedEffects: false,
@@ -89,6 +92,8 @@ export function normalizeSettings(raw) {
     if (Number.isFinite(v)) s[k] = Math.max(0, Math.min(1, v));
   }
   s.muted = !!raw.muted;
+  s.musicTheme = normalizeMusicTheme(raw.musicTheme);
+  s.soundProfile = normalizeSoundProfile(raw.soundProfile);
   if (['auto', 'on', 'off'].includes(raw.reducedMotion)) s.reducedMotion = raw.reducedMotion;
   if (['auto', 'low', 'medium', 'high'].includes(raw.quality)) s.quality = raw.quality;
   if (typeof raw.reducedEffects === 'boolean') s.reducedEffects = raw.reducedEffects;

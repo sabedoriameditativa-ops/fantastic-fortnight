@@ -330,7 +330,7 @@ export const T = {
   howto: {
     title: 'Como jogar',
     steps: [
-      { title: '1. Escolha uma facção', text: 'Cada facção tem 8 naves, um tipo de casco e uma passiva. Terranos são blindados e disciplinados; Vorrax regeneram e vêm em número; Lúmen têm escudos enormes e cascos frágeis; Ferrix se reconstroem e atravessam blindagens.' },
+      { title: '1. Escolha uma facção', text: 'Cinco facções oferecem frotas e pilotos com estilos próprios. Terranos são blindados e disciplinados; Vorrax regeneram e vêm em número; Lúmen combinam escudos e mobilidade; Ferrix se reconstroem; o Concílio Astral controla o campo com gravidade. No treino local, todas estão disponíveis.' },
       { title: '2. Monte a frota dentro do orçamento', text: 'Cada nave custa pontos. O orçamento padrão é 1500. Há limites por classe de tamanho (1 nave-mãe, 2 capitais, 4 grandes, 12 médias, 24 pequenas, 24 minúsculas — 32 para Vorrax) e no máximo 40 naves. Use as predefinições como ponto de partida.' },
       { title: '3. A batalha é automática', text: 'As naves escolhem alvos, se posicionam e usam habilidades sozinhas. Você assiste, acelera o tempo (x2, x4) e aprende o que funciona. Vence quem destruir todas as naves compradas do inimigo.' },
       { title: '4. Morte súbita e tempo', text: 'Aos 150 s a regeneração desliga e o dano cresce 20% a cada 15 s. Aos 240 s a batalha termina: vence quem tiver mais valor de frota restante; se a diferença for de até 2%, vence quem causou mais dano.' },

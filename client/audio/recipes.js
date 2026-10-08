@@ -45,6 +45,7 @@ function track(v, n) { v.nodes.push(n); return n; }
 function oscType(faction, type) {
   if (faction === 'lumen' && (type === 'square' || type === 'sawtooth')) return 'triangle';
   if (faction === 'vorrax' && type === 'square') return 'sawtooth';
+  if (faction === 'astral' && type === 'sawtooth') return 'triangle';
   return type;
 }
 
@@ -270,6 +271,8 @@ export function createVoiceContext(ctx, o) {
  *           white, parallel high-Q ring at 2.2 kHz
  *   ferrix  digital/glitch: staircase shaper (fake bitcrush) + 40 Hz PWM-ish detune
  *           LFO, 10% chance of a short gate glitch
+ *   astral  orbital resonance: moving lowpass and a warm low-mid resonance;
+ *           two filters, without a new oscillator or a lingering delay
  * @param {object} v
  * @param {GainNode} voiceGain
  * @param {AudioNode} postGainDest where the lumen ring joins (after voiceGain)
@@ -313,6 +316,13 @@ export function applyFlavor(v, voiceGain, postGainDest) {
       const sh = stepShaper(v, dest, 16);
       v.lfoSpec = { type: 'square', hz: 40, depth: 120 };
       return sh;
+    }
+    case 'astral': {
+      const body = peaking(v, 190, 1.4, 3.5, voiceGain);
+      const orbit = lp(v, 2800, 1.5, body);
+      pitchSweep(orbit.frequency, 2800, 850, t, t + 0.18);
+      orbit.frequency.exponentialRampToValueAtTime(1900, t + 0.6);
+      return orbit;
     }
     default:
       return voiceGain;
@@ -385,9 +395,14 @@ function laser(v) {
   const base = 220 * [1.7, 1.35, 1, 0.8, 0.62][size] * rnd(0.97, 1.03);
   const g = env(v, t, { a: 0.006, d: dur * 0.5, s: 0.55, hold: dur * 0.35, r: 0.07, peak: gain * 0.4 }, out);
   const f = lp(v, 1800, 4, g);
-  pitchSweep(f.frequency, 2800, 700, t, t + dur);
-  play(v, osc(v, 'sawtooth', base, t, f), t, t + dur + 0.12);
-  play(v, osc(v, 'sine', base * 2, t, f), t, t + dur + 0.12);
+  pitchSweep(f.frequency, 4200, 700, t, t + dur);
+  const carrier = osc(v, 'sawtooth', base * 1.9, t, f);
+  pitchSweep(carrier.frequency, base * 1.9, base, t, t + 0.025);
+  carrier.frequency.exponentialRampToValueAtTime(base * 0.88, t + dur);
+  const harmonic = osc(v, 'sine', base * 3.8, t, f);
+  pitchSweep(harmonic.frequency, base * 3.8, base * 2, t, t + 0.035);
+  play(v, carrier, t, t + dur + 0.12);
+  play(v, harmonic, t, t + dur + 0.12);
 }
 
 function plasma(v) {
@@ -398,7 +413,11 @@ function plasma(v) {
   const f0 = 900 * rnd(0.95, 1.05);
   const o1 = osc(v, 'triangle', f0, t, f); pitchSweep(o1.frequency, f0, 180, t, t + 0.28);
   const o2 = osc(v, 'sawtooth', f0 + 5, t, f); o2.detune.value = 12; pitchSweep(o2.frequency, f0 + 5, 182, t, t + 0.28);
-  play(v, o1, t, t + 0.32); play(v, o2, t, t + 0.32);
+  // A slowing ripple distinguishes plasma from the straight laser sweep.
+  const ripple = osc(v, 'sine', 55, t, null), depth = gainNode(v, 38, null);
+  pitchSweep(ripple.frequency, 55, 17, t, t + 0.28);
+  ripple.connect(depth); depth.connect(o1.frequency);
+  play(v, o1, t, t + 0.32); play(v, o2, t, t + 0.32); play(v, ripple, t, t + 0.32);
 }
 
 function missile(v) {
@@ -428,10 +447,13 @@ function torpedo(v) {
 
 function railgun(v) {
   const { t, out, gain, rnd } = v;
-  const zg = env(v, t, { a: 0.02, d: 0.2, r: 0.03, peak: gain * 0.3 }, out);
-  const z = osc(v, 'sine', 200, t, zg); pitchSweep(z.frequency, 200, 3200 * rnd(0.95, 1.05), t, t + 0.25);
-  play(v, z, t, t + 0.27);
-  const tc = t + 0.25;
+  // The shot event is the discharge: its transient must be immediate, with a
+  // collapsing metallic overtone instead of a quarter-second pre-charge.
+  const zg = env(v, t, { a: 0.001, d: 0.055, r: 0.045, peak: gain * 0.3 }, out);
+  const f0 = 3200 * rnd(0.95, 1.05);
+  const z = osc(v, 'triangle', f0, t, zg); pitchSweep(z.frequency, f0, 520, t, t + 0.085);
+  play(v, z, t, t + 0.12);
+  const tc = t + 0.008;
   const cg = env(v, tc, { a: 0.001, d: 0.05, r: 0.05, peak: gain }, out);
   play(v, noise(v, 'white', tc, dist(v, 6, cg)), tc, tc + 0.1);
   const sg = env(v, tc, { a: 0.002, d: 0.3, r: 0.15, peak: gain * 0.8 }, out);
@@ -484,6 +506,30 @@ function beamCharge(v) {
   const f = bp(v, 500, 6, g); pitchSweep(f.frequency, 500, 6000, t, t + dur);
   const n = noise(v, 'white', t, f);
   for (const x of [a, b, n]) play(v, x, t, t + dur + 0.12);
+}
+
+const PILOT_TIMBRES = Object.freeze({
+  terran: { type: 'triangle', pitch: 300, low: 85, ring: 1800, noise: 'white' },
+  vorrax: { type: 'sawtooth', pitch: 620, low: 160, ring: 930, noise: 'brown' },
+  lumen: { type: 'sine', pitch: 1200, low: 440, ring: 1760, noise: 'pink' },
+  ferrix: { type: 'square', pitch: 1900, low: 300, ring: 2800, noise: 'crackle' },
+  astral: { type: 'triangle', pitch: 480, low: 110, ring: 840, noise: 'pink' },
+});
+
+function pilotShot(v) {
+  const { t, out, gain, rnd } = v;
+  const p = PILOT_TIMBRES[v.faction] || PILOT_TIMBRES.terran;
+  const tune = rnd(0.97, 1.03);
+  const body = env(v, t, { a: 0.002, d: 0.085, r: 0.09, peak: gain * 0.65 }, out);
+  const carrier = osc(v, p.type, p.pitch * tune, t, body);
+  pitchSweep(carrier.frequency, p.pitch * tune, p.low, t, t + 0.15);
+  play(v, carrier, t, t + 0.2);
+  const ring = env(v, t, { a: 0.001, d: 0.035, r: 0.05, peak: gain * 0.22 }, out);
+  const overtone = osc(v, 'sine', p.ring * tune, t, ring);
+  pitchSweep(overtone.frequency, p.ring * tune, p.ring * 0.6, t, t + 0.07);
+  play(v, overtone, t, t + 0.11);
+  const attack = env(v, t, { a: 0.001, d: 0.018, r: 0.025, peak: gain * 0.22 }, out);
+  play(v, noise(v, p.noise, t, hp(v, 1600, 0.8, attack)), t, t + 0.055);
 }
 
 // ---------------------------------------------------------------------------
@@ -543,7 +589,8 @@ function explosionOf(size) {
     const { t, out, gain, rnd } = v;
     const sz = Math.max(0, Math.min(4, size === undefined ? v.size : size));
     const p = EXPLO[sz];
-    const dur = p.dur * rnd(0.9, 1.1);
+    // The sub ends dur + 0.2, with at most another 0.02 for a faction LFO.
+    const dur = Math.min(3.78, p.dur * rnd(0.9, 1.1));
     const g = env(v, t, { a: 0.004, d: dur * 0.5, r: dur * 0.5, peak: gain * p.peak }, out);
     const d = sz >= 2 ? dist(v, 2.5, g) : g;
     const f = lp(v, p.noiseLP[0], 0.9, d);
@@ -585,6 +632,102 @@ function castBuff(v) {
   const a = osc(v, 'triangle', f0, t, g); pitchSweep(a.frequency, f0, f0 * 2, t, t + 0.22);
   const b = osc(v, 'sine', f0 * 1.5, t, g); pitchSweep(b.frequency, f0 * 1.5, f0 * 3, t, t + 0.22);
   play(v, a, t, t + 0.45); play(v, b, t, t + 0.45);
+}
+
+function castBoost(v) {
+  const { t, out, gain, rnd } = v;
+  const g = env(v, t, { a: 0.025, d: 0.3, s: 0.25, hold: 0.1, r: 0.18, peak: gain * 0.55 }, out);
+  const jet = bp(v, 250, 1.2, g);
+  pitchSweep(jet.frequency, 250, 2600 * rnd(0.95, 1.05), t, t + 0.18);
+  jet.frequency.exponentialRampToValueAtTime(900, t + 0.5);
+  play(v, noise(v, 'pink', t, jet), t, t + 0.65);
+  const motor = osc(v, 'triangle', 95, t, g);
+  pitchSweep(motor.frequency, 95, 330, t, t + 0.2);
+  play(v, motor, t, t + 0.65);
+}
+
+function castShield(v) {
+  const { t, out, gain, rnd } = v;
+  const root = 420 * rnd(0.98, 1.02);
+  const body = env(v, t, { a: 0.025, d: 0.26, s: 0.35, hold: 0.12, r: 0.4, peak: gain * 0.34 }, out);
+  for (const ratio of [1, 1.5]) {
+    const ring = osc(v, 'sine', root * ratio * 0.7, t, body);
+    pitchSweep(ring.frequency, root * ratio * 0.7, root * ratio, t, t + 0.12);
+    play(v, ring, t, t + 0.9);
+  }
+  const air = env(v, t, { a: 0.08, d: 0.17, r: 0.25, peak: gain * 0.2 }, out);
+  const edge = hp(v, 1800, 0.7, air);
+  play(v, noise(v, 'pink', t, edge), t, t + 0.55);
+  send(v, body, 0.35);
+}
+
+function castGravity(v) {
+  const { t, out, gain, rnd } = v;
+  const f0 = 210 * rnd(0.95, 1.05);
+  const g = env(v, t, { a: 0.09, d: 0.45, s: 0.3, hold: 0.2, r: 0.55, peak: gain * 0.46 }, out);
+  for (const ratio of [1, Math.SQRT2]) {
+    const orbit = osc(v, 'sine', f0 * ratio, t, g);
+    pitchSweep(orbit.frequency, f0 * ratio, 46 * ratio, t, t + 0.9);
+    play(v, orbit, t, t + 1.35);
+  }
+  const air = env(v, t, { a: 0.14, d: 0.3, r: 0.5, peak: gain * 0.25 }, out);
+  const pull = bp(v, 1500, 2.4, air);
+  pitchSweep(pull.frequency, 1500, 140, t, t + 0.8);
+  play(v, noise(v, 'brown', t, pull), t, t + 1.0);
+  send(v, g, 0.35);
+}
+
+function castDebuff(v) {
+  const { t, out, gain, rnd } = v;
+  const f0 = 740 * rnd(0.97, 1.03);
+  const g = env(v, t, { a: 0.002, d: 0.24, r: 0.22, peak: gain * 0.4 }, out);
+  const latch = osc(v, 'triangle', f0, t, g);
+  pitchSweep(latch.frequency, f0, 130, t, t + 0.23);
+  const ring = osc(v, 'sine', f0 * Math.SQRT2, t, g);
+  pitchSweep(ring.frequency, f0 * Math.SQRT2, 190, t, t + 0.23);
+  play(v, latch, t, t + 0.5); play(v, ring, t, t + 0.5);
+  send(v, g, 0.25);
+}
+
+function castEMP(v) {
+  const { t, out, gain, rnd } = v;
+  // Two distinct pulses, with a brief gap, read as interference rather than
+  // the smooth inward sweep of a gravity field.
+  const band = bp(v, 1800, 1.8, out);
+  for (let i = 0; i < 2; i++) {
+    const ti = t + i * 0.17;
+    const g = env(v, ti, { a: 0.002, d: 0.07, r: 0.045, peak: gain * (i ? 0.35 : 0.6) }, band);
+    play(v, noise(v, 'crackle', ti, g), ti, ti + 0.13);
+  }
+  const g = env(v, t, { a: 0.003, d: 0.16, r: 0.25, peak: gain * 0.32 }, out);
+  const tone = osc(v, 'square', 1700 * rnd(0.97, 1.03), t, g);
+  pitchSweep(tone.frequency, 1700, 95, t, t + 0.38);
+  play(v, tone, t, t + 0.45);
+}
+
+function castRepair(v) {
+  const { t, out, gain, rnd } = v;
+  const tune = rnd(0.98, 1.02);
+  [392, 587, 784].forEach((f, i) => {
+    const ti = t + i * 0.1;
+    const g = env(v, ti, { a: 0.002, d: 0.055, r: 0.08, peak: gain * 0.32 }, out);
+    const tool = osc(v, 'triangle', f * tune, ti, g);
+    pitchSweep(tool.frequency, f * tune, f * tune * 1.06, ti, ti + 0.05);
+    play(v, tool, ti, ti + 0.16);
+  });
+}
+
+function castRegrow(v) {
+  const { t, out, gain, rnd } = v;
+  const body = env(v, t, { a: 0.055, d: 0.32, s: 0.3, hold: 0.08, r: 0.24, peak: gain * 0.48 }, out);
+  const formant = bp(v, 380, 2.8, body);
+  pitchSweep(formant.frequency, 380, 1150, t, t + 0.22);
+  formant.frequency.exponentialRampToValueAtTime(480, t + 0.6);
+  play(v, noise(v, 'brown', t, formant), t, t + 0.75);
+  const f0 = 125 * rnd(0.96, 1.04);
+  const tissue = osc(v, 'triangle', f0, t, body);
+  pitchSweep(tissue.frequency, f0, f0 * 1.7, t, t + 0.45);
+  play(v, tissue, t, t + 0.75);
 }
 
 function castArea(v) {   // EMP / dissonance / singularity: rising zap then electric discharge
@@ -756,6 +899,15 @@ function uiGo(v) {
 // Registry
 // ---------------------------------------------------------------------------
 
+/** Specific ability cues override the generic catalog kind in the event adapter. */
+export const ABILITY_SOUNDS = Object.freeze({
+  afterburner: 'cast.boost', overclock: 'cast.boost',
+  shield_overload: 'cast.shield', mantle: 'cast.shield', orbital_aegis: 'cast.shield', aurora: 'cast.shield',
+  gravity_well: 'cast.gravity', singularity: 'cast.gravity', gravity_snare: 'cast.debuff',
+  emp_pulse: 'cast.emp', emp_storm: 'cast.emp', dissonant_pulse: 'cast.emp',
+  reactive_nanites: 'cast.repair', reconstruction: 'cast.repair', molt: 'cast.regrow',
+});
+
 /** name → recipe(v). */
 export const RECIPES = Object.freeze({
   'shot.kinetic': cannon,
@@ -768,6 +920,7 @@ export const RECIPES = Object.freeze({
   'shot.torpedo': torpedo,
   'shot.bio': acidSpit,
   'shot.ion': ion,
+  'shot.pilot': pilotShot,
   'charge': beamCharge,
   'hit.hull': hitHull,
   'hit.shield': hitShield,
@@ -778,6 +931,13 @@ export const RECIPES = Object.freeze({
   'impact.intercept': intercept,
   'cast.buff': castBuff,
   'cast.buff_ally': castBuff,
+  'cast.boost': castBoost,
+  'cast.shield': castShield,
+  'cast.gravity': castGravity,
+  'cast.debuff': castDebuff,
+  'cast.emp': castEMP,
+  'cast.repair': castRepair,
+  'cast.regrow': castRegrow,
   'cast.area': castArea,
   'cast.heal': castHeal,
   'cast.teleport': teleportOut,
@@ -810,10 +970,13 @@ export const PRIORITY = Object.freeze({
   'shield.break': 70,
   'cast.area': 65, 'cast.aura': 60, 'cast.spawn': 60, 'cast.teleport': 60, 'cast.teleport_in': 58,
   'cast.heal': 55, 'cast.stealth': 55, 'cast.latch': 55, 'cast.buff': 50, 'cast.buff_ally': 50, 'cast.passive': 30,
+  'cast.gravity': 65, 'cast.emp': 65, 'cast.shield': 62, 'cast.debuff': 56,
+  'cast.boost': 52, 'cast.repair': 55, 'cast.regrow': 55,
   'charge': 60, 'alarm': 90,
   'shot.torpedo': 50, 'shot.railgun': 50, 'shot.missile': 40, 'impact.torpedo': 45, 'impact.missile': 35, 'impact.intercept': 15,
   'hit.hull': 25, 'hit.shield': 25, 'heal': 20,
   'shot.laser': 20, 'shot.plasma': 20, 'shot.ion': 22, 'shot.bio': 18, 'shot.kinetic': 15, 'shot.autocannon': 10, 'shot.flak': 10,
+  'shot.pilot': 32,
 });
 
 /**
@@ -832,6 +995,8 @@ export const RATE_LIMITS = Object.freeze({
   'hit.hull': 12, 'hit.shield': 12, 'shot.kinetic': 16, 'shot.autocannon': 16, 'shot.flak': 16,
   'shot.laser': 10, 'shot.plasma': 12, 'shot.bio': 10, 'shot.ion': 10, 'shot.missile': 8, 'shot.torpedo': 6,
   'impact.missile': 8, 'impact.intercept': 8, 'heal': 3, 'death': 20,
+  'shot.pilot': 12, 'cast.boost': 8, 'cast.shield': 6, 'cast.gravity': 3, 'cast.debuff': 6,
+  'cast.emp': 4, 'cast.repair': 5, 'cast.regrow': 4,
 });
 
 /**

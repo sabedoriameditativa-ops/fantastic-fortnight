@@ -113,19 +113,20 @@ function resolveFill(g, L, def, pal, bb) {
       if (def.faction === 'vorrax') {
         const r = Math.max(bb.w, bb.h) * 0.75;
         const gr = g.createRadialGradient(bb.cx, bb.cy - bb.h * 0.3, 0, bb.cx, bb.cy, r);
-        gr.addColorStop(0, pal.hullLight); gr.addColorStop(0.45, pal.hullMid); gr.addColorStop(1, pal.hullDark);
+        gr.addColorStop(0, mix(pal.hullLight, pal.hullEdge, 0.3)); gr.addColorStop(0.28, pal.hullLight); gr.addColorStop(0.58, pal.hullMid); gr.addColorStop(1, pal.hullDark);
         return gr;
       }
       if (def.faction === 'lumen') return crystalFill(g, pal, bb);
-      if (def.faction === 'ferrix') return pal.hullMid;
+      if (def.faction === 'ferrix') return alloyFill(g, pal, bb);
       const gr = g.createLinearGradient(0, bb.y, 0, bb.y + bb.h);
-      gr.addColorStop(0, pal.hullLight); gr.addColorStop(0.3, pal.hullMid);
-      gr.addColorStop(0.33, mix(pal.hullMid, '#ffffff', 0.12)); gr.addColorStop(0.37, pal.hullMid);
-      gr.addColorStop(1, pal.hullDark);
+      gr.addColorStop(0, mix(pal.hullLight, pal.hullEdge, 0.18)); gr.addColorStop(0.18, pal.hullLight);
+      gr.addColorStop(0.42, pal.hullMid); gr.addColorStop(0.46, mix(pal.hullMid, '#ffffff', 0.16));
+      gr.addColorStop(0.54, pal.hullMid); gr.addColorStop(1, pal.hullDark);
       return gr;
     }
     case 'crystal': return crystalFill(g, pal, bb);
-    case 'cells': return pal.hullMid;
+    case 'cells': return alloyFill(g, pal, bb);
+    case 'hullMid': return def.faction === 'vorrax' ? pal.hullMid : alloyFill(g, pal, bb);
     case 'membrane': return pal.membrane || 'rgba(220,150,170,0.35)';
     case 'grad:canopy': {
       const gr = g.createLinearGradient(0, bb.y, 0, bb.y + bb.h);
@@ -133,6 +134,30 @@ function resolveFill(g, L, def, pal, bb) {
       return gr;
     }
     default: return pal[f] || f;
+  }
+}
+
+function alloyFill(g, pal, bb) {
+  const gr = g.createLinearGradient(bb.x, bb.y, bb.x + bb.w * 0.35, bb.y + bb.h);
+  gr.addColorStop(0, pal.hullLight); gr.addColorStop(0.42, pal.hullMid);
+  gr.addColorStop(0.62, pal.hullMid); gr.addColorStop(1, pal.hullDark);
+  return gr;
+}
+
+// Directional bevels are baked into solid hulls. Thin, crisp edges explain
+// thickness at battle zoom without adding glow or another per-ship draw pass.
+function drawBevel(g, pts, bb, pal, faction, px) {
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+    if (len < 2) continue;
+    let nx = dy / len, ny = -dx / len;
+    if (nx * ((a[0] + b[0]) / 2 - bb.cx) + ny * ((a[1] + b[1]) / 2 - bb.cy) < 0) { nx = -nx; ny = -ny; }
+    const light = -nx * 0.4 - ny * 0.92;
+    g.strokeStyle = light > 0 ? (faction === 'astral' ? pal.accent : pal.hullEdge) : pal.panelLine;
+    g.globalAlpha = light > 0 ? 0.24 + light * 0.48 : 0.45 + Math.abs(light) * 0.28;
+    g.lineWidth = Math.max(px * 1.2, light > 0 ? 1.6 : 2.3);
+    g.beginPath(); g.moveTo(a[0] - nx * 0.85, a[1] - ny * 0.85); g.lineTo(b[0] - nx * 0.85, b[1] - ny * 0.85); g.stroke();
   }
 }
 
@@ -153,15 +178,13 @@ function drawMaterialDetail(g, L, def, pal, bb, li, opts) {
   const px = 1 / k; // one device pixel in design units
   // A baked key light separates armor planes without a per-frame lighting pass.
   // Keep the material tint: organic shells, crystal facets and alloy stay distinct.
-  if (['grad:hull', 'crystal', 'cells'].includes(L.fill)) {
+  if (['grad:hull', 'crystal', 'cells', 'hullMid'].includes(L.fill)) {
     const light = g.createLinearGradient(bb.x, bb.y, bb.x + bb.w * 0.45, bb.y + bb.h);
     light.addColorStop(0, rgba(pal.hullLight, 0.32));
     light.addColorStop(0.45, 'rgba(0,0,0,0)');
     light.addColorStop(1, 'rgba(0,0,0,0.28)');
     g.fillStyle = light; g.fillRect(bb.x, bb.y, bb.w, bb.h);
-    g.strokeStyle = rgba(pal.hullLight, def.faction === 'lumen' ? 0.65 : 0.4);
-    g.lineWidth = Math.max(1.4, px * 1.5);
-    tracePoly(g, L, def, 0, 0.8); g.stroke();
+    if (def.faction !== 'vorrax') drawBevel(g, pts, bb, pal, def.faction, px);
   }
   switch (def.faction) {
     case 'terran': {
@@ -186,6 +209,16 @@ function drawMaterialDetail(g, L, def, pal, bb, li, opts) {
         }
         g.fillStyle = pal.hullDark; g.globalAlpha = 0.35;
         g.fillRect(bb.x, bb.y, bb.w, bb.h * 0.5);
+      }
+      if (L.panels && def.size >= 96 && bb.w > 40 && bb.h > 16) {
+        // Recessed service decks/windows give capitals a readable scale cue.
+        g.fillStyle = pal.panelLine; g.globalAlpha = 0.7;
+        g.fillRect(bb.x + bb.w * 0.18, bb.cy - bb.h * 0.09, bb.w * 0.47, bb.h * 0.18);
+        g.fillStyle = mix(pal.canopyA, '#ffffff', 0.2); g.globalAlpha = 0.78;
+        for (let x = bb.x + bb.w * 0.22; x < bb.x + bb.w * 0.62; x += 4) {
+          g.fillRect(x, bb.cy - bb.h * 0.055, 1.4, Math.max(0.65, px));
+          g.fillRect(x, bb.cy + bb.h * 0.055, 1.4, Math.max(0.65, px));
+        }
       }
       if (L.rivets && bucket >= 1) {
         g.fillStyle = pal.hullLight; g.globalAlpha = 0.7;
@@ -216,6 +249,22 @@ function drawMaterialDetail(g, L, def, pal, bb, li, opts) {
         }
         g.stroke();
       }
+      if (L.plates && L.fill === 'grad:hull') {
+        // Each chitin rib has a hard lit shoulder and a soft abdominal shadow.
+        g.strokeStyle = pal.hullEdge; g.lineWidth = Math.max(0.65, px); g.globalAlpha = 0.4;
+        g.beginPath();
+        for (let i = 1; i <= L.plates; i++) {
+          const x = bb.x + bb.w * (i / (L.plates + 1));
+          g.moveTo(x + 1.6, bb.y + bb.h * 0.08);
+          g.quadraticCurveTo(x - bb.w * 0.07, bb.cy - bb.h * 0.1, x + 1.6, bb.cy + bb.h * 0.21);
+        }
+        g.stroke();
+        g.fillStyle = pal.hullDark; g.globalAlpha = 0.18;
+        for (let i = 0; i < 12; i++) {
+          const x = bb.x + hash01(seed, i, 29) * bb.w, y = bb.y + hash01(seed, i, 30) * bb.h;
+          g.beginPath(); g.ellipse(x, y, 0.7, 0.4, 0, 0, TAU); g.fill();
+        }
+      }
       if (L.specular !== false && L.fill === 'grad:hull') {
         g.strokeStyle = '#ffffff'; g.lineWidth = Math.max(1, px); g.globalAlpha = 0.3;
         g.beginPath();
@@ -243,9 +292,10 @@ function drawMaterialDetail(g, L, def, pal, bb, li, opts) {
         const n = pts.length;
         for (let i = 0; i < n; i++) {
           const a = pts[i], b = pts[(i + 1) % n];
-          g.fillStyle = (i + li) % 2 ? (pal.facet || 'rgba(255,255,255,0.18)') : rgba(pal.inner || '#b8f0ff', 0.2);
-          g.globalAlpha = 1;
-          g.beginPath(); g.moveTo(bb.cx, bb.cy); g.lineTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.closePath(); g.fill();
+          const light = clamp(0.5 - ((a[1] + b[1]) / 2 - bb.cy) / Math.max(1, bb.h), 0, 1);
+          g.fillStyle = light > 0.5 ? pal.inner : pal.hullDark;
+          g.globalAlpha = light > 0.5 ? 0.16 + light * 0.2 : 0.18 + (1 - light) * 0.28;
+          g.beginPath(); g.moveTo(bb.cx + bb.w * 0.06, bb.cy - bb.h * 0.1); g.lineTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.closePath(); g.fill();
         }
         // inner edge (thickness)
         g.strokeStyle = pal.hullMid; g.lineWidth = Math.max(1, px); g.globalAlpha = 0.5;
@@ -266,6 +316,15 @@ function drawMaterialDetail(g, L, def, pal, bb, li, opts) {
         g.beginPath();
         for (let x = Math.floor(bb.x / step) * step; x <= bb.x + bb.w; x += step) { g.moveTo(x, bb.y - 1); g.lineTo(x, bb.y + bb.h + 1); }
         for (let y = Math.floor(bb.y / step) * step; y <= bb.y + bb.h; y += step) { g.moveTo(bb.x - 1, y); g.lineTo(bb.x + bb.w + 1, y); }
+        g.stroke();
+        // Hard top/left shoulders make the nanite blocks read as solid modules.
+        g.strokeStyle = pal.hullLight; g.lineWidth = Math.max(0.45, px * 0.8); g.globalAlpha = 0.45;
+        g.beginPath();
+        for (let x = Math.floor(bb.x / step) * step; x <= bb.x + bb.w; x += step) {
+          for (let y = Math.floor(bb.y / step) * step; y <= bb.y + bb.h; y += step) {
+            g.moveTo(x + 0.8, y + step - 0.8); g.lineTo(x + 0.8, y + 0.8); g.lineTo(x + step - 0.8, y + 0.8);
+          }
+        }
         g.stroke();
         // static "on" cells
         const nOn = Math.max(2, Math.round((bb.w * bb.h) / 140));
@@ -309,13 +368,23 @@ function drawMaterialDetail(g, L, def, pal, bb, li, opts) {
       break;
     }
     case 'astral': {
-      if (L.fill !== 'grad:hull') break;
+      if (L.fill !== 'grad:hull' && L.fill !== 'hullMid') break;
       g.strokeStyle = pal.accent; g.lineWidth = Math.max(0.7, px); g.globalAlpha = 0.4;
       g.beginPath();
       for (let i = 0; i < 3; i++) g.arc(-8, 0, 12 + i * 10, -Math.PI * 0.75, Math.PI * 0.75);
       g.stroke();
-      g.fillStyle = pal.inner; g.globalAlpha = 0.5;
+      g.fillStyle = pal.inner; g.globalAlpha = 0.65;
       for (let i = 0; i < 3; i++) g.fillRect(-24 + i * 14, -2, 5, 1);
+      if (def.size >= 80) {
+        g.strokeStyle = pal.accent; g.lineWidth = Math.max(0.5, px); g.globalAlpha = 0.65;
+        g.beginPath();
+        for (let i = 0; i < 12; i++) {
+          const a = i * TAU / 12;
+          g.moveTo(-8 + Math.cos(a) * 23, Math.sin(a) * 23);
+          g.lineTo(-8 + Math.cos(a) * 26, Math.sin(a) * 26);
+        }
+        g.stroke();
+      }
       break;
     }
     default: break;
@@ -356,6 +425,10 @@ function drawStaticLayer(g, L, li, def, pal, opts) {
     case 'poly': {
       const pts = layerPoints(L);
       const bb = ptsBBox(pts);
+      if (detail && li > 0 && ['grad:hull', 'crystal', 'cells', 'grad:canopy'].includes(L.fill)) {
+        g.save(); g.globalCompositeOperation = 'source-atop'; g.globalAlpha = 0.42;
+        g.fillStyle = '#05080f'; tracePoly(g, L, def, 1.2, 1.8); g.fill(); g.restore();
+      }
       tracePoly(g, L, def);
       const fill = resolveFill(g, L, def, pal, bb);
       g.globalAlpha = L.alpha ?? (def.faction === 'lumen' && (L.fill === 'crystal' || L.fill === 'grad:hull') ? 0.8 : 1);

@@ -1,6 +1,6 @@
 {
   "name": "frota-estelar",
-  "version": "0.2.0-preview.2",
+  "version": "0.3.0-preview.1",
   "description": "Frota Estelar — jogo de estratégia espacial com batalhas automáticas (single-player e multiplayer)",
   "type": "module",
   "private": true,

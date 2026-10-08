@@ -1,0 +1,28 @@
+# Allow only runtime sources, their legal notices, and the frozen dependency
+# manifest into the build context. Profiles, credentials, tests and artifacts
+# must never enter an image layer.
+**
+!Dockerfile
+!.dockerignore
+!package.json
+!package-lock.json
+!LICENSE.txt
+!THIRD_PARTY_NOTICES.md
+!client/
+!client/**
+!shared/
+!shared/**
+!server/
+!server/**
+**/.env*
+**/*.pem
+**/*.key
+**/*.sqlite*
+**/*.db*
+**/node_modules/
+**/.git/
+**/data/
+**/test/
+**/tests/
+**/*.test.js
+client/dev/

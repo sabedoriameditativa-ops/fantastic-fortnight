@@ -14,6 +14,7 @@ import { buildSpConfig, autotestSetup, normalizeSpSetup } from './util/spConfig.
 import { audio } from './audio/index.js';
 import { createNetClient } from './battle/netClient.js';
 import { createProfileClient } from './util/profile.js';
+import { createServerInfoClient } from './util/serverInfo.js';
 import { validateName } from '/shared/protocol.js';
 import { DEFAULT_BUDGET } from '/shared/constants.js';
 
@@ -31,6 +32,7 @@ import * as profile from './screens/profile.js';
 const screens = { menu, howto, spSetup, fleetBuilder, lobby, battle, results, codex, options, profile };
 const isStatic = document.documentElement.dataset.deployment === 'static';
 const profileClient = isStatic ? null : createProfileClient();
+const serverInfo = isStatic ? null : createServerInfoClient();
 
 const root = document.getElementById('app');
 const arena = document.getElementById('arena');
@@ -72,13 +74,10 @@ function applySettings() {
   document.documentElement.setAttribute('data-rm', state.settings.reducedMotion);
   setShipAnimations(!reducedMotion());
   try {
-    audio.setVolume('master', state.settings.master);
-    audio.setVolume('music', state.settings.music);
-    audio.setVolume('sfx', state.settings.sfx);
-    audio.setVolume('ui', state.settings.ui);
-    audio.setMuted(state.settings.muted);
+    audio.setSettings(state.settings);
   } catch (e) { reportError(e); }
   if (state.renderer) state.renderer.setOptions({ reducedMotion: reducedMotion(), quality: state.settings.quality, reducedEffects: state.settings.reducedEffects, highContrast: state.settings.highContrast, showNames: state.settings.showNames, grid: state.settings.grid });
+  state.screen?.onSettingsChanged?.();
   ambient.refresh();
 }
 
@@ -181,7 +180,7 @@ async function getNet() {
 // ---------------------------------------------------------------------------
 
 const ctx = {
-  state, params, T, toast, audio, ambient, reducedMotion, applySettings, persistSettings, getNet, reportError, isStatic,
+  state, params, T, toast, audio, ambient, reducedMotion, applySettings, persistSettings, getNet, reportError, isStatic, serverInfo,
   profile: profileClient,
   go: (name, props) => go(name, props),
   setArena(mode) { setArena(mode); },

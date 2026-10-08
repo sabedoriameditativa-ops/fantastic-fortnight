@@ -14,6 +14,7 @@ import { createStaticHandler } from './static.js';
 import { createSessionStore, attachConnection, createAddressLimiter, CLOSE } from './session.js';
 import { createLobby } from './lobby.js';
 import { createProfileService } from './profiles.js';
+import { createRequestPolicy } from './requestPolicy.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -30,23 +31,6 @@ function envCount(name) {
   if (v === undefined || v === '') return undefined;
   const n = Number(v);
   return Number.isInteger(n) && n >= 0 ? n : undefined;
-}
-
-/** Reject browser cross-origin upgrades before any cookie or token is read. */
-function permitsBrowserOrigin(req, secure) {
-  const origin = req.headers.origin;
-  // Native clients do not send Origin; their credentials remain explicit.
-  if (origin === undefined) return true;
-  if (typeof origin !== 'string') return false;
-  try {
-    const candidate = new URL(origin);
-    if (!['http:', 'https:'].includes(candidate.protocol) || candidate.origin !== origin) return false;
-    const scheme = secure || req.socket.encrypted ? 'https' : 'http';
-    const expected = new URL(`${scheme}://${req.headers.host}`);
-    return candidate.origin === expected.origin;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -74,6 +58,9 @@ export function envConfig(log = console) {
     maxRoomsPerAddress: envCount('MAX_ROOMS_PER_IP'),
     profileDataDir: process.env.FE_DATA_DIR || path.join(ROOT, '..', 'frota-estelar-data'),
     secure: process.env.FE_COOKIE_SECURE === '1',
+    trustedProxies: process.env.FE_TRUSTED_PROXIES || '',
+    publicOrigin: process.env.FE_PUBLIC_ORIGIN || undefined,
+    ephemeralData: process.env.FE_EPHEMERAL_DATA === '1',
   };
 }
 
@@ -93,15 +80,20 @@ export function envConfig(log = console) {
  * @param {string} [o.profileDataDir]        durable SQLite directory; omitted uses an in-memory store for embedding/tests
  * @param {object} [o.profileService]        caller-owned profile service (caller also closes it)
  * @param {boolean} [o.secure]              explicit HTTPS proxy mode; defaults to FE_COOKIE_SECURE=1 (never inferred from forwarded headers)
+ * @param {string|string[]} [o.trustedProxies] explicit proxy IPs/CIDRs; default trusts no forwarded IP
+ * @param {string} [o.publicOrigin]          canonical public origin; HTTPS requires secure=true
+ * @param {boolean} [o.ephemeralData]        publicly warn that disk/profile persistence is not guaranteed
  * @param {{log:Function, warn:Function}} [o.log]
  * @returns {Promise<{ port:number, httpServer: http.Server, wss: WebSocketServer, lobby: object, sessions: object, close(): Promise<void> }>}
  */
 export async function startServer(o = {}) {
   const log = o.log || console;
   const secure = o.secure ?? process.env.FE_COOKIE_SECURE === '1';
+  const requestPolicy = createRequestPolicy({ secure, trustedProxies: o.trustedProxies, publicOrigin: o.publicOrigin });
   const profiles = o.profileService || createProfileService({
     ...(o.profileDataDir ? { dataDir: o.profileDataDir } : { filename: ':memory:' }),
     secureCookie: secure,
+    requestPolicy,
   });
   const roomOptions = { profiles };
   if (o.maxTicks) roomOptions.maxTicks = o.maxTicks;
@@ -122,12 +114,21 @@ export async function startServer(o = {}) {
   });
   const limiter = createAddressLimiter(o.maxSocketsPerAddress !== undefined ? { maxSockets: o.maxSocketsPerAddress } : {});
 
+  let shuttingDown = false;
+  const sockets = new Set();
   const handler = createStaticHandler({
     clientDir: path.join(ROOT, 'client'),
     sharedDir: path.join(ROOT, 'shared'),
-    health: () => ({ ...lobby.health(), sessions: sessions.size }),
+    health: () => ({ ...lobby.health(), sessions: sessions.size,
+      capabilities: { profilePersistence: o.ephemeralData ? 'ephemeral' : profiles.persistence || 'memory' },
+    }),
   });
   const httpServer = http.createServer(async (req, res) => {
+    if (shuttingDown) {
+      res.writeHead(503, { 'Content-Type': 'application/json', Connection: 'close' });
+      res.end(JSON.stringify({ error: 'SERVER_CLOSED' }));
+      return;
+    }
     try {
       if (!await profiles.handleHttp(req, res)) handler(req, res);
     } catch (err) {
@@ -136,18 +137,23 @@ export async function startServer(o = {}) {
       res.end(JSON.stringify({ error: 'INTERNAL_ERROR' }));
     }
   });
+  httpServer.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+  });
   const wss = new WebSocketServer({
     server: httpServer,
     perMessageDeflate: { threshold: 512 },
     maxPayload: MAX_MESSAGE_BYTES,
     verifyClient: ({ req }, done) => {
-      if (!permitsBrowserOrigin(req, secure)) return done(false, 403, 'Origin forbidden');
+      if (shuttingDown) return done(false, 503, 'Server closing');
+      if (!requestPolicy.permitsOrigin(req)) return done(false, 403, 'Origin forbidden');
       done(true);
     },
   });
   wss.on('connection', (ws, req) => attachConnection(ws, {
     sessions, lobby, log, limiter, handshakeMs: o.handshakeMs,
-    remoteAddress: req && req.socket ? req.socket.remoteAddress : undefined,
+    remoteAddress: requestPolicy.clientAddress(req),
     profileId: profiles.authenticateRequest(req),
   }));
   // ws re-emits the http server's errors; the listen failure is already reported by startServer's rejection.
@@ -163,6 +169,9 @@ export async function startServer(o = {}) {
       resolve();
     });
   }); } catch (err) {
+    wss.close();
+    lobby.closeAll('room_closed');
+    sessions.clear();
     if (!o.profileService) profiles.close();
     throw err;
   }
@@ -172,28 +181,30 @@ export async function startServer(o = {}) {
   let closing = null;
   function close() {
     if (closing) return closing;
-    closing = new Promise((resolve) => {
+    shuttingDown = true;
+    closing = (async () => {
+      // Stop accepting HTTP/upgrades before touching sessions or the database.
+      const httpClosed = new Promise((resolve) => httpServer.close(resolve));
+      const wsClosed = new Promise((resolve) => wss.close(resolve));
       lobby.closeAll('room_closed');
       for (const client of wss.clients) {
         try { client.close(CLOSE.SHUTDOWN, 'shutdown'); } catch { /* ignore */ }
       }
       sessions.clear();
-      if (!o.profileService) profiles.close();
       const force = setTimeout(() => {
         for (const client of wss.clients) {
           try { client.terminate(); } catch { /* ignore */ }
         }
-        resolve();
+        // Includes partial HTTP requests and upgraded sockets: no listener or
+        // connection is left running after close() resolves.
+        for (const socket of sockets) socket.destroy();
+        httpServer.closeAllConnections();
       }, 2000);
       force.unref();
-      wss.close(() => {
-        httpServer.close(() => {
-          clearTimeout(force);
-          resolve();
-        });
-        httpServer.closeAllConnections?.();
-      });
-    });
+      await Promise.all([httpClosed, wsClosed]);
+      clearTimeout(force);
+      if (!o.profileService) profiles.close();
+    })();
     return closing;
   }
 

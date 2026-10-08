@@ -1,0 +1,26 @@
+# Experimental free multiplayer. Local profiles are temporary: no disk or
+# paid database is provisioned. See docs/CLOUD.md before creating the service.
+services:
+  - type: web
+    name: frota-estelar
+    runtime: docker
+    plan: free
+    region: virginia
+    branch: codex/frota-estelar-evolucao
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    healthCheckPath: /health
+    envVars:
+      - key: FE_COOKIE_SECURE
+        value: "1"
+      - key: FE_EPHEMERAL_DATA
+        value: "1"
+      - key: FE_DATA_DIR
+        value: /data
+      - key: MAX_ROOMS
+        value: "1"
+      - key: MAX_SOCKETS_PER_IP
+        value: "16"
+      - key: MAX_ROOMS_PER_IP
+        value: "1"

@@ -104,31 +104,40 @@ export function createProjectiles(o) {
   /**
    * @param {CanvasRenderingContext2D} ctx base transform [dpr,0,0,dpr,0,0]
    */
-  function draw(ctx, cam, dpr, now, quality) {
+  function draw(ctx, cam, dpr, now, quality, options = {}) {
     if (!byId.size) return;
     const z = cam.zoom;
     const vr = cam.visibleRect(60);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.lineCap = 'round';
-    const simple = z < 0.45 || quality < 0.5;
+    const minimal = quality < 0.5 || options.reducedEffects;
+    const simple = z < 0.45 || minimal;
+    const motionTime = options.reducedMotion ? 0 : now;
     // additive pass for all projectiles (they are emissive)
     ctx.globalCompositeOperation = 'lighter';
     for (const pr of byId.values()) {
       if (pr.x < vr.x0 || pr.x > vr.x1 || pr.y < vr.y0 || pr.y > vr.y1) continue;
       const sx = cam.worldToScreenX(pr.x), sy = cam.worldToScreenY(pr.y);
       const c = Math.cos(pr.a), s = Math.sin(pr.a);
-      if (quality < 0.5) {
+      if (minimal) {
         // Keep every shot visible on low quality; a compact head and direction
         // stroke replace bloom, flicker and multiple sub-particles.
         const length = Math.max(3, (pr.kind === 'rail' ? 22 : 6) * z * pr.size);
         ctx.globalCompositeOperation = 'source-over';
         ctx.strokeStyle = pr.col; ctx.lineWidth = Math.max(1, 1.5 * z); ctx.globalAlpha = 0.9;
         ctx.beginPath(); ctx.moveTo(sx - c * length, sy - s * length); ctx.lineTo(sx, sy); ctx.stroke();
-        if (['missile', 'torpedo', 'ltorpedo', 'plasma', 'spore'].includes(pr.kind)) {
-          const r = Math.max(1.2, 2 * z);
-          ctx.fillStyle = pr.col;
-          ctx.beginPath(); ctx.arc(sx, sy, r, 0, TAU); ctx.fill();
-        }
+        // Geometry carries weapon identity even without bloom or animation.
+        const r = Math.max(1.5, 2.5 * z * pr.size);
+        ctx.fillStyle = pr.col;
+        ctx.beginPath();
+        if (pr.kind === 'missile' || pr.kind === 'torpedo' || pr.kind === 'ltorpedo') {
+          ctx.moveTo(sx + c * r, sy + s * r);
+          ctx.lineTo(sx - c * r - s * r * 0.7, sy - s * r + c * r * 0.7);
+          ctx.lineTo(sx - c * r + s * r * 0.7, sy - s * r - c * r * 0.7); ctx.closePath();
+        } else if (pr.kind === 'ion' || pr.kind === 'flak') {
+          ctx.moveTo(sx + r, sy); ctx.lineTo(sx, sy + r); ctx.lineTo(sx - r, sy); ctx.lineTo(sx, sy - r); ctx.closePath();
+        } else ctx.arc(sx, sy, pr.kind === 'plasma' || pr.kind === 'spore' ? r : r * 0.55, 0, TAU);
+        ctx.fill();
         continue;
       }
       switch (pr.kind) {
@@ -141,8 +150,10 @@ export function createProjectiles(o) {
         }
         case 'flak': {
           ctx.fillStyle = pr.col; ctx.globalAlpha = 1;
-          const r = Math.max(1, 1.2 * z);
-          ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+          const r = Math.max(1.4, 2 * z);
+          ctx.beginPath(); ctx.moveTo(sx + c * r * 1.5, sy + s * r * 1.5);
+          ctx.lineTo(sx - s * r, sy + c * r); ctx.lineTo(sx - c * r, sy - s * r);
+          ctx.lineTo(sx + s * r, sy - c * r); ctx.closePath(); ctx.fill();
           break;
         }
         case 'rail': {
@@ -161,11 +172,15 @@ export function createProjectiles(o) {
           break;
         }
         case 'missile': {
-          const L = 5 * z, W = 1.8 * z;
+          const L = Math.max(3, 6 * z), W = Math.max(1, 1.8 * z);
           ctx.setTransform(c * dpr, s * dpr, -s * dpr, c * dpr, sx * dpr, sy * dpr);
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.fillStyle = '#4a6579'; ctx.globalAlpha = 1;
+          ctx.beginPath(); ctx.moveTo(-L * 0.5, 0); ctx.lineTo(-L, -W * 2); ctx.lineTo(L * 0.15, 0); ctx.lineTo(-L, W * 2); ctx.closePath(); ctx.fill();
           ctx.fillStyle = '#c9d3df'; ctx.globalAlpha = 1;
           ctx.beginPath(); ctx.moveTo(L, 0); ctx.lineTo(-L * 0.6, -W); ctx.lineTo(-L * 0.6, W); ctx.closePath(); ctx.fill();
-          ctx.fillStyle = '#ffb347'; ctx.globalAlpha = 0.8 + 0.2 * Math.sin(now * 0.05 + pr.seed);
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.fillStyle = '#ffb347'; ctx.globalAlpha = 0.8 + 0.15 * Math.sin(motionTime * 0.05 + pr.seed);
           ctx.beginPath(); ctx.moveTo(-L * 0.6, -W * 0.6); ctx.lineTo(-L * 1.6, 0); ctx.lineTo(-L * 0.6, W * 0.6); ctx.closePath(); ctx.fill();
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           if (!simple) { const r = 4 * z; ctx.globalAlpha = 0.6; ctx.drawImage(getGlow(pr.col), sx - r, sy - r, r * 2, r * 2); }
@@ -174,25 +189,33 @@ export function createProjectiles(o) {
         case 'torpedo': case 'ltorpedo': {
           const L = 7 * z, W = 2.8 * z;
           ctx.setTransform(c * dpr, s * dpr, -s * dpr, c * dpr, sx * dpr, sy * dpr);
+          ctx.globalCompositeOperation = 'source-over';
           ctx.fillStyle = pr.kind === 'ltorpedo' ? '#7dd957' : '#4b5665'; ctx.globalAlpha = 1;
           ctx.beginPath(); ctx.ellipse(0, 0, L, W, 0, 0, TAU); ctx.fill();
           if (pr.kind === 'ltorpedo') {
             ctx.fillStyle = '#2e1a24'; ctx.globalAlpha = 0.8;
             for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.ellipse(i * L * 0.5, 0, W * 0.5, W * 0.8, 0, 0, TAU); ctx.fill(); }
           } else {
-            ctx.strokeStyle = pr.col; ctx.lineWidth = Math.max(0.8, 1.2 * z); ctx.globalAlpha = 0.6 + 0.4 * Math.sin(now * 0.0126 + pr.seed);
+            ctx.strokeStyle = pr.col; ctx.lineWidth = Math.max(0.8, 1.2 * z); ctx.globalAlpha = 0.75 + 0.15 * Math.sin(motionTime * 0.0126 + pr.seed);
             ctx.beginPath(); ctx.ellipse(-L * 0.2, 0, W * 0.9, W * 0.9, 0, 0, TAU); ctx.stroke();
             ctx.fillStyle = '#ffb347'; ctx.globalAlpha = 0.9;
             ctx.beginPath(); ctx.moveTo(-L, -W * 0.5); ctx.lineTo(-L * 1.8, 0); ctx.lineTo(-L, W * 0.5); ctx.closePath(); ctx.fill();
           }
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.globalCompositeOperation = 'lighter';
           const r = 7 * z; ctx.globalAlpha = 0.7; ctx.drawImage(getGlow(pr.col), sx - r, sy - r, r * 2, r * 2);
           break;
         }
         case 'plasma': {
-          const wob = 1 + 0.12 * Math.sin(now * 0.12 + pr.seed);
+          const wob = 1 + 0.06 * Math.sin(motionTime * 0.045 + pr.seed);
           const r = 7 * z * pr.size * wob;
-          ctx.globalAlpha = 0.9; ctx.drawImage(getGlow(pr.col), sx - r, sy - r, r * 2, r * 2);
+          ctx.globalAlpha = 0.65; ctx.drawImage(getGlow(pr.col), sx - r, sy - r, r * 2, r * 2);
+          // A short flame-shaped wake differentiates a plasma bolt from an ion dart.
+          ctx.fillStyle = pr.col; ctx.globalAlpha = 0.75;
+          ctx.beginPath(); ctx.moveTo(sx + c * r * 0.35, sy + s * r * 0.35);
+          ctx.lineTo(sx - s * r * 0.38, sy + c * r * 0.38);
+          ctx.lineTo(sx - c * r * 1.9, sy - s * r * 1.9);
+          ctx.lineTo(sx + s * r * 0.38, sy - c * r * 0.38); ctx.closePath(); ctx.fill();
           ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 1;
           ctx.beginPath(); ctx.arc(sx, sy, Math.max(1, 2.5 * z * pr.size * wob), 0, TAU); ctx.fill();
           break;
@@ -209,22 +232,28 @@ export function createProjectiles(o) {
           break;
         }
         case 'spore': {
-          const n = simple ? 2 : 6;
+          const n = simple ? 2 : 3;
           for (let i = 0; i < n; i++) {
-            const a = now * 0.003 + i * (TAU / n) + pr.seed, R = 4 * z;
+            const a = motionTime * 0.003 + i * (TAU / n) + pr.seed, R = 4 * z;
             const r = (3 + (i % 3)) * z;
             ctx.globalAlpha = 0.35;
-            ctx.drawImage(getGlow(pr.col), sx + Math.cos(a) * R - r, sy + Math.sin(a) * R * 0.6 - r, r * 2, r * 2);
+            const px = sx + Math.cos(a) * R, py = sy + Math.sin(a) * R * 0.6;
+            ctx.drawImage(getGlow(pr.col), px - r, py - r, r * 2, r * 2);
+            ctx.globalAlpha = 0.8; ctx.fillStyle = pr.colB;
+            ctx.beginPath(); ctx.arc(px, py, Math.max(0.7, z), 0, TAU); ctx.fill();
           }
           break;
         }
         case 'ion': {
           const r = 5 * z; ctx.globalAlpha = 0.9; ctx.drawImage(getGlow(pr.col), sx - r, sy - r, r * 2, r * 2);
           ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 1;
-          ctx.beginPath(); ctx.arc(sx, sy, Math.max(1, 1.8 * z), 0, TAU); ctx.fill();
+          const head = Math.max(1.8, 3.3 * z), wide = head * 0.48;
+          ctx.beginPath(); ctx.moveTo(sx + c * head, sy + s * head);
+          ctx.lineTo(sx - s * wide, sy + c * wide); ctx.lineTo(sx - c * head, sy - s * head);
+          ctx.lineTo(sx + s * wide, sy - c * wide); ctx.closePath(); ctx.fill();
           if (!simple) {
             ctx.strokeStyle = pr.col; ctx.lineWidth = Math.max(0.6, z * 0.8); ctx.globalAlpha = 0.8;
-            const fr = (now / 40) | 0;
+            const fr = (motionTime / 60) | 0;
             ctx.beginPath();
             for (let k = 0; k < 2; k++) {
               const a0 = hash01(pr.seed, fr, k) * TAU, l0 = (4 + hash01(pr.seed, fr, k + 5) * 4) * z;

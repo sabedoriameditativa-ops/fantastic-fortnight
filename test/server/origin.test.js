@@ -14,7 +14,7 @@ async function setup(t, options = {}) {
   });
   const authority = `127.0.0.1:${server.port}`;
   const origin = `http://${authority}`;
-  const response = await fetch(`${origin}/api/profile`, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: '{}' });
+  const response = await fetch(`${origin}/api/profile`, { method: 'POST', headers: { Origin: options.secure ? `https://${authority}` : origin, 'Content-Type': 'application/json' }, body: '{}' });
   assert.equal(response.status, 200);
   const profile = (await response.json()).profile;
   const cookieHeader = response.headers.get('set-cookie');

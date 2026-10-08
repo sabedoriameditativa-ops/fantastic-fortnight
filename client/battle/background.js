@@ -2,17 +2,93 @@
 // the battle seed, optional planet, occasional comet, vignette and the
 // optional tactical grid. Everything is deterministic from the seed.
 
-import { makeCanvas, getGlow } from './render/glow.js';
-import { hashStr, hash01, makeRand, rgba, mix, TAU, clamp } from './render/palette.js';
+import { makeCanvas } from './render/glow.js';
+import { hashStr, hash01, makeRand, rgba, mix, parseColor, TAU, clamp } from './render/palette.js';
 
 const NEB_PALETTES = [
   ['#1a1040', '#0b2a4a'], ['#2a0f2e', '#102a33'], ['#0e2a1a', '#0a1430'], ['#2a1a10', '#0e1a3a'], ['#101a3a', '#2a1030'],
 ];
 const STAR_COLORS = ['#ffffff', '#cfe8ff', '#ffe9c0', '#ffffff', '#ffd9c0'];
+const PLANET_SIZE = 1024, PLANET_R = 224;
+const smooth = t => t * t * (3 - 2 * t);
+const blend = (a, b, t) => a + (b - a) * t;
+
+// Coherent noise is sampled only while baking textures. No image-data work
+// enters the render loop; spherical coordinates avoid a seam on the globe.
+function noise3(x, y, z, seed) {
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+  const a = smooth(x - ix), b = smooth(y - iy), c = smooth(z - iz);
+  const s0 = seed ^ Math.imul(iz, 92837111), s1 = seed ^ Math.imul(iz + 1, 92837111);
+  const lo = blend(blend(hash01(ix, iy, s0), hash01(ix + 1, iy, s0), a), blend(hash01(ix, iy + 1, s0), hash01(ix + 1, iy + 1, s0), a), b);
+  const hi = blend(blend(hash01(ix, iy, s1), hash01(ix + 1, iy, s1), a), blend(hash01(ix, iy + 1, s1), hash01(ix + 1, iy + 1, s1), a), b);
+  return blend(lo, hi, c);
+}
+function terrain(x, y, z, seed) {
+  return noise3(x, y, z, seed) * 0.57 + noise3(x * 2.07, y * 2.07, z * 2.07, seed + 41) * 0.28 + noise3(x * 4.13, y * 4.13, z * 4.13, seed + 83) * 0.15;
+}
+function tileNoise(u, v, frequency, seed) {
+  const x = u * frequency, y = v * frequency, ix = Math.floor(x), iy = Math.floor(y);
+  const a = smooth(x - ix), b = smooth(y - iy);
+  const x0 = ((ix % frequency) + frequency) % frequency, x1 = (x0 + 1) % frequency;
+  const y0 = ((iy % frequency) + frequency) % frequency, y1 = (y0 + 1) % frequency;
+  return blend(blend(hash01(x0, y0, seed), hash01(x1, y0, seed), a), blend(hash01(x0, y1, seed), hash01(x1, y1, seed), a), b);
+}
+
+/** Bake a lit sphere; the output also occludes stars on its unlit hemisphere. */
+function bakeGlobe(radius, p, seed, moon = false) {
+  const size = radius * 2 + 4, cv = makeCanvas(size, size), g = cv.getContext('2d');
+  const pixels = g.createImageData(size, size), data = pixels.data;
+  const hue = parseColor(p.hue), cloud = parseColor(moon ? '#a2a4ae' : '#d5deed');
+  const lightZ = p.lightZ ?? 0.5, side = Math.sqrt(1 - lightZ * lightZ);
+  const lx = Math.cos(p.lightA) * side, ly = Math.sin(p.lightA) * side;
+  const cx = size / 2, cy = size / 2;
+  for (let py = 0; py < size; py++) for (let px = 0; px < size; px++) {
+    const nx = (px + 0.5 - cx) / radius, ny = (py + 0.5 - cy) / radius, rr = nx * nx + ny * ny;
+    if (rr >= 1) continue;
+    const nz = Math.sqrt(1 - rr), dot = nx * lx + ny * ly + nz * lightZ;
+    const n = terrain(nx * 4.4 + 13, ny * 4.4 + 7, nz * 4.4 + 3, seed);
+    let red, green, blue, rough = 0, cloudCover = 0;
+    if (moon) {
+      const crater = noise3(nx * 23 + 5, ny * 23, nz * 23, seed + 59);
+      const albedo = 0.38 + n * 0.48 + (crater - 0.5) * 0.16;
+      red = hue[0] * albedo; green = hue[1] * albedo; blue = hue[2] * albedo;
+      rough = (crater - 0.5) * 0.09;
+    } else if (p.gas) {
+      const flow = ny * 23 + (n - 0.5) * 4.5 + Math.sin(nx * 4 + nz * 3) * 0.7;
+      const band = 0.5 + Math.sin(flow) * 0.27 + Math.sin(flow * 2.7 + n) * 0.1;
+      const stormX = (nx - 0.28) / 0.3, stormY = (ny + 0.17) / 0.13;
+      const stormR = Math.sqrt(stormX * stormX + stormY * stormY);
+      const storm = Math.max(0, 1 - stormR) * (0.45 + 0.35 * Math.sin(stormR * 19 + Math.atan2(stormY, stormX)));
+      const bright = clamp(band * 0.48 + n * 0.2 + storm * 0.5, 0, 0.65);
+      red = blend(hue[0] * 0.55, 218, bright); green = blend(hue[1] * 0.55, 202, bright); blue = blend(hue[2] * 0.55, 175, bright);
+    } else {
+      const land = smooth(clamp((n - 0.49) * 16, 0, 1));
+      const coast = Math.max(0, 1 - Math.abs(n - 0.49) * 60) * 0.3;
+      red = blend(hue[0] * 0.38, 67 + n * 43, land) + coast * 24;
+      green = blend(hue[1] * 0.6, 80 + n * 34, land) + coast * 32;
+      blue = blend(hue[2] * 0.76, 52 + n * 23, land) + coast * 20;
+      const ice = smooth(clamp((Math.abs(ny) + n * 0.13 - 0.88) * 16, 0, 1));
+      red = blend(red, 194, ice); green = blend(green, 209, ice); blue = blend(blue, 220, ice);
+      cloudCover = smooth(clamp((terrain(nx * 7 + 31, ny * 7 + 9, nz * 7, seed + 193) - 0.55) * 8, 0, 1)) * 0.83;
+      const spec = Math.pow(Math.max(0, nx * lx * 0.56 + ny * ly * 0.56 + nz * 0.88), 30) * (1 - land) * 0.16;
+      red += spec * 175; green += spec * 198; blue += spec * 222;
+    }
+    const light = 0.035 + Math.pow(Math.max(0, dot + rough), 0.8) * 0.93;
+    const rim = moon ? 0 : Math.pow(1 - nz, 3) * Math.max(0, dot + 0.12) * 0.3;
+    const at = (py * size + px) * 4;
+    data[at] = blend(red, cloud[0], cloudCover) * light + rim * 78;
+    data[at + 1] = blend(green, cloud[1], cloudCover) * light + rim * 141;
+    data[at + 2] = blend(blue, cloud[2], cloudCover) * light + rim * 212;
+    data[at + 3] = clamp((1 - Math.sqrt(rr)) * radius, 0, 1) * 255;
+  }
+  g.putImageData(pixels, 0, 0);
+  return cv;
+}
+
 
 /**
  * @param {{ seed: number|string, world: {w:number,h:number}, dpr?: number, planet?: boolean }} o
- *   planet: allow a planet (default true; 55% of seeds get one)
+ *   planet: allow a planet (default true; 75% of seeds get one)
  */
 export function createBackground(o) {
   const seed = hashStr(String(o.seed ?? 1));
@@ -26,44 +102,25 @@ export function createBackground(o) {
   let nebula = null;
   function buildNebula() {
     const cv = makeCanvas(NEB_PX, NEB_PX);
-    const g = cv.getContext('2d');
-    const s = NEB_PX / NEB_T;
+    const g = cv.getContext('2d'), pixels = g.createImageData(NEB_PX, NEB_PX), data = pixels.data;
     const pal = NEB_PALETTES[seed % NEB_PALETTES.length];
-    const r = makeRand(seed ^ 0xabc);
-    g.fillStyle = '#05070c'; g.fillRect(0, 0, NEB_PX, NEB_PX);
-    g.globalCompositeOperation = 'lighter';
-    const blobs = 7 + r.int(0, 3);
-    const drawBlob = (x, y, rx, ry, rot, col, a) => {
-      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
-        const bx = x + ox * NEB_T, by = y + oy * NEB_T;
-        if (bx + rx < 0 || bx - rx > NEB_T || by + ry < 0 || by - ry > NEB_T) continue;
-        g.save();
-        g.translate(bx * s, by * s); g.rotate(rot); g.scale(1, ry / rx);
-        const gr = g.createRadialGradient(0, 0, 0, 0, 0, rx * s);
-        gr.addColorStop(0, rgba(col, a)); gr.addColorStop(0.5, rgba(col, a * 0.45)); gr.addColorStop(1, rgba(col, 0));
-        g.fillStyle = gr; g.beginPath(); g.arc(0, 0, rx * s, 0, TAU); g.fill();
-        g.restore();
-      }
-    };
-    for (let i = 0; i < blobs; i++) {
-      const col = pal[i % 2];
-      drawBlob(r.range(0, NEB_T), r.range(0, NEB_T), r.range(500, 1300), r.range(300, 900), r.range(0, TAU), col, r.range(0.14, 0.26));
+    const a = parseColor(mix(pal[0], '#aa8bbb', 0.16)), b = parseColor(mix(pal[1], '#7cb9cf', 0.16));
+    for (let y = 0; y < NEB_PX; y++) for (let x = 0; x < NEB_PX; x++) {
+      const u = x / NEB_PX, v = y / NEB_PX;
+      const warp = (tileNoise(u, v, 4, seed + 11) - 0.5) * 0.3;
+      const n = tileNoise(u + warp, v - warp, 4, seed + 21);
+      const fine = tileNoise(u + warp, v, 16, seed + 31);
+      const dust = tileNoise(u, v + warp, 8, seed + 51);
+      const cloud = Math.pow(Math.max(0, n * 0.8 + fine * 0.2 - 0.25), 2) * 1.7;
+      const filament = Math.max(0, 1 - Math.abs(dust - 0.48) * 18) * cloud * 0.46;
+      const shadow = 1 - smooth(clamp((dust - 0.58) * 6, 0, 1)) * 0.82;
+      const tint = smooth(clamp(n * 1.4 - 0.15, 0, 1)), i = (y * NEB_PX + x) * 4;
+      data[i] = 4 + (blend(a[0], b[0], tint) * cloud + filament * 26) * shadow;
+      data[i + 1] = 6 + (blend(a[1], b[1], tint) * cloud + filament * 32) * shadow;
+      data[i + 2] = 12 + (blend(a[2], b[2], tint) * cloud + filament * 44) * shadow;
+      data[i + 3] = 255;
     }
-    // cheap "noise": many faint circles
-    for (let i = 0; i < 320; i++) {
-      const col = pal[i % 2];
-      drawBlob(r.range(0, NEB_T), r.range(0, NEB_T), r.range(60, 200), r.range(60, 200), 0, mix(col, '#ffffff', 0.2), 0.035);
-    }
-    // Fine luminous dust lanes, baked once; wrapping uses the same seamless blobs.
-    for (let lane = 0; lane < 2; lane++) {
-      const y0 = r.range(0, NEB_T), phase = r.range(0, TAU);
-      const col = mix(pal[lane], lane ? '#9fc6de' : '#b29adb', 0.24);
-      for (let i = 0; i < 24; i++) {
-        const x = i * NEB_T / 24, a = x / NEB_T * TAU + phase;
-        drawBlob(x, (y0 + Math.sin(a) * 360 + NEB_T) % NEB_T, 250, 58, Math.cos(a) * 0.5, col, 0.16);
-      }
-    }
-    g.globalCompositeOperation = 'source-over';
+    g.putImageData(pixels, 0, 0);
     return cv;
   }
 
@@ -74,9 +131,9 @@ export function createBackground(o) {
   const near = [];
   {
     const r = makeRand(seed ^ 0x51a7);
-    for (let i = 0; i < 900; i++) far.push({ x: r.range(0, STAR_T), y: r.range(0, STAR_T), r: r.range(0.5, 1.1), a: r.range(0.35, 0.8), c: r.pick(STAR_COLORS) });
-    for (let i = 0; i < 330; i++) mid.push({ x: r.range(0, STAR_T), y: r.range(0, STAR_T), r: r.range(0.9, 1.6), a: r.range(0.5, 0.95), c: r.pick(STAR_COLORS), cross: i < 18, tw: i >= 18 && i < 30 ? r.range(1, 3) : 0, ph: r.range(0, TAU) });
-    for (let i = 0; i < 70; i++) near.push({ x: r.range(0, STAR_T), y: r.range(0, STAR_T), r: r.range(1.4, 2.2), a: r.range(0.6, 1), c: r.pick(STAR_COLORS) });
+    for (let i = 0; i < 620; i++) far.push({ x: r.range(0, STAR_T), y: r.range(0, STAR_T), r: r.range(0.5, 1.1), a: r.range(0.2, 0.65), c: r.pick(STAR_COLORS) });
+    for (let i = 0; i < 180; i++) mid.push({ x: r.range(0, STAR_T), y: r.range(0, STAR_T), r: r.range(0.9, 1.6), a: r.range(0.35, 0.8), c: r.pick(STAR_COLORS), cross: i < 18, tw: i >= 18 && i < 30 ? r.range(1, 3) : 0, ph: r.range(0, TAU) });
+    for (let i = 0; i < 40; i++) near.push({ x: r.range(0, STAR_T), y: r.range(0, STAR_T), r: r.range(1.4, 2.2), a: r.range(0.6, 1), c: r.pick(STAR_COLORS) });
   }
   const farTiles = new Map(); // band -> canvas
   function farTile(band) {
@@ -98,71 +155,85 @@ export function createBackground(o) {
 
   // ---- planet ----
   let planet = null;
-  if (o.planet !== false && rnd() < 0.55) {
+  if (o.planet !== false && rnd() < 0.75) {
     const r = makeRand(seed ^ 0x9e3779b9);
     const radius = r.range(320, 560);
     const corner = r.int(0, 3);
     planet = {
       x: (corner & 1 ? 0.9 : 0.1) * world.w + r.range(-150, 150),
       y: (corner & 2 ? 0.88 : 0.12) * world.h + r.range(-100, 100),
-      radius, gas: r() < 0.6, ring: r() < 0.4, lightA: r.range(0, TAU),
+      radius, gas: r() < 0.6, ring: r() < 0.6, lightA: r.range(-2.7, -0.5), lightZ: r.range(0.35, 0.65),
+      ringAngle: r.range(-0.55, 0.4), moon: r() < 0.65, moonAngle: r.range(-1.8, 1.8), moonCanvas: null,
       hue: r.pick(['#4a6cb0', '#b07a4a', '#7a4ab0', '#4aa890', '#b04a5a', '#6a7090']),
-      canvas: null,
+      canvas: null, toneCanvas: null, toneMode: 0,
     };
   }
   function buildPlanet(p) {
-    const S = 1024, R = S * 0.4, cx = S / 2, cy = S / 2;
-    const cv = makeCanvas(S, S);
-    const g = cv.getContext('2d');
-    const r = makeRand(seed ^ 0x77);
-    // atmosphere glow
-    const atm = g.createRadialGradient(cx, cy, R * 0.9, cx, cy, R * 1.22);
-    atm.addColorStop(0, rgba(p.hue, 0.5)); atm.addColorStop(1, rgba(p.hue, 0));
-    g.fillStyle = atm; g.beginPath(); g.arc(cx, cy, R * 1.22, 0, TAU); g.fill();
-    // body
-    g.save(); g.beginPath(); g.arc(cx, cy, R, 0, TAU); g.clip();
-    // soft antialiased limb: drawn below everything inside the clip
-    g.fillStyle = '#03040a'; g.fillRect(0, 0, S, S);
-    const lx = cx + Math.cos(p.lightA) * R * 0.6, ly = cy + Math.sin(p.lightA) * R * 0.6;
-    const body = g.createRadialGradient(lx, ly, R * 0.1, cx, cy, R * 1.05);
-    body.addColorStop(0, mix(p.hue, '#ffffff', 0.15)); body.addColorStop(0.45, mix(p.hue, '#000000', 0.25)); body.addColorStop(0.85, mix(p.hue, '#000000', 0.75)); body.addColorStop(1, '#03040a');
-    g.fillStyle = body; g.fillRect(0, 0, S, S);
-    if (p.gas) {
-      g.globalAlpha = 0.07;
-      for (let i = 0; i < 6; i++) {
-        const y = cy + (i - 2.5) * R * 0.3 + r.range(-10, 10);
-        g.strokeStyle = i % 2 ? '#ffffff' : '#000000'; g.lineWidth = r.range(8, 26);
-        g.beginPath(); g.moveTo(cx - R, y);
-        g.bezierCurveTo(cx - R * 0.4, y + r.range(-25, 25), cx + R * 0.4, y + r.range(-25, 25), cx + R, y + r.range(-10, 10));
-        g.stroke();
+    const cv = makeCanvas(PLANET_SIZE, PLANET_SIZE), g = cv.getContext('2d');
+    const cx = PLANET_SIZE / 2, cy = PLANET_SIZE / 2, R = PLANET_R;
+    const ringColor = mix(p.hue, '#d8c8a7', 0.7);
+    const drawRings = front => {
+      if (!p.ring) return;
+      g.save(); g.translate(cx, cy); g.rotate(p.ringAngle);
+      // Upper half is behind the globe; lower half crosses in front. Keeping
+      // the split in ring-local coordinates also works for inclined rings.
+      const from = front ? 0 : Math.PI, to = front ? Math.PI : TAU;
+      for (let i = 0; i < 30; i++) {
+        if (i === 17 || i === 18 || i === 25) continue; // Cassini-like divisions
+        const rr = R * (1.2 + i * 0.022);
+        const lit = (front ? 0.3 : 0.2) + hash01(seed, i, 84) * 0.2;
+        g.strokeStyle = rgba(ringColor, lit); g.lineWidth = R * 0.018;
+        g.beginPath(); g.ellipse(0, 0, rr, rr * 0.29, 0, from, to); g.stroke();
       }
-      g.globalAlpha = 1;
-    } else {
-      g.globalAlpha = 0.25;
-      for (let i = 0; i < 40; i++) {
-        const a = r.range(0, TAU), d = r.range(0, R * 0.95), rr = r.range(4, 22);
-        g.fillStyle = i % 3 ? '#000000' : '#ffffff';
-        g.beginPath(); g.arc(cx + Math.cos(a) * d, cy + Math.sin(a) * d, rr, 0, TAU); g.fill();
-      }
-      g.globalAlpha = 1;
-    }
-    // terminator shading
-    const term = g.createRadialGradient(lx, ly, R * 0.3, lx, ly, R * 1.9);
-    term.addColorStop(0, 'rgba(0,0,0,0)'); term.addColorStop(0.6, 'rgba(0,0,0,0.25)'); term.addColorStop(1, 'rgba(0,0,0,0.85)');
-    g.fillStyle = term; g.fillRect(0, 0, S, S);
-    g.restore();
-    g.strokeStyle = 'rgba(3,4,10,0.9)'; g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, R + 1, 0, TAU); g.stroke();
+      g.restore();
+    };
+    drawRings(false);
+    // Restrained atmosphere outside the opaque globe, not an all-over bloom.
+    const atm = g.createRadialGradient(cx, cy, R * 0.99, cx, cy, R * 1.085);
+    atm.addColorStop(0, rgba(mix(p.hue, '#9dcbff', 0.5), 0.48));
+    atm.addColorStop(0.32, rgba(p.hue, 0.16)); atm.addColorStop(1, rgba(p.hue, 0));
+    g.fillStyle = atm; g.beginPath(); g.arc(cx, cy, R * 1.085, 0, TAU); g.fill();
+    const globe = bakeGlobe(R, p, seed ^ 0x77);
+    g.drawImage(globe, cx - globe.width / 2, cy - globe.height / 2);
     if (p.ring) {
-      g.strokeStyle = rgba(mix(p.hue, '#ffffff', 0.5), 0.22); g.lineWidth = 16;
-      g.beginPath(); g.ellipse(cx, cy, R * 1.5, R * 0.42, p.lightA * 0.3, 0, TAU); g.stroke();
-      g.strokeStyle = rgba(mix(p.hue, '#ffffff', 0.7), 0.16); g.lineWidth = 4;
-      g.beginPath(); g.ellipse(cx, cy, R * 1.68, R * 0.47, p.lightA * 0.3, 0, TAU); g.stroke();
+      // Ring shadow conforms to the body: clipped and subtly offset from its
+      // front band. The visible rings themselves are never clipped to the disc.
+      g.save(); g.beginPath(); g.arc(cx, cy, R, 0, TAU); g.clip();
+      g.translate(cx, cy + R * 0.075); g.rotate(p.ringAngle);
+      g.strokeStyle = 'rgba(1,3,8,0.42)'; g.lineWidth = R * 0.055;
+      g.beginPath(); g.ellipse(0, 0, R * 1.44, R * 0.42, 0, 0, Math.PI); g.stroke();
+      g.restore();
     }
+    drawRings(true);
     return cv;
   }
 
+  function planetTexture(mode) {
+    if (!planet.canvas) planet.canvas = buildPlanet(planet);
+    if (!mode) return planet.canvas;
+    // Keep alpha unchanged: even a darkened night side must occlude stars.
+    // At most one tinted variant lives beside the original atlas.
+    if (!planet.toneCanvas || planet.toneMode !== mode) {
+      const cv = makeCanvas(PLANET_SIZE, PLANET_SIZE), g = cv.getContext('2d');
+      g.drawImage(planet.canvas, 0, 0);
+      g.globalCompositeOperation = 'source-atop';
+      g.fillStyle = mode === 2 ? 'rgba(0,0,0,0.78)' : 'rgba(0,0,0,0.22)';
+      g.fillRect(0, 0, PLANET_SIZE, PLANET_SIZE);
+      planet.toneCanvas = cv; planet.toneMode = mode;
+    }
+    return planet.toneCanvas;
+  }
+
   // ---- comet ----
-  let comet = null, nextComet = 0;
+  let comet = null, nextComet = 0, cometCanvas = null;
+  function buildComet() {
+    const cv = makeCanvas(256, 8), g = cv.getContext('2d');
+    const gr = g.createLinearGradient(0, 0, 256, 0);
+    gr.addColorStop(0, 'rgba(194,219,255,0)'); gr.addColorStop(1, 'rgba(224,238,255,0.85)');
+    g.strokeStyle = gr; g.lineWidth = 1.5; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(0, 4); g.lineTo(253, 4); g.stroke();
+    return cv;
+  }
   const cometRnd = makeRand(seed ^ 0xc0e7);
 
   // ---- vignette ----
@@ -221,42 +292,46 @@ export function createBackground(o) {
      * @param {CanvasRenderingContext2D} ctx
      * @param {object} cam camera
      * @param {number} now ms
-     * @param {{ grid?: boolean, quality?: number, reducedMotion?: boolean, highContrast?: boolean }} opts
+     * @param {{ grid?: boolean, quality?: number, reducedMotion?: boolean, reducedEffects?: boolean, highContrast?: boolean }} opts
      */
     draw(ctx, cam, now, opts = {}) {
       const z = cam.zoom;
+      const quiet = opts.reducedEffects || (opts.quality ?? 1) < 0.5;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = '#05070c';
       ctx.fillRect(cam.vx, cam.vy, cam.vw, cam.vh);
       // nebula
       if (!nebula) nebula = buildNebula();
-      drawTiled(ctx, nebula, NEB_T, 0.15, cam, opts.highContrast ? 0.25 : 1);
-      // planet (behind stars? no: stars are far; planet is between far and mid)
-      // far stars (cached tile, band by zoom)
+      drawTiled(ctx, nebula, NEB_T, 0.15, cam, opts.highContrast ? 0.13 : quiet ? 0.65 : 1);
+      // All stars lie behind the opaque planet; distant layer uses cached tiles.
       const band = z < 0.9 ? 0 : 1;
       drawTiled(ctx, farTile(band), STAR_T, 0.3, cam, opts.highContrast ? 0.25 : z < 0.5 ? 0.8 : 1);
+      // mid stars (direct, twinkle)
+      const starTime = opts.reducedMotion ? 0 : now;
+      if (!quiet && !opts.highContrast) drawStarsDirect(ctx, mid, 0.55, cam, starTime, z < 0.6 ? 0.9 : 1.1);
+      // near stars
+      if (!quiet && !opts.highContrast) drawStarsDirect(ctx, near, 0.85, cam, starTime, 1.2);
       if (planet) {
-        if (!planet.canvas) planet.canvas = buildPlanet(planet);
+        const texture = planetTexture(opts.highContrast ? 2 : quiet ? 1 : 0);
         // parallax 0.2, anchored so that at the world center the offset is zero
         const p = 0.2;
         const wx = planet.x - (cam.x - world.w / 2) * (1 - p);
         const wy = planet.y - (cam.y - world.h / 2) * (1 - p);
         const sx = cam.worldToScreenX(wx), sy = cam.worldToScreenY(wy);
-        const R = planet.radius * z * 1.25; // canvas radius includes atmosphere/rings (0.4*S body)
-        const S = R / 0.4;
+        const R = planet.radius * z;
+        const S = R * PLANET_SIZE / PLANET_R;
         if (sx + S / 2 > cam.vx - 50 && sx - S / 2 < cam.vx + cam.vw + 50 && sy + S / 2 > cam.vy - 50 && sy - S / 2 < cam.vy + cam.vh + 50) {
-          ctx.globalAlpha = opts.highContrast ? 0.25 : 1;
-          ctx.drawImage(planet.canvas, sx - S / 2, sy - S / 2, S, S);
-          ctx.globalAlpha = 1;
+          ctx.drawImage(texture, sx - S / 2, sy - S / 2, S, S);
+        }
+        if (planet.moon && !quiet && !opts.highContrast) {
+          if (!planet.moonCanvas) planet.moonCanvas = bakeGlobe(96, { ...planet, hue: '#989baa' }, seed ^ 0x919, true);
+          const mx = sx + Math.cos(planet.moonAngle) * R * 2.4, my = sy + Math.sin(planet.moonAngle) * R * 1.65;
+          const msize = R * 0.34;
+          ctx.drawImage(planet.moonCanvas, mx - msize / 2, my - msize / 2, msize, msize);
         }
       }
-      // mid stars (direct, twinkle)
-      const starTime = opts.reducedMotion ? 0 : now;
-      if ((opts.quality ?? 1) > 0.3 && !opts.highContrast) drawStarsDirect(ctx, mid, 0.55, cam, starTime, z < 0.6 ? 0.9 : 1.1);
-      // near stars
-      if (!opts.highContrast) drawStarsDirect(ctx, near, 0.85, cam, starTime, 1.2);
       // comet
-      if (!opts.reducedMotion && !opts.highContrast && (opts.quality ?? 1) > 0.5) {
+      if (!quiet && !opts.reducedMotion && !opts.highContrast && (opts.quality ?? 1) > 0.5) {
         if (now >= nextComet && !comet) {
           const r = cometRnd;
           const vr = cam.visibleRect(200);
@@ -268,13 +343,13 @@ export function createBackground(o) {
           if (u >= 1) comet = null;
           else {
             const dx = Math.cos(comet.a), dy = Math.sin(comet.a);
-            const head = { x: comet.x + dx * comet.len * u, y: comet.y + dy * comet.len * u };
-            const tail = { x: head.x - dx * comet.len * 0.35, y: head.y - dy * comet.len * 0.35 };
-            const hx = cam.worldToScreenX(head.x), hy = cam.worldToScreenY(head.y), tx = cam.worldToScreenX(tail.x), ty = cam.worldToScreenY(tail.y);
-            const gr = ctx.createLinearGradient(tx, ty, hx, hy);
-            gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(1, `rgba(255,255,255,${0.8 * Math.sin(u * Math.PI)})`);
-            ctx.strokeStyle = gr; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
-            ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.stroke();
+            const headX = comet.x + dx * comet.len * u, headY = comet.y + dy * comet.len * u;
+            const hx = cam.worldToScreenX(headX), hy = cam.worldToScreenY(headY);
+            if (!cometCanvas) cometCanvas = buildComet();
+            ctx.save(); ctx.translate(hx, hy); ctx.rotate(comet.a);
+            ctx.globalAlpha = 0.8 * Math.sin(u * Math.PI);
+            ctx.drawImage(cometCanvas, -comet.len * 0.35 * z, -4, comet.len * 0.35 * z, 8);
+            ctx.restore();
           }
         }
       }
@@ -324,6 +399,6 @@ export function createBackground(o) {
       }
     },
 
-    dispose() { nebula = null; farTiles.clear(); vignette = null; if (planet) planet.canvas = null; },
+    dispose() { nebula = null; farTiles.clear(); vignette = null; cometCanvas = null; comet = null; if (planet) { planet.canvas = null; planet.moonCanvas = null; planet.toneCanvas = null; } },
   };
 }

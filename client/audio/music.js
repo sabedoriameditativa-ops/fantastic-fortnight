@@ -1,10 +1,5 @@
-// Generative soundtrack for Frota Estelar: a lookahead sequencer (Chris
-// Wilson style) with hand-written D minor progressions and themes:
-//   menu     72 BPM ambient pad + sparse arp + sub drone
-//   builder  96 BPM pad, bass, soft kick/hat, deterministic arp, faction fills
-//   battle  128 BPM six intensity layers L0..L5 (hysteresis), progression B at
-//            high intensity, lead phrases and faction motifs
-//   victory / defeat   stingers followed by a calm (major) / dark loop
+// Original procedural soundtrack: three arrangements with written phrases,
+// distinct harmony, instruments and grooves, and a 16-bar musical form.
 // Scenes crossfade on bar boundaries of the outgoing theme. Everything is
 // scheduled on the injected AudioContext; the only timer is the engine's
 // 25 ms tick calling `scheduler()` (injected by index.js, mockable in tests).
@@ -22,6 +17,22 @@ export const STEPS_PER_BAR = 16;
 export const LAYER_ON = [0, 0.1, 0.25, 0.45, 0.65, 0.85];
 export const HYSTERESIS = 0.15;
 export const PROG_B_LAYER = 4;
+
+/** Pure metadata: safe to import from settings/storage without starting audio. */
+export const MUSIC_THEMES = Object.freeze({
+  adventure: Object.freeze({ id: 'adventure', label: 'Aventura estelar', description: 'Melodias heroicas, baixo pulsante e bateria com viradas.' }),
+  arcade: Object.freeze({ id: 'arcade', label: 'Órbita arcade', description: 'Sintetizadores de pulso, arpejos rápidos e ritmo sincopado.' }),
+  ambient: Object.freeze({ id: 'ambient', label: 'Nebulosa', description: 'Acordes abertos, sinos espaciais e percussão espaçada.' }),
+});
+export const SOUND_PROFILES = Object.freeze({
+  balanced: Object.freeze({ id: 'balanced', label: 'Equilibrado', description: 'Música e combate em equilíbrio.', music: 1, sfx: 1, reverb: 0.18, threshold: -18, ratio: 4 }),
+  cinematic: Object.freeze({ id: 'cinematic', label: 'Cinemático', description: 'Trilha mais presente, espaço e contraste entre os impactos.', music: 1.06, sfx: 0.94, reverb: 0.22, threshold: -16, ratio: 3 }),
+  tactical: Object.freeze({ id: 'tactical', label: 'Tático', description: 'Música discreta e efeitos mais secos para ler o combate.', music: 0.65, sfx: 1, reverb: 0.07, threshold: -20, ratio: 5 }),
+});
+export const DEFAULT_MUSIC_THEME = 'adventure';
+export const DEFAULT_SOUND_PROFILE = 'balanced';
+export const normalizeMusicTheme = value => Object.hasOwn(MUSIC_THEMES, value) ? value : DEFAULT_MUSIC_THEME;
+export const normalizeSoundProfile = value => Object.hasOwn(SOUND_PROFILES, value) ? value : DEFAULT_SOUND_PROFILE;
 
 // Chords (MIDI triads) — D natural minor unless noted.
 const Dm = [50, 57, 62, 65], Bb = [46, 53, 58, 62], F = [41, 48, 53, 57], C = [48, 55, 60, 64];
@@ -54,10 +65,34 @@ export const MOTIFS = Object.freeze({
   vorrax: { notes: [62, 63, 62, 65, 63, 62, 60, 62], timbre: 'vorrax' },
   lumen: { notes: [62, 69, 74, 81, 78, 74, 69, 62], timbre: 'lumen' },
   ferrix: { notes: [62, 62, 62, 65, 62, 62, 72, 62], timbre: 'ferrix' },
+  astral: { notes: [62, 69, 76, 74, 65, 72, 69, 62], timbre: 'astral' },
 });
 
 const THEME_BPM = { menu: 72, builder: 96, battle: 128, victory: 84, defeat: 60 };
 export const THEME_BPM_TABLE = Object.freeze({ ...THEME_BPM });
+
+const ARRANGEMENTS = {
+  adventure: { bpm: THEME_BPM, transpose: 0, swing: 0, arp: 'triangle', lead: 'terran', pad: 'sawtooth', cutoff: 1500,
+    progression: [Dm, Bb, F, C], bridge: [[43, 50, 58, 62], Dm, A7, Dm],
+    bass: [0, 3, 6, 8, 12, 14], kicks: [0, 8, 10], hats: [2, 6, 10, 14],
+    melody: [0, 2, 1, 3, 2, 0, 1, 2], answer: [3, 2, 1, 2, 0, 1, 2, 0] },
+  arcade: { bpm: { menu: 104, builder: 116, battle: 144, victory: 104, defeat: 72 }, transpose: 2, swing: 0.08, arp: 'square', lead: 'pulse', pad: 'triangle', cutoff: 2400,
+    progression: [[52, 59, 64, 67], [48, 55, 60, 64], [55, 59, 62, 67], [50, 57, 62, 66]],
+    bridge: [[45, 52, 61, 64], [48, 55, 60, 64], [47, 54, 59, 62], [52, 59, 64, 67]],
+    bass: [0, 3, 6, 8, 11, 14], kicks: [0, 6, 8, 11], hats: [0, 2, 6, 8, 10, 14],
+    melody: [0, 2, 3, 2, 1, 3, 2, 0], answer: [2, 3, 2, 0, 3, 1, 2, 0] },
+  ambient: { bpm: { menu: 60, builder: 72, battle: 92, victory: 72, defeat: 50 }, transpose: 5, swing: 0, arp: 'sine', lead: 'astral', pad: 'triangle', cutoff: 950,
+    progression: [[43, 50, 58, 69], [51, 58, 62, 65], [48, 55, 58, 62], [50, 57, 65, 69]],
+    bridge: [[46, 53, 60, 65], [48, 55, 58, 62], [43, 50, 58, 69], [50, 57, 62, 69]],
+    bass: [0, 7, 10], kicks: [0], hats: [6, 14],
+    melody: [0, 2, 3, 1, 2, 0, 3, 2], answer: [3, 1, 2, 0, 2, 3, 1, 0] },
+};
+
+/** A quiet opening, groove, lift, two-bar breakdown and a returning answer. */
+export function sectionAtBar(bar) {
+  const position = Math.floor(Math.max(0, bar)) % 16;
+  return position < 4 ? 'opening' : position < 8 ? 'groove' : position < 12 ? 'lift' : position < 14 ? 'break' : 'return';
+}
 
 /**
  * Battle intensity from the HUD battle state (docs/design/audio.md §3.4).
@@ -102,11 +137,17 @@ export function createMusicEngine(o) {
   let motifPending = false;
   let stepHook = null;
   let notesScheduled = 0;
+  let musicTheme = normalizeMusicTheme(o.musicTheme);
+  let schedulingTheme = null;
+  const activeVoices = new Set();
+  let peakVoices = 0;
 
   // ---- note helpers -------------------------------------------------------
 
   function voice(t, dest) {
-    return createVoiceContext(ctx, { t, out: dest, gain: 1, size: 0, faction: null, rnd: rngAsRnd(), noise: bank, reverbIn, kind: 'music' });
+    const v = createVoiceContext(ctx, { t, out: dest, gain: 1, size: 0, faction: null, rnd: rngAsRnd(), noise: bank, reverbIn, kind: 'music' });
+    v.theme = schedulingTheme;
+    return v;
   }
 
   function rngAsRnd() {
@@ -116,16 +157,22 @@ export function createMusicEngine(o) {
     return r;
   }
 
-  function done(v) { finalizeVoice(v); notesScheduled++; }
+  function done(v) {
+    activeVoices.add(v);
+    peakVoices = Math.max(peakVoices, activeVoices.size);
+    finalizeVoice(v, () => activeVoices.delete(v));
+    notesScheduled++;
+  }
 
   /** Detuned saws through a lowpass; slow attack. Optional cutoff LFO. */
   function pad(t, midi, dur, dest, { cutoff = 900, gain = 0.16, lfoHz = 0, lfoDepth = 0, type = 'sawtooth', detune = 7, send = 0 } = {}) {
     const v = voice(t, dest);
-    const g = env(v, t, { a: Math.min(1.5, dur * 0.35), d: dur * 0.2, s: 0.7, hold: Math.max(0, dur * 0.45), r: 1.5, peak: gain }, dest);
+    // Chord density changes the voicing, never its nominal loudness.
+    const g = env(v, t, { a: Math.min(1.1, dur * 0.3), d: dur * 0.2, s: 0.7, hold: Math.max(0, dur * 0.45), r: 1.1, peak: gain / Math.sqrt(Math.max(1, midi.length)) }, dest);
     const f = lp(v, cutoff, 0.8, g);
     if (lfoHz > 0) { const l = osc(v, 'sine', lfoHz, t, null); const lg = gainNode(v, lfoDepth, null); l.connect(lg); lg.connect(f.frequency); play(v, l, t, t + dur + 2); }
     for (const m of midi) {
-      for (const c of [-detune, 0, detune]) {
+      for (const c of [-detune, detune]) {
         const x = osc(v, type, mtof(m), t, f); x.detune.value = c; play(v, x, t, t + dur + 2);
       }
     }
@@ -133,22 +180,23 @@ export function createMusicEngine(o) {
     done(v);
   }
 
-  function bass(t, midi, dur, dest, { gain = 0.35 } = {}) {
+  function bass(t, midi, dur, dest, { gain = 0.28, type = 'sine' } = {}) {
     const v = voice(t, dest);
     const g = env(v, t, { a: 0.005, d: dur * 0.5, s: 0.3, r: 0.08, peak: gain }, dest);
     const f = lp(v, 400, 1.2, g); pitchSweep(f.frequency, 900, 300, t, t + 0.15);
-    play(v, osc(v, 'sine', mtof(midi), t, f), t, t + dur);
-    const qg = gainNode(v, 0.25, f);
+    play(v, osc(v, type, mtof(midi), t, f), t, t + dur);
+    const qg = gainNode(v, 0.16, f);
     play(v, osc(v, 'square', mtof(midi + 12), t, qg), t, t + dur);
     done(v);
   }
 
-  function arp(t, midi, dest, { gain = 0.14, cutoff = 2500 } = {}) {
+  function arp(t, midi, dest, { gain = 0.1, cutoff = 2500, type = 'triangle' } = {}) {
     const v = voice(t, dest);
     const g = env(v, t, { a: 0.003, d: 0.18, r: 0.12, peak: gain }, dest);
     const f = lp(v, cutoff, 2, g);
-    play(v, osc(v, 'triangle', mtof(midi), t, f), t, t + 0.4);
-    play(v, osc(v, 'sine', mtof(midi + 12), t, f), t, t + 0.4);
+    play(v, osc(v, type, mtof(midi), t, f), t, t + 0.4);
+    const overtone = gainNode(v, type === 'square' ? 0.12 : 0.35, f);
+    play(v, osc(v, 'sine', mtof(midi + 12), t, overtone), t, t + 0.4);
     done(v);
   }
 
@@ -166,6 +214,20 @@ export function createMusicEngine(o) {
       const g3 = gainNode(v, 0.25, g); const o3 = osc(v, 'sine', f0 * 2, t, g3);
       play(v, o1, t, t + dur + 0.2); play(v, o2, t, t + dur + 0.2); play(v, o3, t, t + dur + 0.2);
       if (reverbIn) { const sg = gainNode(v, 0.7, reverbIn); g.connect(sg); }
+    } else if (timbre === 'astral') {
+      // A rounded bell with a quiet, inharmonic upper partial: distinct from
+      // Lúmen's harmonic stack, with no harsh ring-modulation aliasing.
+      const body = osc(v, 'sine', f0, t, g);
+      const shimmer = gainNode(v, 0.22, g);
+      const overtone = osc(v, 'sine', f0 * 2.756, t, shimmer);
+      overtone.detune.setValueAtTime(-5, t);
+      overtone.detune.linearRampToValueAtTime(8, t + dur);
+      play(v, body, t, t + dur + 0.2); play(v, overtone, t, t + dur + 0.2);
+    } else if (timbre === 'pulse') {
+      const f = lp(v, 2200, 0.65, g);
+      play(v, osc(v, 'square', f0, t, f), t, t + dur + 0.15);
+      const octave = gainNode(v, 0.16, f);
+      play(v, osc(v, 'triangle', f0 * 2, t, octave), t, t + dur + 0.15);
     } else if (timbre === 'ferrix') {
       const sh = stepShaper(v, g, 12);
       const o = osc(v, 'square', f0, t, sh);
@@ -215,17 +277,6 @@ export function createMusicEngine(o) {
     done(v);
   }
 
-  function drone(t, hz, dest, { gain = 0.12, type = 'sine' } = {}) {
-    // persistent sub drone, returned so the theme can stop it
-    const v = voice(t, dest);
-    const g = gainNode(v, 0, dest);
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain, t + 3);
-    const o = osc(v, type, hz, t, g);
-    o.start(t);
-    v.sources.push(o);
-    return { v, o, g };
-  }
-
   // ---- theme instances ----------------------------------------------------
 
   /** Feedback delay (dotted 8th) shared by a theme's arp. Returns { input, nodes }. */
@@ -242,23 +293,22 @@ export function createMusicEngine(o) {
   }
 
   function makeTheme(name, startAt) {
-    const bpm = THEME_BPM[name] || 100;
+    const arrangement = ARRANGEMENTS[musicTheme];
+    const bpm = arrangement.bpm[name] || 100;
     const bus = ctx.createGain();
     bus.gain.value = 0;
     bus.connect(out);
     const th = {
-      name, bpm, bus,
+      name, bpm, bus, musicTheme, arrangement, section: 'opening',
       stepDur: 60 / bpm / 4,
       step: 0,
       nextNoteTime: startAt,
       startAt,
       stopAt: null,
       nodes: [bus],
-      drones: [],
       layers: null,
       prog: null,
       phrase: null,
-      fillUntil: -1,
       onStep: null,
       /** Time of the next bar boundary at or after the next unscheduled step. */
       nextBarTime() {
@@ -270,7 +320,10 @@ export function createMusicEngine(o) {
         return this.nextNoteTime + rem * this.stepDur;
       },
       dispose() {
-        for (const d of this.drones) { try { d.o.stop(ctx.currentTime); } catch { /* ignore */ } try { d.v.cleanup ? d.v.cleanup() : d.v.nodes.forEach((n) => n.disconnect()); } catch { /* ignore */ } }
+        for (const v of [...activeVoices]) if (v.theme === this) {
+          for (const source of v.sources) { try { source.stop(ctx.currentTime); } catch { /* already stopped */ } }
+          v.cleanup();
+        }
         for (const n of this.nodes) { try { n.disconnect(); } catch { /* ignore */ } }
         this.nodes.length = 0;
       },
@@ -279,136 +332,157 @@ export function createMusicEngine(o) {
     return th;
   }
 
+  const upper = (note, octave = 60) => octave + ((note % 12 + 12) % 12);
+
+  function phrase(th, chord, bar, isBattle) {
+    const a = th.arrangement;
+    const motif = factionHint && MOTIFS[factionHint];
+    const useMotif = motif && (motifPending || bar % 4 === 0);
+    if (useMotif) {
+      motifPending = false;
+      return { notes: motif.notes.map(n => n + a.transpose), timbre: motif.timbre };
+    }
+    const order = bar % 2 ? a.answer : a.melody;
+    return { notes: order.map(index => upper(chord[index % chord.length], isBattle ? 72 : 60)),
+      timbre: th.musicTheme === 'adventure' && motif ? motif.timbre : a.lead };
+  }
+
+  function prepareBar(th, step, battleScene = false) {
+    const bar = Math.floor(step / STEPS_PER_BAR);
+    th.section = sectionAtBar(bar);
+    if (battleScene && step % 64 === 0) th.prog = progB ? 'B' : 'A';
+    const alternate = th.section === 'lift' || (battleScene && th.prog === 'B');
+    const progression = alternate ? th.arrangement.bridge : th.arrangement.progression;
+    const chord = progression[bar % progression.length];
+    if (step % 16 === 0) th.phrase = phrase(th, chord, bar, battleScene);
+    return { bar, chord, s16: step % 16, breakBar: th.section === 'break', lift: th.section === 'lift' || th.section === 'return' };
+  }
+
+  function melodicNote(th, step, time, dest, gain, sparse = false) {
+    const index = (step % 16) / 2;
+    if (!Number.isInteger(index) || !th.phrase || index >= 7 || (sparse && index % 2)) return;
+    // The final eighth is a rest: calls and answers breathe between bars.
+    lead(time, th.phrase.notes[index], th.stepDur * (sparse ? 2.9 : 1.45), dest,
+      { gain, timbre: th.phrase.timbre });
+  }
+
+  function factionFill(th, s16, time, dest) {
+    if (s16 !== 14) return;
+    if (factionHint === 'vorrax') tom(time, 45 + th.arrangement.transpose, dest, { gain: 0.18 });
+    else if (factionHint === 'ferrix') arp(time, 74 + th.arrangement.transpose, dest, { type: 'square', gain: 0.07, cutoff: 1600 });
+    else if (factionHint === 'lumen' || factionHint === 'astral') lead(time, 81 + th.arrangement.transpose, 3 * th.stepDur, dest, { timbre: factionHint, gain: 0.07 });
+    else tom(time, 43 + th.arrangement.transpose, dest, { gain: 0.17 });
+  }
+
   const BUILDERS = {
     menu(th) {
-      const d = makeDelay(th.bpm, th.bus); th.nodes.push(...d.nodes);
-      th.drones.push(drone(th.startAt, mtof(38), th.bus, { gain: 0.12 }));
+      const a = th.arrangement, airy = th.musicTheme === 'ambient';
+      const delay = makeDelay(th.bpm, th.bus); th.nodes.push(...delay.nodes);
       th.onStep = (t, step, time) => {
-        const prog = PROGRESSIONS.menu;
-        if (step % 32 === 0) {
-          const chord = prog[(step / 32) % prog.length].slice();
-          if (rng.next() < 0.3) chord.push(chord[0] + 26);   // open 9th
-          pad(time, chord, 32 * t.stepDur, t.bus, { cutoff: 700, gain: 0.15, lfoHz: 0.05, lfoDepth: 200, send: 0.25 });
+        const { bar, chord, s16, breakBar, lift } = prepareBar(t, step);
+        if (s16 === 0) {
+          pad(time, chord, 16 * t.stepDur, t.bus, { cutoff: a.cutoff * 0.65, gain: 0.13, type: a.pad, detune: airy ? 4 : 7, send: 0.14 });
+          bass(time, chord[0] - 12, 3 * t.stepDur, t.bus, { gain: 0.13, type: airy ? 'sine' : 'triangle' });
         }
-        if (rng.next() < 0.22) arp(time, PENTA[5 + Math.floor(rng.next() * 6)], d.input, { gain: 0.08, cutoff: 2200 });
+        if (!breakBar && (airy ? s16 % 4 === 2 : s16 % 2 === 1)) {
+          const note = upper(chord[(Math.floor(s16 / 2) + bar) % chord.length], 72);
+          arp(time, note, delay.input, { type: a.arp, gain: lift ? 0.065 : 0.045, cutoff: a.cutoff });
+        }
+        if (bar % 2 === 0 || lift) melodicNote(t, step, time, t.bus, airy ? 0.07 : 0.085, airy);
+        if (!airy && !breakBar && bar >= 2 && a.kicks.includes(s16)) kick(time, t.bus, { gain: 0.2 });
+        if (!airy && !breakBar && bar >= 4 && a.hats.includes(s16)) hat(time, t.bus, false, { gain: 0.045 });
       };
     },
     builder(th) {
-      const d = makeDelay(th.bpm, th.bus); th.nodes.push(...d.nodes);
-      const ARP = [0, 2, 4, 2, 7, 4, 2, 0];
+      const a = th.arrangement, airy = th.musicTheme === 'ambient';
+      const delay = makeDelay(th.bpm, th.bus); th.nodes.push(...delay.nodes);
       th.onStep = (t, step, time) => {
-        const prog = PROGRESSIONS.builder;
-        const bar = Math.floor(step / STEPS_PER_BAR);
-        const chord = prog[bar % prog.length];
-        const s16 = step % STEPS_PER_BAR;
-        if (s16 === 0) pad(time, chord, STEPS_PER_BAR * t.stepDur, t.bus, { cutoff: 1400, gain: 0.14, send: 0.15 });
-        if (step % 2 === 0) {
-          const e8 = (step / 2) % 8;
-          if ([0, 3, 6].includes(e8)) bass(time, chord[0] + (e8 === 6 ? 12 : 0), 2 * t.stepDur, t.bus, { gain: 0.3 });
-          if (e8 % 2 === 1) hat(time, t.bus, false, { gain: 0.08 });
-          if (s16 === 0 || s16 === 8) kick(time, t.bus, { gain: 0.4 });
-        }
-        if (motifPending && s16 === 0 && factionHint && MOTIFS[factionHint]) {
-          const m = MOTIFS[factionHint];
-          m.notes.forEach((n, i) => lead(time + i * 2 * t.stepDur, n + 12, 2 * t.stepDur * 0.9, t.bus, { gain: 0.16, timbre: m.timbre }));
-          motifPending = false;
-          t.fillUntil = step + STEPS_PER_BAR;
-        }
-        if (!(t.fillUntil > step)) arp(time, PENTA[(ARP[s16 % 8] % PENTA.length)] + (s16 >= 8 ? 12 : 0), d.input, { gain: 0.1, cutoff: 2000 });
+        const { bar, chord, s16, breakBar, lift } = prepareBar(t, step);
+        if (s16 === 0) pad(time, chord, 16 * t.stepDur, t.bus, { cutoff: a.cutoff, gain: 0.12, type: a.pad, send: 0.12 });
+        if (a.bass.includes(s16) && (!breakBar || s16 === 0)) bass(time, chord[0] - (s16 >= 12 ? 0 : 12), 1.8 * t.stepDur, t.bus, { gain: 0.22, type: th.musicTheme === 'arcade' ? 'square' : 'sine' });
+        if (!breakBar && a.kicks.includes(s16)) kick(time, t.bus, { gain: airy ? 0.25 : 0.38 });
+        if (!breakBar && a.hats.includes(s16)) hat(time, t.bus, false, { gain: 0.06 });
+        if (!airy && !breakBar && (s16 === 4 || s16 === 12) && bar % 4 !== 0) snare(time, t.bus, { gain: 0.17 });
+        if (!breakBar && s16 % (airy ? 4 : 2) === 1) arp(time, upper(chord[(s16 + bar) % chord.length], 72), delay.input, { type: a.arp, gain: 0.055, cutoff: a.cutoff });
+        if (bar % 2 === 0 || lift || breakBar) melodicNote(t, step, time, t.bus, 0.11, airy || breakBar);
+        if (bar % 4 === 3 && !breakBar) factionFill(t, s16, time, t.bus);
       };
     },
     battle(th) {
+      const a = th.arrangement, airy = th.musicTheme === 'ambient';
       th.layers = [];
       for (let k = 0; k < 6; k++) {
-        const g = ctx.createGain(); g.gain.value = k === 0 ? 1 : 0; g.connect(th.bus); th.layers.push(g); th.nodes.push(g);
+        const gain = ctx.createGain(); gain.gain.value = layerOn[k] ? 1 : 0; gain.connect(th.bus); th.layers.push(gain); th.nodes.push(gain);
       }
-      const d = makeDelay(th.bpm, th.layers[3]); th.nodes.push(...d.nodes);
-      th.prog = 'A';
-      th.drones.push(drone(th.startAt, mtof(38), th.layers[0], { gain: 0.1 }));
       const L = th.layers;
+      const delay = makeDelay(th.bpm, L[3]); th.nodes.push(...delay.nodes);
+      th.prog = 'A';
       th.onStep = (t, step, time) => {
-        const s16 = step % STEPS_PER_BAR;
-        const bar = Math.floor(step / STEPS_PER_BAR);
-        if (step % 64 === 0) t.prog = progB ? 'B' : 'A';
-        const prog = t.prog === 'B' ? PROGRESSIONS.battleB : PROGRESSIONS.battleA;
-        const chord = prog[bar % prog.length];
+        const { bar, chord, s16, breakBar, lift } = prepareBar(t, step, true);
         const root = chord[0];
-        const now = ctx.currentTime;
-        const active = (k) => layerOn[k] || now - layerOffAt[k] < 3;
-        // L0 pad
-        if (s16 === 0) pad(time, chord, STEPS_PER_BAR * t.stepDur, L[0], { cutoff: 900 + 900 * intensity, gain: 0.14, send: 0.2 });
-        // L1 bass
-        if (active(1)) {
-          if (step % 2 === 0 && [0, 2, 4, 6, 7].includes((step / 2) % 8)) bass(time, root, 2 * t.stepDur, L[1]);
-          if (s16 === 15) bass(time, root - 2, t.stepDur, L[1], { gain: 0.25 });
+        const active = k => layerOn[k] || (layerOffAt[k] > 0 && ctx.currentTime - layerOffAt[k] < 3);
+        if (s16 === 0) pad(time, chord, 16 * t.stepDur, L[0], { cutoff: a.cutoff * (0.6 + intensity * 0.4), gain: 0.12, type: a.pad, send: 0.08 });
+        // Early combat has a recognizable pulse and theme before casualty-driven
+        // intensity rises; escalation adds counterpoint instead of just volume.
+        if (s16 === 0 || (!airy && s16 === 8)) kick(time, L[0], { gain: 0.17 });
+        if (!active(4) && (bar % 2 === 0 || breakBar)) melodicNote(t, step, time, L[0], 0.065, true);
+        if (active(1) && a.bass.includes(s16) && (!breakBar || s16 === 0)) bass(time, root - 12 + (s16 === 14 ? 12 : 0), t.stepDur * 1.7, L[1], { gain: 0.25, type: th.musicTheme === 'arcade' ? 'square' : 'sine' });
+        if (active(2) && !breakBar) {
+          if (a.kicks.includes(s16)) kick(time, L[2], { gain: 0.43 });
+          if (a.hats.includes(s16)) hat(time, L[2], lift && s16 === 14, { gain: 0.085 });
         }
-        // L2 kick + hat
-        if (active(2)) {
-          if (s16 === 0 || s16 === 8) kick(time, L[2]);
-          else if (s16 === 6 && intensity >= 0.5) kick(time, L[2], { gain: 0.5 });
-          hat(time, L[2], s16 === 14, { gain: 0.1 });
+        if (active(3) && !breakBar) {
+          if (s16 === 4 || s16 === 12) snare(time, L[3], { gain: airy ? 0.19 : 0.28 });
+          if (s16 % (airy ? 4 : 2) === 1) arp(time, upper(chord[(Math.floor(s16 / 2) + bar) % chord.length], 72), delay.input, { type: a.arp, gain: 0.075, cutoff: a.cutoff });
         }
-        // L3 snare + arp
-        if (active(3)) {
-          if (s16 === 4 || s16 === 12) snare(time, L[3]);
-          const pat = [0, 4, 7, 4, 0, 4, 9, 4];
-          arp(time, root + 24 + pat[s16 % 8], d.input, { gain: 0.11, cutoff: 2500 });
+        if (active(4)) melodicNote(t, step, time, L[4], 0.12, airy || breakBar);
+        if (active(5) && !breakBar && bar % 4 === 3) {
+          if ([10, 12, 14].includes(s16)) tom(time, 50 - (s16 - 10) * 2 + a.transpose, L[5], { gain: 0.27 });
+          if (s16 === 15) kick(time, L[5], { gain: 0.3 });
         }
-        // L4 lead phrases (2 bars, 8ths); faction motif every 8 bars
-        if (active(4) && step % 2 === 0) {
-          if (step % 32 === 0) {
-            const useMotif = bar % 8 === 0 && factionHint && MOTIFS[factionHint];
-            t.phrase = useMotif ? { notes: MOTIFS[factionHint].notes, timbre: MOTIFS[factionHint].timbre } : { notes: rng.pick(LEAD_PHRASES), timbre: 'default' };
-          }
-          if (t.phrase) {
-            const idx = (step % 32) / 2;
-            if (idx < t.phrase.notes.length) lead(time, t.phrase.notes[idx] + 12, 2 * t.stepDur * 0.85, L[4], { gain: 0.15, timbre: t.phrase.timbre });
-          }
-        }
-        // L5 toms + double kick
-        if (active(5)) {
-          if (s16 === 10) tom(time, 50, L[5]); else if (s16 === 12) tom(time, 45, L[5]); else if (s16 === 14) tom(time, 43, L[5]);
-          if (step % 2 === 0 && s16 !== 0 && s16 !== 8) kick(time, L[5], { gain: 0.55 });
-        }
+        if (bar % 4 === 3 && !breakBar) factionFill(t, s16, time, L[0]);
       };
     },
     victory(th) {
-      const d = makeDelay(th.bpm, th.bus); th.nodes.push(...d.nodes);
+      const a = th.arrangement;
+      const delay = makeDelay(th.bpm, th.bus); th.nodes.push(...delay.nodes);
       th.onStep = (t, step, time) => {
-        if (step === 0) stingerVictory(time, t.bus);
-        const bar = Math.floor(step / STEPS_PER_BAR);
-        if (bar >= 2) {
-          const prog = PROGRESSIONS.victory;
-          if (step % 32 === 0) pad(time, prog[((bar - 2) / 2) % prog.length], 32 * t.stepDur, t.bus, { cutoff: 1200, gain: 0.12, send: 0.3 });
-          if (rng.next() < 0.18) arp(time, [62, 66, 69, 74, 78, 81][Math.floor(rng.next() * 6)] + 12, d.input, { gain: 0.07 });
-        }
+        if (step === 0) stingerVictory(time, t.bus, a.transpose, a.lead);
+        const bar = Math.floor(step / 16), s16 = step % 16;
+        t.section = sectionAtBar(bar);
+        if (bar < 2) return;
+        const chord = PROGRESSIONS.victory[(bar - 2) % 4].map(n => n + a.transpose);
+        if (s16 === 0) { pad(time, chord, 16 * t.stepDur, t.bus, { cutoff: a.cutoff, gain: 0.11, type: a.pad, send: 0.15 }); t.phrase = phrase(t, chord, bar, false); }
+        melodicNote(t, step, time, t.bus, 0.07, true);
+        if (s16 % 4 === 2) arp(time, upper(chord[(s16 / 2) % chord.length], 72), delay.input, { type: a.arp, gain: 0.05, cutoff: a.cutoff });
       };
     },
     defeat(th) {
-      th.drones.push(drone(th.startAt + 1.5, mtof(38), th.bus, { gain: 0.12 }));
+      const a = th.arrangement;
       th.onStep = (t, step, time) => {
-        if (step === 0) stingerDefeat(time, t.bus);
-        const bar = Math.floor(step / STEPS_PER_BAR);
-        if (bar >= 1 && step % 32 === 16) {
-          const prog = PROGRESSIONS.defeat;
-          pad(time, prog[Math.floor(bar / 2) % prog.length], 32 * t.stepDur, t.bus, { cutoff: 500, gain: 0.12, type: 'triangle', send: 0.35 });
-        }
-        if (bar >= 1 && step % STEPS_PER_BAR === 0) tom(time, 38, t.bus, { gain: 0.28 });
-        if (bar >= 2 && step % 32 === 24 && rng.next() < 0.5) arp(time, [62, 65, 69, 70][Math.floor(rng.next() * 4)], t.bus, { gain: 0.05, cutoff: 900 });
+        if (step === 0) stingerDefeat(time, t.bus, a.transpose);
+        const bar = Math.floor(step / 16), s16 = step % 16;
+        t.section = sectionAtBar(bar);
+        if (bar < 1) return;
+        const chord = PROGRESSIONS.defeat[bar % 2].map(n => n + a.transpose);
+        if (s16 === 0) pad(time, chord, 16 * t.stepDur, t.bus, { cutoff: 650, gain: 0.105, type: 'triangle', send: 0.15 });
+        if (s16 === 0) bass(time, chord[0] - 12, 3 * t.stepDur, t.bus, { gain: 0.14 });
+        if (s16 === 4 || s16 === 12) lead(time, upper(chord[s16 === 4 ? 2 : 0]), 3 * t.stepDur, t.bus, { gain: 0.065, timbre: a.lead });
       };
     },
   };
 
   /** Victory stinger: IV–V–I in D major, 3 saw voices through a lowpass, 2.2 s. */
-  function stingerVictory(t, dest) {
+  function stingerVictory(t, dest, transpose = 0, timbre = 'terran') {
     const v = voice(t, dest);
     const chords = [[Gmaj, 0, 0.55], [Amaj, 0.5, 0.55], [Dmaj, 1.0, 1.4]];
     const sends = [];
     for (const [ch, off, dur] of chords) {
-      const g = env(v, t + off, { a: 0.02, d: dur * 0.4, s: 0.7, hold: dur * 0.4, r: 0.5, peak: 0.22 }, dest);
+      const g = env(v, t + off, { a: 0.02, d: dur * 0.4, s: 0.7, hold: dur * 0.4, r: 0.5, peak: 0.16 / Math.sqrt(ch.length) }, dest);
       sends.push(g);
       const f = lp(v, 2000, 0.8, g);
-      for (const m of ch) play(v, osc(v, 'sawtooth', mtof(m + 12), t + off, f), t + off, t + off + dur + 0.6);
+      const type = timbre === 'pulse' ? 'square' : timbre === 'astral' ? 'sine' : 'sawtooth';
+      for (const m of ch) play(v, osc(v, type, mtof(m + 12 + transpose), t + off, f), t + off, t + off + dur + 0.6);
     }
     const sg = env(v, t, { a: 0.3, d: 1.2, r: 0.6, peak: 0.12 }, dest);
     play(v, noise(v, 'pink', t, hp(v, 4000, 0.7, sg)), t, t + 2.2);
@@ -419,11 +493,11 @@ export function createMusicEngine(o) {
   }
 
   /** Defeat stinger: two sines descending D4→A3 in semitones over 1.8 s + brown rumble. */
-  function stingerDefeat(t, dest) {
+  function stingerDefeat(t, dest, transpose = 0) {
     const v = voice(t, dest);
     const g = env(v, t, { a: 0.05, d: 0.4, s: 0.8, hold: 1.0, r: 0.6, peak: 0.25 }, dest);
-    const a = osc(v, 'sine', mtof(62), t, g), b = osc(v, 'sine', mtof(65), t, g);
-    for (let i = 1; i <= 5; i++) { a.frequency.setValueAtTime(mtof(62 - i), t + i * 0.36); b.frequency.setValueAtTime(mtof(65 - i), t + i * 0.36); }
+    const a = osc(v, 'sine', mtof(62 + transpose), t, g), b = osc(v, 'sine', mtof(65 + transpose), t, g);
+    for (let i = 1; i <= 5; i++) { a.frequency.setValueAtTime(mtof(62 - i + transpose), t + i * 0.36); b.frequency.setValueAtTime(mtof(65 - i + transpose), t + i * 0.36); }
     play(v, a, t, t + 2.4); play(v, b, t, t + 2.4);
     const ng = env(v, t, { a: 0.3, d: 1.5, r: 0.7, peak: 0.3 }, dest);
     play(v, noise(v, 'brown', t, lp(v, 200, 0.8, ng)), t, t + 2.6);
@@ -443,7 +517,9 @@ export function createMusicEngine(o) {
     while (th.nextNoteTime < now + LOOKAHEAD) {
       if (th.stopAt !== null && th.nextNoteTime >= th.stopAt) break;
       const time = th.nextNoteTime;
-      th.onStep(th, th.step, time);
+      schedulingTheme = th;
+      try { th.onStep(th, th.step, time + (th.step % 2 ? th.arrangement.swing * th.stepDur : 0)); }
+      finally { schedulingTheme = null; }
       if (stepHook) stepHook(th.name, th.step, time);
       th.nextNoteTime += th.stepDur;
       th.step++;
@@ -480,6 +556,8 @@ export function createMusicEngine(o) {
     g.linearRampToValueAtTime(0, tSwitch + fade);
     th.stopAt = tSwitch + fade + 0.2;
     fading.push(th);
+    // Repeated clicks while selecting a style must not accumulate whole bands.
+    while (fading.length > 2) fading.shift().dispose();
   }
 
   /**
@@ -487,8 +565,8 @@ export function createMusicEngine(o) {
    * (eighth-note boundary for stingers so the ending lands promptly).
    * @param {'none'|'menu'|'builder'|'battle'|'victory'|'defeat'} next
    */
-  function setScene(next) {
-    if (next === scene) return;
+  function setScene(next, refresh = false) {
+    if (next === scene && !refresh) return;
     const now = ctx.currentTime;
     const stinger = next === 'victory' || next === 'defeat';
     const old = current;
@@ -524,6 +602,13 @@ export function createMusicEngine(o) {
 
   function setBattleState(s) { setIntensity(computeIntensity(s)); }
 
+  function setTheme(value) {
+    const next = normalizeMusicTheme(value);
+    if (next === musicTheme) return;
+    musicTheme = next;
+    if (scene !== 'none') setScene(scene, true);
+  }
+
   function setFactionHint(f) {
     factionHint = f && MOTIFS[f] ? f : null;
     if (factionHint && scene === 'builder') motifPending = true;
@@ -540,18 +625,23 @@ export function createMusicEngine(o) {
 
   /** Play a stinger straight on the music bus (used by play('ui.victory'|'ui.defeat')). */
   function stinger(kind, t = ctx.currentTime + 0.02) {
-    if (kind === 'victory') stingerVictory(t, out); else stingerDefeat(t, out);
+    const a = ARRANGEMENTS[musicTheme];
+    if (kind === 'victory') stingerVictory(t, out, a.transpose, a.lead); else stingerDefeat(t, out, a.transpose);
   }
 
   function dispose() {
     if (current) { current.dispose(); current = null; }
     for (const th of fading) th.dispose();
     fading.length = 0;
+    for (const v of [...activeVoices]) {
+      for (const source of v.sources) { try { source.stop(ctx.currentTime); } catch { /* already stopped */ } }
+      v.cleanup();
+    }
     scene = 'none';
   }
 
   return {
-    scheduler, setScene, setIntensity, setBattleState, setFactionHint, pause, resume, stinger, dispose,
+    scheduler, setScene, setTheme, setIntensity, setBattleState, setFactionHint, pause, resume, stinger, dispose,
     get scene() { return scene; },
     get intensity() { return intensity; },
     get layersOn() { return layerOn.slice(); },
@@ -563,7 +653,7 @@ export function createMusicEngine(o) {
     get motifPending() { return motifPending; },
     /** Test hook: (themeName, step, time) for every scheduled step. */
     set onStep(fn) { stepHook = typeof fn === 'function' ? fn : null; },
-    stats() { return { scene, intensity, layers: layerOn.map((b) => (b ? 1 : 0)).join(''), progB, notes: notesScheduled, fading: fading.length }; },
+    stats() { return { scene, musicTheme, bpm: current?.bpm || 0, section: current?.section || 'none', intensity, layers: layerOn.map((b) => (b ? 1 : 0)).join(''), progB, notes: notesScheduled, fading: fading.length, voices: activeVoices.size, peakVoices }; },
   };
 }
 

@@ -18,6 +18,15 @@ funcionam na demonstração. Ela não inclui servidor WebSocket ou SQLite:
 multiplayer, pontos verificados, histórico do servidor e desbloqueios online
 exigem a versão com servidor. A tela Progresso local explica essa diferença.
 
+Para hospedar partidas online, consulte [Multiplayer na nuvem](CLOUD.md).
+O servidor tem outro endereço e não transfere automaticamente os dados desta
+demonstração. O plano gratuito sugerido é experimental e tem perfis temporários.
+
+As opções incluem três trilhas procedurais originais e três perfis de mixagem.
+O rádio das cinco facções pode usar português, inglês ou espanhol, com teste de
+voz. A síntese depende de vozes locais compatíveis; na ausência delas, as legendas
+continuam no idioma escolhido. Os menus permanecem em português.
+
 ## Preparar e verificar
 
 ```bash

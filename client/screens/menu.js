@@ -4,6 +4,7 @@
 import { T, fmt, difficultyName } from '../i18n.js';
 import { h } from '../util/dom.js';
 import { bestProgress } from '../util/storage.js';
+import { serverStorageNotice } from '../util/serverInfo.js';
 import { MAX_NAME_LENGTH } from '/shared/constants.js';
 
 export function mount(root, props, ctx) {
@@ -30,6 +31,7 @@ export function mount(root, props, ctx) {
     h('label.field.menu-name', h('span.lbl', { text: T.menu.nameLabel }), nameInput, h('span.tiny', { text: T.menu.nameHint })),
     h('div.menu-progress', { text: best ? fmt(T.menu.progress, { level: best.max, difficulty: difficultyName(best.difficulty) }) : T.menu.noProgress }),
     ctx.isStatic ? h('div.menu-static-note.small.muted', { test: 'static-mode-notice' }, 'Versão individual para navegador. Campanha e frotas ficam neste navegador; não há multiplayer nem pontos verificados.') : null,
+    serverStorageNotice(ctx),
     h('div.menu-foot', { text: T.menu.footer }),
     ctx.isStatic ? h('div.menu-foot',
       h('span', '© 2026 Pedro Tiago Corrêa Faria · '),

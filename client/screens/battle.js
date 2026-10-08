@@ -10,7 +10,7 @@ import { createLocalRunner } from '../battle/localRunner.js';
 import { createHud } from '../battle/hud.js';
 import { createBattleChatter } from '../battle/chatter.js';
 import { createPilotControls, normalizePilotBindings, pilotKeyLabel } from '../battle/pilotControls.js';
-import { FACTIONS, SHIPS } from '/shared/catalog.js';
+import { FACTIONS, SHIPS, ABILITIES } from '/shared/catalog.js';
 import { fleetToArray } from '/shared/fleet.js';
 
 const INTRO_MS = 2600;
@@ -110,8 +110,10 @@ export function mount(root, props, ctx) {
     const subtitle = h('div.battle-subtitle', { test: 'battle-subtitle', role: 'status', 'aria-live': 'polite' });
     hudRoot.appendChild(subtitle);
     chatter = createBattleChatter({ faction: me(start)?.faction || me(start)?.fleet?.faction, myTeam, myPlayerId, ships: start.ships,
+      onSpeakingChange: active => audio.setSpeechDucking(active),
       getSettings: () => state.settings, onLine: line => { subtitle.textContent = line?.text || ''; subtitle.classList.toggle('visible', !!line); } });
     const pilotStatus = h('span.small');
+    const pilotAbility = h('div.tiny', { test: 'pilot-ability-status' });
     const pilotButton = h('button.btn.btn-sm', { type: 'button', test: 'pilot-toggle',
       // Preserve the intended toggle: focusing a control releases manual input
       // before click; a pointer activation must not flip that release back on.
@@ -119,6 +121,7 @@ export function mount(root, props, ctx) {
       onClick: e => { e.currentTarget.blur(); pilotControls?.setEnabled(!pilotControls.state.manual); } }, 'Assumir controle');
     const binds = normalizePilotBindings(state.settings.pilotBindings);
     const pilotPanel = h('div.hud-pilot.hidden', { test: 'pilot-panel' }, pilotButton, pilotStatus,
+      pilotAbility,
       h('div.tiny.muted', `${pilotKeyLabel(binds.toggle)} alterna · ${pilotKeyLabel(binds.fire)} dispara · ${pilotKeyLabel(binds.ability)} habilidade · mouse aponta`));
     hudRoot.appendChild(pilotPanel);
     pilotControls = createPilotControls({ canvas: arena, feed, renderer, bindings: binds, myPlayerId, onState: p => {
@@ -126,7 +129,10 @@ export function mount(root, props, ctx) {
       pilotButton.disabled = !p.alive;
       pilotButton.textContent = p.manual ? 'Voltar ao automático' : 'Assumir controle';
       pilotButton.setAttribute('aria-pressed', String(p.manual));
-      pilotStatus.textContent = !p.alive ? 'Nave destruída · a frota continua' : `${p.manual ? 'Controle manual' : 'Piloto automático'} · ${p.abilityReady ? 'Habilidade pronta' : 'Recarregando'}`;
+      pilotStatus.textContent = !p.alive ? 'Nave destruída · a frota continua' : p.manual ? 'Controle manual' : 'Piloto automático';
+      const ability = ABILITIES[SHIPS[p.shipClass]?.ability];
+      pilotAbility.textContent = !p.alive ? '' : `${ability?.name || 'Habilidade'} · ${p.abilityReady ? `pronta [${pilotKeyLabel(binds.ability)}]` : `recarga: ${p.abilityCooldown.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} s`}`;
+      pilotAbility.title = ability?.desc || '';
     } });
     pilotControls.setSuspended(!skipIntro);
     try { audio.setScene('battle'); audio.setFactionHint(me(start) ? me(start).faction : null); } catch { /* ignore */ }
@@ -292,6 +298,7 @@ export function mount(root, props, ctx) {
   }
 
   return {
+    onSettingsChanged() { chatter?.updateSettings(); },
     unmount() {
       disposed = true;
       if (raf) cancelAnimationFrame(raf);

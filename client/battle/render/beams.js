@@ -80,6 +80,8 @@ export function createBeams(max = 256) {
     ctx.globalCompositeOperation = options.reducedEffects ? 'source-over' : 'lighter';
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const z = cam.zoom;
+    const detailed = quality > 0.5 && !options.reducedEffects;
+    const motionTime = options.reducedMotion ? 0 : now;
     for (const b of list) {
       const age = now - b.t0;
       if (age < 0) continue;
@@ -92,7 +94,6 @@ export function createBeams(max = 256) {
       const vx0 = cam.vx - 100, vy0 = cam.vy - 100, vx1 = cam.vx + cam.vw + 100, vy1 = cam.vy + cam.vh + 100;
       if ((p0x < vx0 && p1x < vx0) || (p0x > vx1 && p1x > vx1) || (p0y < vy0 && p1y < vy0) || (p0y > vy1 && p1y > vy1)) continue;
       const f = b.flags;
-      const motionTime = options.reducedMotion ? 0 : now;
       let n = 2;
       const dx = p1x - p0x, dy = p1y - p0y, len = Math.hypot(dx, dy) || 1;
       const nx = -dy / len, ny = dx / len;
@@ -133,16 +134,30 @@ export function createBeams(max = 256) {
         scratch[0] = p0x; scratch[1] = p0y; scratch[2] = p1x; scratch[3] = p1y;
       }
       const w = b.w * Math.max(0.6, z);
-      if (quality > 0.5) strokePts(ctx, n, w * 6, b.colA, 0.22 * a);
-      strokePts(ctx, n, w * 2, b.colA, 0.9 * a);
+      if (detailed) strokePts(ctx, n, w * 5, b.colA, 0.16 * a);
+      strokePts(ctx, n, w * 1.8, b.colA, 0.85 * a);
       if (f.dash) { ctx.setLineDash([6 * z, 4 * z]); ctx.lineDashOffset = -motionTime * 0.25 * z; }
-      strokePts(ctx, n, Math.max(0.6, w * 0.7), b.colB, a);
+      strokePts(ctx, n, Math.max(0.6, w * 0.55), b.colB, a * 0.9);
       if (f.dash) ctx.setLineDash([]);
       // impact bloom
       const ir = b.impactR * z * (f.impact || 1);
       ctx.globalAlpha = 0.8 * a;
-      if (quality > 0.5 && !options.reducedEffects) ctx.drawImage(getGlow(b.colA), p1x - ir, p1y - ir, ir * 2, ir * 2);
-      if (f.suckers && quality > 0.5) {
+      if (detailed) ctx.drawImage(getGlow(b.colA), p1x - ir, p1y - ir, ir * 2, ir * 2);
+      if (detailed && f.dash && len > 24) {
+        // Repair packets are squares; the disassembler uses diamonds. Both
+        // remain distinct from an attack beam without relying only on color.
+        ctx.fillStyle = b.colB; ctx.globalAlpha = 0.65 * a;
+        const size = Math.max(1.3, z * 1.8);
+        const travel = (motionTime * 0.0007) % 1;
+        for (let k = 0; k < 3; k++) {
+          const u = (travel + k / 3) % 1, px = p0x + dx * u, py = p0y + dy * u;
+          if (b.kind === 'nanite') {
+            ctx.beginPath(); ctx.moveTo(px, py - size * 1.4); ctx.lineTo(px + size * 1.4, py);
+            ctx.lineTo(px, py + size * 1.4); ctx.lineTo(px - size * 1.4, py); ctx.closePath(); ctx.fill();
+          } else ctx.fillRect(px - size, py - size, size * 2, size * 2);
+        }
+      }
+      if (f.suckers && detailed) {
         ctx.fillStyle = b.colB; ctx.globalAlpha = 0.6 * a;
         for (let i = 1; i < n - 1; i += 2) { ctx.beginPath(); ctx.arc(scratch[i * 2], scratch[i * 2 + 1], 1.5 * z, 0, TAU); ctx.fill(); }
       }

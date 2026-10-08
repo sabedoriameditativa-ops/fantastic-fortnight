@@ -11,6 +11,30 @@ demonstração gratuita para um jogador, sem instalação. A campanha, as frotas
 preferências ficam salvas nesse navegador. Multiplayer e progressão verificada
 exigem servidor. Consulte [recursos, publicação e limites da versão web](docs/WEB.md).
 
+## Multiplayer na nuvem e melhorias da versão 0.3
+
+O jogo inclui uma configuração de **servidor gratuito de testes no Render**:
+consulte [publicação multiplayer, persistência e limites](docs/CLOUD.md). Ela serve
+o jogo e as salas no mesmo endereço HTTPS. A criação da conta e do serviço no
+provedor ainda é necessária; o link do GitHub Pages acima continua individual.
+No plano gratuito, os perfis do servidor são temporários e as partidas terminam
+quando a instância reinicia. Uma instalação com volume durável preserva o SQLite.
+
+Em **Opções**, experimente as trilhas **Aventura estelar**, **Órbita arcade** e
+**Nebulosa**, os perfis de mixagem e o rádio em português, inglês ou espanhol.
+O botão **Testar fala** apresenta cada facção. A voz usa o sintetizador local
+compatível do dispositivo; sem essa voz, o jogo mantém as legendas. Os menus
+continuam em português. As escolhas anteriores de volume são preservadas.
+
+Os cenários, materiais das naves, projéteis e escudos receberam mais detalhes,
+mantendo opções de qualidade baixa e redução de efeitos. O controle manual
+preserva toques rápidos entre atualizações e mostra o nome e a recarga da habilidade.
+
+Hoje há **cinco facções**: quatro originais e o **Concílio Astral**, sem outras
+facções ocultas. Veja as [recomendações para diversão, expansão e monetização](docs/ROADMAP.md).
+
+## Recursos do jogo
+
 - **Um jogador**: 15 níveis com chefes e níveis infinitos depois, 4 dificuldades,
   formatos de 1v1 até 6v6 com aliados controlados pelo computador.
 - **Multijogador**: salas com código de 4 letras, de 1v1 até 6v6, bots preenchem as

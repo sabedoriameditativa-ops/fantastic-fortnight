@@ -133,6 +133,22 @@ describe('static server', () => {
     assert.deepEqual(JSON.parse(r.body), { ok: true, rooms: 3, uptime: 7 });
   });
 
+  test('/health failures return 503 for container readiness checks', async (t) => {
+    let throws = false;
+    const unhealthy = http.createServer(createStaticHandler({
+      clientDir: root, sharedDir: root,
+      health: () => { if (throws) throw new Error('unavailable'); return { ok: false }; },
+    }));
+    await new Promise((resolve) => unhealthy.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise((resolve) => unhealthy.close(resolve)));
+    const url = `http://127.0.0.1:${unhealthy.address().port}/health`;
+    assert.equal((await fetch(url)).status, 503);
+    throws = true;
+    const response = await fetch(url);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { ok: false });
+  });
+
   test('HEAD works, other methods → 405', async () => {
     const h = await get('/app.js', 'HEAD');
     assert.equal(h.status, 200);

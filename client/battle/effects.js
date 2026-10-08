@@ -83,8 +83,8 @@ export function createEffects(o) {
   }
 
   function addMuzzle(x, y, a, w, col, now) {
-    if (quality.reducedEffects) return;
-    if (muzzles.length > 200) muzzles.shift();
+    if (quality.reducedEffects || !quality.glow) return;
+    if (muzzles.length >= 200) muzzles.shift();
     const size = clamp(5 + w.damage * 0.25, 5, 22);
     muzzles.push({ x, y, a, kind: FLASH_KIND_BY_TYPE[w.type] || 'kinetic', col, t0: now, size, light: w.damage < 10 });
   }
@@ -159,7 +159,7 @@ export function createEffects(o) {
   }
 
   function empRing(x, y, R, col, now, big) {
-    if (empRings.length > 40) empRings.shift();
+    if (empRings.length >= 40) empRings.shift();
     empRings.push({ x, y, R, col, t0: now, dur: big ? 600 : 400, arcs: big ? 32 : 20, seed: rand.int(0, 1e6) });
     explosions.flash({ x, y, r: R * 0.5, col, t0: now, dur: 200, a: 0.5 });
     const n = Math.round((big ? 30 : 14) * quality.density);
@@ -169,7 +169,7 @@ export function createEffects(o) {
   }
 
   function addDome(d) {
-    if (domes.length > 40) domes.shift();
+    if (domes.length >= 40) domes.shift();
     domes.push({ hex: true, grow: 250, ...d });
   }
 
@@ -735,11 +735,11 @@ export function createEffects(o) {
   }
 
   function drawProjectiles(ctx, c, dpr, now) {
-    projectiles.draw(ctx, c, dpr, now, quality.density);
+    projectiles.draw(ctx, c, dpr, now, quality.density, quality);
   }
 
   function drawMuzzles(ctx, c, dpr, now) {
-    if (!muzzles.length || quality.reducedEffects) return;
+    if (!muzzles.length || quality.reducedEffects || !quality.glow) return;
     const z = c.zoom;
     ctx.globalCompositeOperation = 'lighter';
     for (const m of muzzles) {
@@ -770,7 +770,7 @@ export function createEffects(o) {
       const sx = c.worldToScreenX(r.x), sy = c.worldToScreenY(r.y);
       ctx.strokeStyle = r.col; ctx.lineWidth = Math.max(1, 4 * z * (1 - u)); ctx.globalAlpha = 0.9 * (1 - u);
       ctx.beginPath(); ctx.arc(sx, sy, R, 0, TAU); ctx.stroke();
-      if (quality.reducedEffects) continue;
+      if (quality.reducedEffects || !quality.glow) continue;
       ctx.lineWidth = Math.max(0.8, 1.2 * z);
       const fr = quality.reducedMotion ? 0 : (now / 50) | 0;
       ctx.beginPath();
@@ -795,11 +795,43 @@ export function createEffects(o) {
   function drawEffects(ctx, c, dpr, now) {
     beams.draw(ctx, c, dpr, now, quality.density, quality);
     drawMuzzles(ctx, c, dpr, now);
-    shields.drawRipples(ctx, c, dpr, now, shieldLook, quality.reducedEffects);
+    shields.drawRipples(ctx, c, dpr, now, shieldLook, quality.reducedEffects || quality.density < 0.5);
     explosions.draw(ctx, c, dpr, now, quality.reducedEffects);
     drawEmp(ctx, c, dpr, now);
     if (!quality.reducedEffects) particles.render(ctx, c, dpr, now);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // Small, steady symbols carry the status meaning when glow/color alone is
+  // ambiguous. They share one stroke and also remain in reduced-effects mode.
+  function drawBuffSymbol(ctx, b, sx, sy, radius, zoom, now) {
+    if (b.kind === 'glow' || b.kind === 'chaff') return;
+    const s = clamp(2.5 * zoom, 2.2, 5), x = sx + radius * 0.78, y = sy + radius * 0.65;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = clamp((b.until - now) / 250, 0, 0.9);
+    ctx.fillStyle = '#07101c'; ctx.fillRect(x - s * 1.5, y - s * 1.5, s * 3, s * 3);
+    ctx.strokeStyle = b.col; ctx.lineWidth = 1.3; ctx.beginPath();
+    if (b.kind === 'heal') {
+      ctx.moveTo(x - s, y); ctx.lineTo(x + s, y); ctx.moveTo(x, y - s); ctx.lineTo(x, y + s);
+    } else if (b.kind === 'boost') {
+      ctx.moveTo(x - s, y - s); ctx.lineTo(x, y); ctx.lineTo(x - s, y + s);
+      ctx.moveTo(x, y - s); ctx.lineTo(x + s, y); ctx.lineTo(x, y + s);
+    } else if (b.kind === 'anchor') {
+      ctx.moveTo(x, y - s); ctx.lineTo(x, y + s); ctx.moveTo(x - s, y);
+      ctx.lineTo(x - s, y + s); ctx.lineTo(x + s, y + s); ctx.lineTo(x + s, y);
+    } else if (b.kind === 'focus') {
+      ctx.rect(x - s, y - s, s * 2, s * 2);
+      ctx.moveTo(x - s * 1.4, y); ctx.lineTo(x + s * 1.4, y);
+      ctx.moveTo(x, y - s * 1.4); ctx.lineTo(x, y + s * 1.4);
+    } else if (b.kind === 'rage') {
+      ctx.moveTo(x, y - s * 1.3); ctx.lineTo(x + s, y); ctx.lineTo(x, y + s * 1.3); ctx.lineTo(x - s, y); ctx.closePath();
+    } else {
+      // Armor/mantle: shield outline.
+      ctx.moveTo(x, y - s * 1.2); ctx.lineTo(x + s, y - s * 0.5);
+      ctx.lineTo(x + s * 0.7, y + s * 0.6); ctx.lineTo(x, y + s * 1.3);
+      ctx.lineTo(x - s * 0.7, y + s * 0.6); ctx.lineTo(x - s, y - s * 0.5); ctx.closePath();
+    }
+    ctx.stroke(); ctx.globalAlpha = 1;
   }
 
   /**
@@ -807,25 +839,26 @@ export function createEffects(o) {
    * glow, charge, mantle, anchor marker). Base transform is restored.
    */
   function drawShipOverlay(ctx, v, inf, sx, sy, zoom, dpr, now, lod) {
+    const quiet = quality.reducedEffects || quality.density < 0.5;
     const hasShield = inf.cat.shield && inf.cat.shield.cap > 0;
     if (hasShield && v.sh > 0 && lod >= 1) {
-      shields.drawBubble(ctx, sx, sy, shieldRadius(inf.def) * zoom, v.sh / 1000, inf.pal.team, now, v.id, dpr, lod, quality.reducedEffects);
+      shields.drawBubble(ctx, sx, sy, shieldRadius(inf.def) * zoom, v.sh / 1000, inf.pal.team, now, v.id, dpr, lod, quiet, inf.faction);
     }
     const b = buffs.get(v.id);
     const ch = charges.get(v.id);
-    if ((b || ch) && lod >= 1 && quality.reducedEffects) {
+    if ((b || ch) && lod >= 1 && quiet) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.strokeStyle = (ch || b).col; ctx.globalAlpha = 0.6; ctx.lineWidth = 1;
       ctx.setLineDash(ch ? [2, 3] : [5, 3]);
       ctx.beginPath(); ctx.arc(sx, sy, inf.def.size * 0.65 * zoom, 0, TAU); ctx.stroke();
       ctx.setLineDash([]); ctx.globalAlpha = 1;
     }
-    if ((b || ch) && lod >= 1 && !quality.reducedEffects) {
+    if ((b || ch) && lod >= 1 && !quiet) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalCompositeOperation = 'lighter';
       if (b) {
         const r = inf.def.size * 0.6 * zoom;
-        const pulse = quality.reducedMotion ? 0.5 : 0.5 + 0.5 * Math.sin((now - b.t0) * 0.0377);
+        const pulse = quality.reducedMotion ? 0.5 : 0.5 + 0.5 * Math.sin((now - b.t0) * 0.007);
         const fade = clamp((b.until - now) / 300, 0, 1) * clamp((now - b.t0) / 150, 0, 1);
         if (b.kind === 'mantle') {
           ctx.strokeStyle = b.col; ctx.lineWidth = Math.max(1, 2 * zoom); ctx.globalAlpha = (0.35 + 0.25 * pulse) * fade;
@@ -858,6 +891,10 @@ export function createEffects(o) {
       }
       ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     }
+    if (b && lod >= 1) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawBuffSymbol(ctx, b, sx, sy, inf.def.size * 0.6 * zoom, zoom, now);
+    }
     if ((v.flags & 1) && lod >= 1) { // UNTARGETABLE: cloak shimmer outline
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.globalAlpha = quality.reducedMotion ? 0.2 : 0.15 + 0.1 * Math.sin(now * 0.012 + v.id);
@@ -867,7 +904,7 @@ export function createEffects(o) {
   }
 
   /** Per-ship presentation state derived from flags/buffs (for sprites.js). */
-  function shipState(v, inf, now, myTeam) {
+  function shipState(v, inf, now, myTeam, out = {}) {
     const b = buffs.get(v.id);
     const sp = spawnAt.get(v.id);
     const spawnScale = sp === undefined || quality.reducedMotion ? 1 : clamp(0.2 + 0.8 * ((now - sp) / 200), 0.2, 1);
@@ -875,7 +912,13 @@ export function createEffects(o) {
     const thrust = clamp(speed / Math.max(20, inf.cat.speed), 0, 1);
     let alpha = 1;
     if (v.flags & 1) alpha = myTeam === null || myTeam === undefined ? 0.45 : v.team === myTeam ? 0.5 : 0.18;
-    return { thrust, boosted: !!(b && b.kind === 'boost') || !!(v.flags & 4), disrupted: !!(v.flags & 2), spawnScale, alpha, id: v.id };
+    out.thrust = thrust;
+    out.boosted = !!(b && b.kind === 'boost') || !!(v.flags & 4);
+    out.disrupted = !!(v.flags & 2);
+    out.spawnScale = spawnScale;
+    out.alpha = alpha;
+    out.id = v.id;
+    return out;
   }
 
   return {

@@ -85,7 +85,7 @@ export function createShields(o) {
    * @param {number} rPx bubble radius in screen px
    * @param {number} pct shield 0..1
    */
-  function drawBubble(ctx, sx, sy, rPx, pct, teamColor, now, id, dpr, lod, reducedEffects = false) {
+  function drawBubble(ctx, sx, sy, rPx, pct, teamColor, now, id, dpr, lod, reducedEffects = false, faction = 'terran') {
     let r = rPx;
     const rs = restores.get(id);
     if (rs !== undefined) {
@@ -93,19 +93,40 @@ export function createShields(o) {
       if (u >= 1) restores.delete(id); else r = rPx * (1 - (1 - u) * (1 - u));
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = teamColor; ctx.globalAlpha = 0.05 + 0.05 * pct;
+    ctx.globalCompositeOperation = 'source-over';
+    // The shield reads at its rim; a light interior tint keeps hull material and
+    // damage visible instead of washing every ship into its team's color.
+    ctx.fillStyle = teamColor; ctx.globalAlpha = reducedEffects ? 0.018 : 0.015 + 0.02 * pct;
     ctx.beginPath(); ctx.arc(sx, sy, r, 0, TAU); ctx.fill();
     if (lod >= 1) {
-      ctx.strokeStyle = teamColor; ctx.lineWidth = 1; ctx.globalAlpha = 0.1 + 0.2 * pct;
+      ctx.strokeStyle = teamColor; ctx.lineWidth = 1; ctx.globalAlpha = 0.12 + 0.2 * pct;
+      ctx.stroke();
+    }
+    if (!reducedEffects && lod >= 2 && r >= 12) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = teamColor; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.13 + 0.16 * pct;
+      ctx.beginPath();
+      if (faction === 'lumen' || faction === 'astral') {
+        // Crystal/astral screens have separated facets; nanite/alloy screens use
+        // paired arcs. The actual shield boundary remains circular for all.
+        for (let k = 0; k < 6; k++) {
+          const a = k * TAU / 6 - Math.PI / 2, b = a + TAU / 6 * 0.7;
+          ctx.moveTo(sx + Math.cos(a) * r * 0.95, sy + Math.sin(a) * r * 0.95);
+          ctx.lineTo(sx + Math.cos(b) * r * 0.95, sy + Math.sin(b) * r * 0.95);
+        }
+      } else {
+        ctx.arc(sx, sy, r * 0.94, Math.PI * 1.1, Math.PI * 1.6);
+        ctx.moveTo(sx + Math.cos(Math.PI * 0.1) * r * 0.94, sy + Math.sin(Math.PI * 0.1) * r * 0.94);
+        ctx.arc(sx, sy, r * 0.94, Math.PI * 0.1, Math.PI * 0.38);
+      }
       ctx.stroke();
     }
     const bk = breaks.get(id);
     if (bk !== undefined) {
       const age = now - bk;
       if (age > 200) breaks.delete(id);
-      else if (!reducedEffects && ((age / 80) | 0) % 2 === 0) {
-        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.globalAlpha = 0.9 * (1 - age / 200);
+      else if (!reducedEffects) {
+        ctx.strokeStyle = teamColor; ctx.lineWidth = 2; ctx.globalAlpha = 0.5 * (1 - age / 200);
         ctx.beginPath(); ctx.arc(sx, sy, rPx, 0, TAU); ctx.stroke();
       }
     }
@@ -120,7 +141,7 @@ export function createShields(o) {
     if (!ripples.length) return;
     const z = cam.zoom;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalCompositeOperation = reducedEffects ? 'source-over' : 'lighter';
     for (let i = ripples.length - 1; i >= 0; i--) {
       const rp = ripples[i];
       const u = (now - rp.t0) / 350;
@@ -140,15 +161,20 @@ export function createShields(o) {
         ctx.save();
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();
         ctx.beginPath(); ctx.arc(ix, iy, outer, 0, TAU); ctx.arc(ix, iy, inner, 0, TAU, true); ctx.clip('evenodd');
-        ctx.globalAlpha = 0.9 * (1 - u) * rp.strength;
+        ctx.globalAlpha = 0.65 * (1 - u) * rp.strength;
         ctx.fillStyle = L.color; ctx.globalAlpha *= 0.35;
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fill();
-        ctx.globalAlpha = 0.9 * (1 - u) * rp.strength;
+        ctx.globalAlpha = 0.55 * (1 - u) * rp.strength;
         ctx.drawImage(hexMask(R), cx - R, cy - R, R * 2, R * 2);
         ctx.restore();
+        // The bright edge identifies the incoming direction even when the
+        // interior wave crosses a busy or very dark hull.
+        ctx.strokeStyle = L.color; ctx.lineWidth = Math.max(1, 2.2 * z);
+        ctx.globalAlpha = 0.65 * (1 - u) * rp.strength;
+        ctx.beginPath(); ctx.arc(cx, cy, R, rp.ang - 0.2 - u * 0.75, rp.ang + 0.2 + u * 0.75); ctx.stroke();
         // impact bloom
         const g = 8 * z;
-        ctx.globalAlpha = 0.8 * (1 - u);
+        ctx.globalAlpha = 0.55 * (1 - u);
         ctx.drawImage(getGlow(L.color), ix - g, iy - g, g * 2, g * 2);
       } else {
         ctx.strokeStyle = L.color; ctx.lineWidth = Math.max(1.5, 3 * z); ctx.globalAlpha = (1 - u) * rp.strength;
