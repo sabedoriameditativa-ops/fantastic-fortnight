@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/windows-preview.yml
       - tools/test-windows-launcher.ps1
+      - test/server/integration.test.js
   workflow_dispatch:
 
 permissions:

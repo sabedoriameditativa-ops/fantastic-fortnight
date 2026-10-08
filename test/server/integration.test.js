@@ -270,7 +270,12 @@ describe('integration: real server', () => {
     assert.equal(closed.code, 1009);
   });
 
-  test('server process prints "listening <port>" and exits cleanly on SIGTERM', async () => {
+  // Windows terminates child.kill('SIGTERM') immediately instead of dispatching
+  // a POSIX signal. Its graceful desktop shutdown is exercised through stdin
+  // in desktop.test.js and through the native window in the Windows smoke test.
+  test('server process prints "listening <port>" and exits cleanly on SIGTERM', {
+    skip: process.platform === 'win32' ? 'POSIX signal delivery is unavailable on Windows' : false,
+  }, async () => {
     const child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
       env: { ...process.env, PORT: '0', FE_MAX_TICKS: '50' },
       stdio: ['ignore', 'pipe', 'pipe'],
