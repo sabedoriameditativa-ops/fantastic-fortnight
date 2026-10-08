@@ -110,11 +110,17 @@ CHROMIUM_PATH=/usr/bin/chromium node tools/verify-desktop-package.js /tmp/frota-
 O último teste usa o Node da máquina de teste para servir os arquivos do pacote,
 cria um perfil e inicia uma batalha no Chromium. Ele não executa o Node Windows.
 
-A máquina desta tarefa é Linux, sem Windows, Wine ou VM Windows. A compilação e os
-testes de lógica não confirmam a execução da janela nativa, a associação do navegador
-ou o funcionamento do Node embarcado em um Windows real. Essa validação ainda está
-pendente. O executável também não tem assinatura digital Authenticode; o Windows
-pode identificá-lo como aplicativo de editor desconhecido.
+A máquina de desenvolvimento desta tarefa é Linux, sem Windows, Wine ou VM Windows.
+O workflow `.github/workflows/windows-preview.yml` faz uma validação separada em
+um runner Windows antes de publicar os arquivos: inicia o `.exe`, verifica a janela,
+o Node embarcado, recursos HTTP, perfil após reinício e encerramento. O resultado
+é anexado como `Windows-smoke.json`; o manifesto identifica o commit e o workflow.
+Os testes locais Linux, sozinhos, não demonstram essa execução no Windows.
+
+Não houve avaliação manual de gameplay em computadores Windows físicos. A associação
+automática do navegador e a experiência em diferentes dispositivos exigem verificação
+adicional. O executável não tem assinatura digital Authenticode; o Windows pode
+identificá-lo como aplicativo de editor desconhecido.
 
 `install_script` e `start_skill` são instruções do ambiente de desenvolvimento na
 nuvem. Elas não são usadas pelo executável nem são necessárias para jogar.

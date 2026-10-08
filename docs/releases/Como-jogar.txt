@@ -1,0 +1,29 @@
+FROTA ESTELAR — PRÉ-VERSÃO WINDOWS 0.2.0-preview.1
+
+1. Baixe FrotaEstelar.exe. Não é necessário instalar Node, npm ou Go.
+2. Dê um duplo clique. O jogo abre no navegador padrão.
+3. Use Abrir jogo para voltar ao navegador e Encerrar para fechar o servidor.
+   Fechar a pequena janela também encerra o servidor.
+
+Requisitos: Windows 10/11 de 64 bits (x64) e navegador moderno.
+Na primeira abertura, o aplicativo extrai seus arquivos. Nas seguintes, reutiliza-os.
+Fontes e recursos do jogo estão incluídos; não é necessário baixar dependências.
+
+Progresso: %LOCALAPPDATA%\FrotaEstelar\data
+Preserve os cookies e dados de localhost:3000 no mesmo navegador.
+Para backup, encerre o aplicativo e copie a pasta data inteira.
+
+Se a porta 3000 estiver ocupada, feche a instância anterior e tente novamente.
+Esta distribuição abre o servidor somente no próprio computador.
+
+SOBRE ESTA PRÉ-VERSÃO
+Windows-smoke.json registra a validação automática da inicialização no Windows.
+Não houve teste manual de gameplay em computadores Windows físicos.
+O arquivo não tem assinatura digital Authenticode; o Windows pode informar
+que o editor é desconhecido.
+
+Instruções completas:
+https://github.com/sabedoriameditativa-ops/fantastic-fortnight/blob/frota-estelar-v0.2.0-preview.1/docs/WINDOWS.md
+
+Página do projeto:
+https://github.com/sabedoriameditativa-ops/fantastic-fortnight/releases

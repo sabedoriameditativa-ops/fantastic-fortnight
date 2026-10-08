@@ -1,0 +1,97 @@
+name: Frota Estelar - previa Windows
+
+on:
+  push:
+    branches: [codex/frota-estelar-evolucao]
+    paths:
+      - .github/workflows/windows-preview.yml
+      - tools/test-windows-launcher.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: frota-estelar-windows-preview
+  cancel-in-progress: false
+
+jobs:
+  windows-preview:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 1.27.1
+          cache: false
+      - name: Instalar dependencias do desenvolvimento
+        run: npm ci --include=dev --no-audit --no-fund
+      - name: Testar jogo e servidor no Windows
+        run: npm test
+      - name: Gerar executavel com runtime verificado
+        shell: pwsh
+        run: |
+          $env:FE_BUILD_PAYLOAD_OUT = Join-Path $env:RUNNER_TEMP 'frota-payload.zip'
+          npm run build:windows
+          if ($LASTEXITCODE -ne 0) { throw 'Build Windows falhou' }
+      - name: Verificar extracao do pacote real no Windows
+        shell: pwsh
+        working-directory: desktop/launcher
+        run: |
+          $env:FE_LAUNCHER_TEST_PAYLOAD = Join-Path $env:RUNNER_TEMP 'frota-payload.zip'
+          Copy-Item $env:FE_LAUNCHER_TEST_PAYLOAD payload.zip
+          $env:GOTOOLCHAIN = 'local'
+          $env:GOPROXY = 'off'
+          go test -v ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Testes Go falharam' }
+      - name: Executar janela, Node embarcado e persistencia no Windows
+        shell: pwsh
+        run: ./tools/test-windows-launcher.ps1 -Executable ./dist/FrotaEstelar.exe
+      - name: Preparar arquivos da distribuicao
+        shell: pwsh
+        run: |
+          Copy-Item docs/releases/Como-jogar.txt dist/Como-jogar.txt
+          $manifest = Get-Content dist/FrotaEstelar.build.json -Raw | ConvertFrom-Json
+          $manifest | Add-Member sourceCommit $env:GITHUB_SHA
+          $manifest | Add-Member workflowRun "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content dist/FrotaEstelar.build.json -Encoding utf8
+      - name: Guardar evidencia do build
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: frota-estelar-windows
+          path: dist/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Publicar somente a pre-versao validada
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+-preview\.\d+$') { throw 'Versao precisa ser preview' }
+          $tag = "frota-estelar-v$version"
+          $repo = $env:GITHUB_REPOSITORY
+          $release = gh release view $tag --repo $repo --json isDraft,targetCommitish | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Crie primeiro o rascunho da pre-versao autorizada' }
+          if (-not $release.isDraft) { throw 'A versao ja foi publicada; seus arquivos nao serao substituidos' }
+          $smoke = Get-Content dist/Windows-smoke.json -Raw | ConvertFrom-Json
+          if ($smoke.status -ne 'passed') { throw 'Validacao Windows ausente' }
+          gh release edit $tag --repo $repo --target $env:GITHUB_SHA --prerelease --latest=false --notes-file docs/releases/windows-preview.md
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar rascunho' }
+          gh release upload $tag dist/FrotaEstelar.exe dist/FrotaEstelar.sha256 dist/FrotaEstelar.build.json dist/Como-jogar.txt dist/Windows-smoke.json --repo $repo --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Falha no envio; release permanece rascunho' }
+          $assets = gh release view $tag --repo $repo --json assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao conferir anexos' }
+          foreach ($name in @('FrotaEstelar.exe','FrotaEstelar.sha256','FrotaEstelar.build.json','Como-jogar.txt','Windows-smoke.json')) {
+            if (-not ($assets.assets | Where-Object name -eq $name)) { throw "Anexo ausente: $name" }
+          }
+          gh release edit $tag --repo $repo --draft=false --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao publicar pre-versao' }
