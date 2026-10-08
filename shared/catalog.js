@@ -119,6 +119,13 @@ export const FACTIONS = {
     passive: { id: 'neural_net', name: 'Rede Neural', desc: '+10% de precisão contra naves minúsculas e pequenas (mira compartilhada).' },
     style: 'modular',
   },
+  astral: {
+    id: 'astral', name: 'Concílio Astral', short: 'Astral', race: 'Navegantes gravitacionais',
+    tagline: 'Controle do espaço, anéis orbitais e artilharia pesada. Poucas naves, cada perda importa.',
+    lore: 'Navegantes que habitam estações ao redor de estrelas escuras. Seus anéis dobram a gravidade para atrasar inimigos e cobrir retiradas. Cascos ressonantes sofrem contra canhões magnéticos, e a frota cara depende de escolta contra enxames.',
+    color: '#24465b', accent: '#edc66f', hull: 'crystalline', style: 'orbital', advanced: true,
+    passive: { id: 'inertial_keel', name: 'Quilha Inercial', desc: 'Sofre 30% menos deslocamento por campos gravitacionais. Sem regeneração de casco.' },
+  },
 };
 
 export const FACTION_IDS = Object.keys(FACTIONS);
@@ -128,6 +135,12 @@ export const FACTION_IDS = Object.keys(FACTIONS);
 // ---------------------------------------------------------------------------
 
 export const ABILITIES = {
+  gravity_snare: { id: 'gravity_snare', name: 'Âncora Vetorial', cooldown: 12, duration: 2.5, kind: 'debuff',
+    desc: 'Reduz a velocidade do alvo em 45% por 2,5 s. Não acumula com outras âncoras.', params: { range: 520, slowMul: 0.55 } },
+  gravity_well: { id: 'gravity_well', name: 'Poço Orbital', cooldown: 30, duration: 5, kind: 'area',
+    desc: 'Campo de 200 u por 5 s: puxa inimigos a 35 u/s e reduz a velocidade em 30%. Não causa dano.', params: { range: 800, radius: 200, pull: 35, slowMul: 0.7 } },
+  orbital_aegis: { id: 'orbital_aegis', name: 'Égide Orbital', cooldown: 18, duration: 6, kind: 'aura',
+    desc: 'Aliados de qualquer tamanho em 350 u recebem 200 de escudo extra por 6 s. Barreiras sobrepostas não somam.', params: { radius: 350, shield: 200 } },
   // --- Terran ---
   afterburner: { id: 'afterburner', name: 'Pós-combustor', cooldown: 12, duration: 3,
     desc: '+80% de velocidade e +50% de giro por 3 s.', params: { speedMul: 1.8, turnMul: 1.5 }, kind: 'buff' },
@@ -235,6 +248,7 @@ function W(id, name, type, o) {
     interceptable: o.interceptable ?? (type === 'missile' || type === 'torpedo'),
     minTargetClass: o.minTargetClass ?? (type === 'torpedo' ? 'medium' : 'tiny'),
     pd: o.pd ?? false,
+    ...(o.directional ? { directional: true } : {}),
     ...(o.charge ? { charge: o.charge } : {}),
     ...(o.chain ? { chain: o.chain } : {}),
     ...(o.contact ? { contact: true } : {}),
@@ -250,6 +264,7 @@ function S(o) {
     speed: o.speed, turnRate: o.turn, accel: sc.accel, radius: sc.radius, mass: sc.mass,
     weapons: o.weapons, ability: o.ability,
     spawnable: o.spawnable ?? false,
+    ...(o.pilotOnly ? { pilotOnly: true } : {}),
   };
 }
 
@@ -474,7 +489,48 @@ const FERRIX = [
     ability: 'emp_storm' }),
 ];
 
-export const SHIP_LIST = [...TERRAN, ...VORRAX, ...LUMEN, ...FERRIX];
+// Specialists exchange the same 200-point fleet reserve for direct control.
+// Their guns use physical directional collisions in both manual and AI modes.
+const PILOTS = [
+  S({ id: 'ast_ace', faction: 'astral', name: 'Navegante Zero', sizeClass: 'small', role: 'kiter', cost: 200, pilotOnly: true,
+    desc: 'Interceptador orbital com pulsos direcionais e impulso de fuga. Casco ressonante vulnerável a railguns.',
+    hp: 470, shield: { cap: 360, regen: 10, delay: 4 }, speed: 165, turn: 330,
+    weapons: [W('ast_ace_pulse', 'Pulso orbital', 'plasma', { dmg: 32, cd: 0.55, range: 600, speed: 650, directional: true })], ability: 'afterburner' }),
+  S({ id: 'ter_ace', faction: 'terran', name: 'Ás Peregrino', sizeClass: 'small', role: 'kiter', cost: 200, pilotOnly: true,
+    desc: 'Caça de comando. Rajadas direcionais e pós-combustor; casco vulnerável a fogo concentrado.',
+    hp: 540, dr: 3, shield: { cap: 180, regen: 8, delay: 4 }, speed: 180, turn: 340,
+    weapons: [W('ter_ace_cannon', 'Canhão vetorial', 'kinetic', { dmg: 18, cd: 0.28, range: 620, speed: 760, directional: true })], ability: 'afterburner' }),
+  S({ id: 'vor_ace', faction: 'vorrax', name: 'Predador Sináptico', sizeClass: 'small', role: 'brawler', cost: 200, pilotOnly: true,
+    desc: 'Organismo de assalto com ácido direcional e muda restauradora. Sem escudos, alcance curto.',
+    hp: 950, dr: 1, regen: 5, speed: 155, turn: 300,
+    weapons: [W('vor_ace_acid', 'Agulha ácida', 'bio', { dmg: 34, cd: 0.6, range: 490, speed: 540, directional: true, dot: { dps: 3, duration: 3 } })], ability: 'molt' }),
+  S({ id: 'lum_ace', faction: 'lumen', name: 'Prisma Errante', sizeClass: 'small', role: 'kiter', cost: 200, pilotOnly: true,
+    desc: 'Escudo recarregável e pulsos iônicos direcionais. Excelente disrupção, casco frágil.',
+    hp: 320, shield: { cap: 600, regen: 15, delay: 3 }, speed: 175, turn: 360,
+    weapons: [W('lum_ace_pulse', 'Pulso de luz', 'ion', { dmg: 30, cd: 0.6, range: 650, speed: 680, directional: true })], ability: 'shield_overload' }),
+  S({ id: 'fer_ace', faction: 'ferrix', name: 'Vetor Singular', sizeClass: 'small', role: 'kiter', cost: 200, pilotOnly: true,
+    desc: 'Disparos magnéticos de precisão e nanitos de emergência. Salvas lentas exigem antecipar o movimento.',
+    hp: 750, dr: 4, regen: 4, speed: 145, turn: 280,
+    weapons: [W('fer_ace_rail', 'Trilho vetorial', 'railgun', { dmg: 65, cd: 1.2, range: 760, speed: 1050, directional: true })], ability: 'reactive_nanites' }),
+];
+
+const ASTRAL = [
+  S({ id: 'ast_lanceta', faction: 'astral', name: 'Lanceta Orbital', sizeClass: 'small', role: 'kiter', cost: 85,
+    desc: 'Escolta de interdição. Ancora um alvo veloz para a artilharia; baixo casco e nenhum reparo.',
+    hp: 240, shield: { cap: 210, regen: 8, delay: 4 }, speed: 150, turn: 210,
+    weapons: [W('ast_lance', 'Lança de massa', 'railgun', { dmg: 40, cd: 1.3, range: 520, speed: 1000, arc: 70 })], ability: 'gravity_snare' }),
+  S({ id: 'ast_guardiao', faction: 'astral', name: 'Guardião do Anel', sizeClass: 'large', role: 'support', cost: 220,
+    desc: 'Bastião de escolta com barreira temporária em área. Defesa pontual de curto alcance; depende de aliados para atacar.',
+    hp: 1000, dr: 3, shield: { cap: 500, regen: 12, delay: 4 }, speed: 65, turn: 80,
+    weapons: [W('ast_screen', 'Tela de partículas', 'flak', { dmg: 16, salvo: 3, cd: 0.9, range: 370, speed: 700, pd: true })], ability: 'orbital_aegis' }),
+  S({ id: 'ast_arconte', faction: 'astral', name: 'Arconte Gravitacional', sizeClass: 'mothership', role: 'anchor', cost: 650,
+    desc: 'Supernave de controle orbital. Agrupa inimigos para a frota; muito lenta, cara e vulnerável a enxames e railguns.',
+    hp: 3600, dr: 5, shield: { cap: 1800, regen: 40, delay: 5 }, speed: 30, turn: 28,
+    weapons: [W('ast_siege', 'Lança orbital pesada', 'railgun', { dmg: 260, cd: 4.5, range: 880, speed: 1300, arc: 55, minTargetClass: 'small' }),
+      W('ast_ion', 'Pulso de contenção', 'ion', { dmg: 40, cd: 1.6, range: 700, speed: 650 })], ability: 'gravity_well' }),
+];
+
+export const SHIP_LIST = [...TERRAN, ...VORRAX, ...LUMEN, ...FERRIX, ...ASTRAL, ...PILOTS];
 export const SHIPS = Object.freeze(Object.fromEntries(SHIP_LIST.map((s) => [s.id, s])));
 
 export function getShip(id) {
@@ -483,8 +539,8 @@ export function getShip(id) {
   return s;
 }
 
-export function shipsOfFaction(factionId) {
-  return SHIP_LIST.filter((s) => s.faction === factionId);
+export function shipsOfFaction(factionId, { includePilots = false } = {}) {
+  return SHIP_LIST.filter((s) => s.faction === factionId && (includePilots || !s.pilotOnly));
 }
 
 export function sizeIndex(sizeClass) {
@@ -511,6 +567,12 @@ export function shipEhp(ship) {
  * @type {Record<string, {id:string, faction:string, name:string, desc:string, style:string, ships:[string, number][]}>}
  */
 export const PRESETS = {
+  ast_orbita: { id: 'ast_orbita', faction: 'astral', name: 'Órbita de Cerco', style: 'artillery',
+    desc: 'Arconte e lancetas ancoram alvos; o guardião protege a artilharia.',
+    ships: [['ast_arconte', 1], ['ast_guardiao', 1], ['ast_lanceta', 7]] },
+  ast_baluarte: { id: 'ast_baluarte', faction: 'astral', name: 'Baluarte Orbital', style: 'sustain',
+    desc: 'Guardiões cobrem uma rede de lancetas; menos alcance, mais proteção.',
+    ships: [['ast_guardiao', 3], ['ast_lanceta', 9]] },
   ter_linha: { id: 'ter_linha', faction: 'terran', name: 'Linha de Batalha', style: 'balanced',
     desc: 'Nave-mãe, encouraçado e cruzadores com escolta de corvetas.',
     ships: [['ter_prometeu', 1], ['ter_hercules', 1], ['ter_orion', 2], ['ter_artemis', 1], ['ter_falcao', 4], ['ter_vespa', 7]] },

@@ -10,12 +10,26 @@ própria. Você assiste, acelera o tempo e aprende o que funciona.
   formatos de 1v1 até 6v6 com aliados controlados pelo computador.
 - **Multijogador**: salas com código de 4 letras, de 1v1 até 6v6, bots preenchem as
   vagas vazias, chat, revanche, reconexão automática.
+- **Preparação e progressão**: biblioteca de frotas, formações, prioridades táticas,
+  objetivos de campanha e perfil persistente no servidor, com histórico e desbloqueios.
+- **Piloto opcional**: uma nave especial por comandante; o restante da frota continua
+  automático. O modo totalmente automático permanece disponível.
 - **Sem dependências de build**: JavaScript moderno (ES modules), Canvas 2D e Web Audio.
   Toda a arte e todo o som são gerados por código; não há arquivos de mídia.
 
-## Testar agora (3 passos)
+## Abrir no Windows com um duplo clique
 
-1. **Instale o Node.js** (versão LTS) em <https://nodejs.org> — só uma vez.
+O pacote **FrotaEstelar.exe** já inclui o Node e abre o jogo no navegador, sem
+terminal ou instalação de dependências. Guarde o executável no computador e dê
+um duplo clique; use **Encerrar** na pequena janela para fechar o servidor.
+Consulte [Windows: uso, geração do pacote e limites de validação](docs/WINDOWS.md).
+Baixe o executável nos arquivos da [pré-versão Windows](https://github.com/sabedoriameditativa-ops/fantastic-fortnight/releases/tag/frota-estelar-v0.2.0-preview.1).
+O ZIP do código-fonte não inclui o `.exe`; ao gerar o pacote localmente, o arquivo
+fica em `dist/FrotaEstelar.exe`.
+
+## Executar pelo código-fonte (3 passos)
+
+1. **Instale o Node.js 24 ou superior** em <https://nodejs.org> — só uma vez.
 2. **Baixe o jogo**: no GitHub clique em *Code → Download ZIP* e descompacte, ou
    `git clone https://github.com/sabedoriameditativa-ops/fantastic-fortnight.git`.
 3. **Abra o jogo**: dê dois cliques em `iniciar.bat` (Windows) ou rode `./iniciar.sh`
@@ -36,8 +50,9 @@ Enter; na janela que abre rode `node server\index.js` e depois acesse `http://lo
 
 Para jogar com amigos na mesma rede, eles abrem `http://SEU-IP:3000` (o IP do computador
 que rodou o script; veja com `ipconfig` no Windows ou `ifconfig`/`ip a` no macOS/Linux) e
-entram com o código da sala. Pela internet é preciso liberar a porta 3000 no roteador ou
-usar um túnel (por exemplo `ngrok http 3000`).
+entram com o código da sala. Para acesso pela internet, configure um proxy ou túnel
+HTTPS e inicie o servidor com `FE_COOKIE_SECURE=1`, preservando o domínio público no
+cabeçalho `Host`. Os perfis persistentes dependem da proteção do cookie de acesso.
 
 Dica: `npm install --omit=dev` instala só o necessário para jogar; o `npm install` completo
 também traz o Playwright (usado pelos testes ponta a ponta), que é bem maior.
@@ -50,9 +65,12 @@ também traz o Playwright (usado pelos testes ponta a ponta), que é bem maior.
 | **Enxame Vorrax** | Insetoides | Orgânico | Cascos vivos que se regeneram. Sem escudos, sem recuo, sem fim. | *Fome*: uma nave Vorrax que destrói um inimigo recupera parte do casco máximo. |
 | **Ascendência Lúmen** | Seres de energia | Cristalino | Escudos de luz, cascos de cristal. Feixes precisos e saltos de fase. | *Fase*: ao perder o escudo, a nave fica intocável por 1 s (uma vez a cada 20 s). |
 | **Nexo Ferrix** | Coletivo de máquinas | Nanitos | Nanitos que se reconstroem, canhões magnéticos e pulsos EMP. Fria eficiência. | *Rede Neural*: +10% de precisão contra naves minúsculas e pequenas. |
+| **Concílio Astral** | Navegantes gravitacionais | Cristalino | Controle de área, contenção e escoltas; vulnerável à pressão cinética. | Resistência parcial a deslocamentos gravitacionais. |
 
-Cada facção tem 8 naves (minúscula → nave-mãe), cada uma com uma habilidade
-própria, e 3 predefinições de frota prontas para usar. Os tipos de dano importam:
+As quatro facções originais mantêm suas 8 naves (minúscula → nave-mãe), cada uma
+com uma habilidade própria, e 3 predefinições. O Concílio Astral acrescenta
+Lanceta, Guardião e Arconte. Há também uma nave especial pilotável por facção:
+40 classes ao todo, sendo 35 de frota e 5 especiais. Os tipos de dano importam:
 lasers derretem escudos e cascos orgânicos; cinéticos e torpedos castigam blindagem
 e cristal; plasma e bioácido corroem nanitos; pulsos iônicos apagam escudos e
 interrompem a regeneração. A **Galeria de naves** dentro do jogo mostra a ficha
@@ -60,13 +78,13 @@ completa de cada nave, arma e habilidade.
 
 ## Instalação e execução
 
-Requisitos: **Node.js 22 ou superior** (`npm test` usa o descobridor de testes por
-glob e os *loader hooks* do Node 22). A única dependência de runtime é o pacote `ws`
+Requisitos: **Node.js 24 ou superior**, inclusive para o SQLite nativo usado pelos
+perfis. A única dependência de runtime instalada pelo npm é o pacote `ws`
 (WebSocket); o Playwright, usado só pelos testes ponta a ponta, é uma dependência
 de desenvolvimento.
 
 ```bash
-npm install
+npm ci
 npm start            # servidor em http://localhost:3000
 ```
 
@@ -80,8 +98,17 @@ Variáveis de ambiente úteis:
 | `HOST` | interface de rede (padrão: todas) |
 | `MAX_ROOMS` | limite de salas simultâneas |
 | `FE_MAX_TICKS`, `FE_TICK_MS`, `FE_COUNTDOWN_MS` | encurtam batalhas/contagem (usado pelos testes) |
+| `FE_DATA_DIR` | diretório persistente do SQLite; padrão: `frota-estelar-data` ao lado do checkout |
+| `FE_PROGRESSION_POLICY` | objeto JSON com ajustes da política de pontos e inatividade |
+| `FE_COOKIE_SECURE` | use `1` quando o servidor estiver atrás de um proxy HTTPS |
+| `CHROMIUM_PATH` | executável Chromium alternativo para os testes de navegador |
 
 `GET /health` responde `{ ok, rooms, uptime, sessions }`.
+
+O perfil pertence a este servidor e ao cookie privado deste navegador. Não há
+login global nem sincronização entre dispositivos. Faça backup do diretório de
+dados para preservar perfis. Consulte [Perfis e progressão](docs/PROFILES.md)
+para limites, perda gradual por inatividade, migração e verificação de resultados.
 
 ## Como jogar
 
@@ -97,10 +124,20 @@ Variáveis de ambiente úteis:
 4. **Confirmar e lutar**. A tela de resultados oferece *Jogar de novo* (mesma frota,
    nova semente), *Próximo nível*, *Editar frota* e *Menu*.
 
+No construtor, salve modelos nomeados na biblioteca, duplique, compare e reutilize
+suas composições. Escolha formação, posição inicial e prioridade dos alvos antes
+de confirmar. O tutorial está em **Como jogar**, e o relatório final ajuda a
+interpretar as perdas, o dano e o valor restante da frota.
+
+A campanha inclui eliminação, escolta, defesa, sobrevivência e ondas. A dificuldade
+controla a inteligência dos bots; o ajuste de recursos é separado e aparece no
+orçamento da missão. Personalidades variadas mudam as composições e a tática.
+
 Você também pode abrir uma batalha direta pela URL:
 `?autotest=1&level=3&difficulty=dificil&faction=vorrax&speed=4&seed=42`
 (`?seed=` fixa a semente de qualquer batalha de um jogador; `?debug=1` expõe
 `window.__fe` no console).
+Partidas com semente explícita são treino e não concedem pontos verificados.
 
 ### Multijogador (salas com código)
 
@@ -118,25 +155,31 @@ Você também pode abrir uma batalha direta pela URL:
 Quem cair durante a batalha é reconectado automaticamente (a sessão vale por
 60 s); se o anfitrião sair, o próximo jogador assume.
 
+Cada comandante pode indicar seu papel de vanguarda, apoio ou ataque. Os papéis
+comunicam a intenção ao time e não concedem bônus. O modo de pilotos é uma opção
+da sala: reserva 200 pontos por comandante para a nave especial, inclusive bots.
+Cada humano precisa da licença da facção para participar nesse modo. Em 6v6 são
+dois times com seis comandantes cada, misturando humanos e bots.
+
 ### Jogar em rede local (LAN)
 
 Rode `npm start` em um computador e descubra o IP dele na rede (`ipconfig` no
 Windows, `ip addr`/`ifconfig` no Linux/macOS). Os outros jogadores abrem
 `http://IP_DO_HOST:3000` (por exemplo `http://192.168.0.10:3000`) e entram pelo
 código da sala ou pelo link `http://192.168.0.10:3000/?sala=CODIGO`. Libere a porta
-no firewall do host se necessário. Para jogar pela internet, exponha a mesma porta
-(ou use um túnel) — o servidor é único e autoritativo, não há configuração extra.
+no firewall do host se necessário. Pela internet, use HTTPS conforme descrito acima;
+a página, a API de perfil e o WebSocket devem compartilhar a mesma origem.
 
 ### Dificuldades e níveis
 
-As dificuldades mudam os bots (e, no modo um jogador, o orçamento inimigo):
+As dificuldades mudam a inteligência dos bots. Recursos são um ajuste independente:
 
 | | Fácil | Normal | Difícil | Especialista |
 |---|---|---|---|---|
 | Reação / precisão da IA | lenta, erra alvos e habilidades | média | rápida | perfeita |
 | Foco de fogo, recuo, formação | não | sim | sim | sim |
 | Como monta a frota | aleatória, gasta 60–85% | predefinição | **contra-ataque** à sua frota | **contra-ataque** |
-| Orçamento inimigo (× do nível) | menor | igual | maior | ainda maior |
+| Recursos extras pela dificuldade | nenhum | nenhum | nenhum | nenhum |
 
 Os valores exatos ficam em `shared/aiProfiles.js`. Jogadores humanos sempre têm
 a IA de nave no nível *Especialista* — a dificuldade só afeta os bots.
@@ -145,9 +188,13 @@ Os 15 níveis formam uma campanha: **1–3** Confederação Terrana (orçamento 
 50–70% do seu), **4–6** Enxame Vorrax (chefe: Rainha-Guerreira no 6), **7–9**
 Ascendência Lúmen (chefe: Catedral no 9), **10–12** Nexo Ferrix (chefe: Mente
 Primária no 12), **13–15** facção aleatória com frotas de contra-ataque e orçamento
-120–150% (no 15 o inimigo sempre traz uma nave-mãe). A partir do **16** os níveis
+120–150% (no 15 o inimigo traz uma nave-mãe quando sua facção tem essa classe). A partir do **16** os níveis
 são infinitos e o orçamento inimigo cresce 10% por nível. O progresso (maior nível
 concluído por dificuldade) fica salvo no navegador.
+
+Os objetivos e reforços variam por missão. Em missões com ondas, o orçamento
+informado inclui a frota inicial e os reforços, sem multiplicadores ocultos de
+dificuldade.
 
 ### Regras da batalha
 
@@ -175,12 +222,26 @@ concluído por dificuldade) fica salvo no navegador.
 Em **Opções** você ajusta volumes (geral, música, efeitos, interface), mudo, movimento
 reduzido, qualidade dos efeitos, nomes e grade padrão, seu nome, e pode zerar o progresso.
 
+Com uma nave especial na frota, **P** alterna piloto manual/automático, as **setas**
+movem, **F** ou o botão esquerdo do mouse disparam, e **E** usa a habilidade. O mouse
+aponta para o cenário. Remapeie essas teclas em **Opções**. O controle retorna à IA
+ao perder foco, pausar ou desconectar; a morte da nave especial não encerra a batalha
+enquanto o restante da frota sobreviver. Os tiros especiais usam colisão direcional;
+as armas guiadas da frota continuam seguindo suas regras próprias.
+
+As opções também incluem redução de efeitos, alto contraste e rádio de batalha por
+facção, com frequência, legendas e volume. Voz sintetizada é opcional e usa apenas
+uma voz portuguesa instalada no dispositivo; sem essa voz, as legendas continuam
+funcionando. Não há serviço pago ou download de vozes.
+
 ## Testes, simulações e ferramentas de balanceamento
 
 ```bash
 npm test                     # testes unitários (node:test, test/**/*.test.js)
 npm run e2e                  # ponta a ponta no Chromium (Playwright): sobe o servidor
                              # numa porta livre e joga partidas reais pelo navegador
+npm run e2e:ui               # regressões de câmera, teclado, chat e HUD
+npm run e2e:features         # biblioteca, perfil, campanha, piloto e opções
 npm run simulate -- --help   # simulador headless (frota × frota, matrizes, dificuldade)
 ```
 
@@ -191,7 +252,21 @@ pacote `playwright`; baixe o navegador uma vez com:
 npx playwright install chromium
 ```
 
-(O runner também aceita um Chromium já instalado via `PLAYWRIGHT_BROWSERS_PATH`.
+No ambiente de nuvem preparado, o download do Chromium do Playwright não foi
+concluído; as tentativas receberam uma recusa da política de rede. Use o Chromium
+já instalado, sem alterar os testes:
+
+```bash
+CHROMIUM_PATH=/usr/bin/chromium npm run e2e
+CHROMIUM_PATH=/usr/bin/chromium npm run e2e:ui
+CHROMIUM_PATH=/usr/bin/chromium npm run e2e:features
+```
+
+Os testes de navegador usam dados de perfil temporários. Execute testes de
+desempenho e de navegador separadamente para evitar concorrência pela CPU.
+
+(O runner aceita a pasta dos navegadores geridos pelo Playwright via
+`PLAYWRIGHT_BROWSERS_PATH`; `CHROMIUM_PATH` seleciona um executável do sistema.
 Se o Playwright não puder ser importado, `npm run e2e` imprime o comando acima.)
 O simulador valida seus argumentos (`--ai` precisa ser um perfil de
 `shared/aiProfiles.js`; `--seeds`, `--budget` e `--maxTicks` são inteiros positivos)
@@ -211,9 +286,16 @@ node tools/simulate.js --a ter_linha --b fer_ferro --dump 7 --out /tmp/dump   # 
 Os critérios de aceitação de balanceamento (espelhos 50% ± 10, matriz de facções
 dentro de 35–65%, ritmo mediano 60–160 s, dificuldade monotônica, etc.) estão em
 `docs/SPEC.md` §8. Outras ferramentas: `tools/ui-shots.js` (percorre todas as telas e
-tira capturas), `tools/render-shots.js` (vitrine das 32 naves e quadros de batalha),
+tira capturas), `tools/render-shots.js` (vitrine das 40 classes de naves e quadros de batalha),
 `tools/audio-check.js` (verifica o áudio num Chromium real ou renderiza todas as
 receitas offline).
+
+Para reproduzir a amostra da facção Astral, execute
+`node tools/balance.js --seeds=8 --budget=1500`. Para medir uma batalha 6v6 real
+no navegador, use `CHROMIUM_PATH=/usr/bin/chromium node tools/benchmark-browser.js`.
+O segundo comando grava métricas e captura em uma pasta temporária, sem impor
+uma meta de FPS. Resultados e limites da validação estão em
+[Entrega e validação](docs/EVOLUCAO.md).
 
 ## Arquitetura (resumo)
 
@@ -234,7 +316,8 @@ test/        testes unitários; test-e2e/ testes ponta a ponta.
 docs/        ARCHITECTURE.md (contratos entre módulos), SPEC.md (regras) e propostas de design.
 ```
 
-A simulação é **determinística**: a mesma configuração e semente produzem a mesma
+A simulação é **determinística**: a mesma configuração, semente e sequência de
+comandos de piloto nos mesmos ticks produzem a mesma
 batalha, tick a tick, no servidor e no navegador. No modo um jogador ela roda num
 Web Worker; no multijogador roda no servidor (autoritativo) e os clientes apenas
 interpolam os quadros recebidos. Renderizador e áudio consomem o mesmo formato de
@@ -245,6 +328,8 @@ quadro nos dois casos.
 Toda a arte (naves, efeitos, fundo, interface) e todo o áudio (efeitos sonoros e
 trilha generativa) são **procedurais**, gerados em tempo de execução por código —
 o projeto não contém nem baixa nenhum arquivo de mídia. A única dependência de
-runtime é o pacote `ws`. Textos da interface em português do Brasil.
+runtime é o pacote `ws`. As fontes Orbitron e Exo 2 são distribuídas localmente
+sob a licença SIL Open Font License; os textos completos e a proveniência estão
+em `client/fonts`. Textos da interface em português do Brasil.
 
 Licença: MIT.

@@ -16,7 +16,7 @@ import { createEffects } from './effects.js';
 import {
   getDef, createSpriteCache, blitShip, drawLod0, drawShipDetails, pickBucket, lodFor, damageState, breatheScale,
 } from './sprites.js';
-import { palette, clamp, TAU } from './render/palette.js';
+import { palette, clamp, hash01, TAU } from './render/palette.js';
 
 const DELAY_LOCAL = 120, DELAY_NET = 160;
 const UI_FONT = '"Exo 2", "Segoe UI", system-ui, sans-serif';
@@ -47,7 +47,7 @@ export function createRenderer(canvas, o) {
   const delayMs = o.delayMs ?? (isLocal ? DELAY_LOCAL : DELAY_NET);
   const ctx = canvas.getContext('2d', { alpha: false });
   let dpr = Math.min(2, (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1) || 1);
-  const options = { showNames: false, grid: false, reducedMotion: false, quality: 'auto' };
+  const options = { showNames: false, grid: false, reducedMotion: false, reducedEffects: false, highContrast: false, quality: 'auto' };
   const playerNames = new Map();
   for (const p of start.players || []) playerNames.set(p.id, p.name || p.id);
 
@@ -180,7 +180,7 @@ export function createRenderer(canvas, o) {
   const pnow = () => (typeof performance !== 'undefined' ? performance.now() : 0);
   const lap = (k, t) => { const n = pnow(); perf.passes[k] += (n - t - perf.passes[k]) * 0.1; return n; };
   function adapt() {
-    if (options.quality !== 'auto') return;
+    if (options.quality !== 'auto' || options.reducedEffects) return;
     if (perf.total < 90) { perf.drawMs = Math.min(perf.drawMs, 12); return; } // ignore warm-up (sprite builds)
     const q = effects.quality;
     if (perf.drawMs > 18) {
@@ -189,7 +189,7 @@ export function createRenderer(canvas, o) {
       if (perf.badFrames >= 12) {
         perf.badFrames = 0;
         if (q.density > 0.25) { q.density = Math.max(0.25, q.density * 0.8); }
-        if (q.density < 0.6) { q.trails = false; q.chroma = false; spriteQuality.anims = q.density > 0.35; }
+        if (q.density < 0.6) { q.trails = false; q.chroma = false; q.glow = false; q.anims = spriteQuality.anims = q.density > 0.35; }
       }
       perf.goodFrames = 0;
     } else if (perf.drawMs < 11) {
@@ -198,7 +198,7 @@ export function createRenderer(canvas, o) {
       if (perf.goodFrames > 120) {
         perf.goodFrames = 0;
         q.density = Math.min(1, q.density * 1.15);
-        if (q.density >= 0.6) { q.trails = true; q.chroma = true; spriteQuality.anims = true; }
+        if (q.density >= 0.6) { q.trails = true; q.chroma = true; q.glow = true; q.anims = spriteQuality.anims = true; }
       }
     } else perf.goodFrames = 0;
   }
@@ -207,6 +207,22 @@ export function createRenderer(canvas, o) {
     if (name === 'low') { q.density = 0.35; q.trails = false; q.chroma = false; q.anims = false; spriteQuality.anims = false; }
     else if (name === 'medium') { q.density = 0.7; q.trails = true; q.chroma = false; q.anims = true; spriteQuality.anims = true; }
     else { q.density = 1; q.trails = true; q.chroma = true; q.anims = true; spriteQuality.anims = true; }
+    q.glow = name !== 'low';
+    q.reducedEffects = options.reducedEffects;
+    q.reducedMotion = options.reducedMotion || options.reducedEffects;
+    if (options.reducedEffects) {
+      q.density = 0.2; q.trails = false; q.chroma = false; q.glow = false;
+      q.anims = spriteQuality.anims = false;
+    }
+  }
+
+  function setOptions(opts = {}) {
+    for (const key of ['showNames', 'grid', 'reducedMotion', 'reducedEffects', 'highContrast']) {
+      if (typeof opts?.[key] === 'boolean') options[key] = opts[key];
+    }
+    if (['auto', 'low', 'medium', 'high'].includes(opts?.quality)) options.quality = opts.quality;
+    camera.setReducedMotion(options.reducedMotion || options.reducedEffects);
+    if (opts && ['quality', 'reducedMotion', 'reducedEffects'].some((key) => key in opts)) applyQualityPreset(options.quality);
   }
 
   // ---- audio lookup ----
@@ -239,15 +255,15 @@ export function createRenderer(canvas, o) {
       const cos = Math.cos(v.a), sin = Math.sin(v.a);
       if (lod === 0) {
         if (st.alpha !== 1) ctx.globalAlpha = st.alpha;
-        drawLod0(ctx, inf.pal, sx, sy, cos, sin, size * zoom, dpr);
+        drawLod0(ctx, inf.pal, sx, sy, cos, sin, size * zoom, dpr, inf.faction);
         ctx.globalAlpha = 1;
       } else {
         const spr = sprites.get(inf.def, inf.team, zoom, damageState(v.hp));
-        const scaleY = (lod === 2 && spriteQuality.anims && inf.faction === 'vorrax') ? breatheScale(inf.def, v.id, now) : 1;
+        const scaleY = (lod === 2 && spriteQuality.anims && !q.reducedMotion && inf.faction === 'vorrax') ? breatheScale(inf.def, v.id, now) : 1;
         blitShip(ctx, spr, sx, sy, cos, sin, zoom * st.spawnScale, dpr, st.alpha, scaleY);
         if (lod === 2 && st.spawnScale === 1) {
           if (st.alpha !== 1) ctx.globalAlpha = st.alpha;
-          drawShipDetails(ctx, inf.def, inf.pal, sx, sy, cos, sin, zoom, dpr, st, now, { anims: spriteQuality.anims && q.anims, glow: q.glow });
+          drawShipDetails(ctx, inf.def, inf.pal, sx, sy, cos, sin, zoom, dpr, st, now, { anims: spriteQuality.anims && q.anims, glow: q.glow, reducedMotion: q.reducedMotion });
           ctx.globalAlpha = 1;
         }
       }
@@ -257,8 +273,9 @@ export function createRenderer(canvas, o) {
     for (const g of effects.ghosts) {
       if (!g.def || !camera.isVisible(g.x, g.y, g.def.size)) continue;
       const u = (now - g.t0) / Math.max(1, g.until - g.t0);
-      const sh = g.shake * zoom;
-      const sx = camera.worldToScreenX(g.x) + (Math.random() - 0.5) * sh, sy = camera.worldToScreenY(g.y) + (Math.random() - 0.5) * sh;
+      const sh = q.reducedMotion ? 0 : g.shake * zoom;
+      const frame = Math.floor(now / 40);
+      const sx = camera.worldToScreenX(g.x) + (hash01(g.id, frame, 1) - 0.5) * sh, sy = camera.worldToScreenY(g.y) + (hash01(g.id, frame, 2) - 0.5) * sh;
       const spr = sprites.get(g.def, g.team, zoom, 2);
       blitShip(ctx, spr, sx, sy, Math.cos(g.a), Math.sin(g.a), zoom, dpr, 1 - u * 0.4, 1);
     }
@@ -279,9 +296,19 @@ export function createRenderer(canvas, o) {
       const showBar = big || hovered || followed || (size >= 30 && v.hp < 500 && !manyShips);
       const sx = camera.worldToScreenX(v.x), sy = camera.worldToScreenY(v.y);
       const top = sy - size * 0.55 * zoom - 6;
+      if (options.highContrast) {
+        // Different silhouettes identify teams even when their colors are hard to distinguish.
+        const x = sx, y = sy + size * 0.55 * zoom + 5, r = 3;
+        ctx.fillStyle = inf.team === 0 ? '#b8efff' : '#ffe09a';
+        ctx.strokeStyle = '#05070c'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        if (inf.team === 0) ctx.rect(x - r, y - r, r * 2, r * 2);
+        else { ctx.moveTo(x, y - r - 1); ctx.lineTo(x + r + 1, y); ctx.lineTo(x, y + r + 1); ctx.lineTo(x - r - 1, y); ctx.closePath(); }
+        ctx.stroke(); ctx.fill();
+      }
       if (followed) {
         ctx.strokeStyle = inf.pal.team; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.9;
-        ctx.setLineDash([4, 4]); ctx.lineDashOffset = -now * 0.02;
+        ctx.setLineDash([4, 4]); ctx.lineDashOffset = effects.quality.reducedMotion ? 0 : -now * 0.02;
         ctx.beginPath(); ctx.arc(sx, sy, size * 0.6 * zoom + 4, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
         ctx.globalAlpha = 1;
       }
@@ -360,7 +387,7 @@ export function createRenderer(canvas, o) {
     // 3. passes (restore is in a finally: a throwing pass must not leave the save stack growing every frame)
     let tp = lap('sim', t0);
     try {
-      background.draw(ctx, camera, now, { grid: options.grid, quality: effects.quality.density, reducedMotion: options.reducedMotion });
+      background.draw(ctx, camera, now, { grid: options.grid, quality: effects.quality.density, reducedMotion: effects.quality.reducedMotion, highContrast: options.highContrast });
       tp = lap('bg', tp);
       effects.drawArea(ctx, camera, dpr, now);
       tp = lap('area', tp);
@@ -428,13 +455,11 @@ export function createRenderer(canvas, o) {
     registerShips,
     draw,
     resize,
-    /** @param {{ showNames?: boolean, grid?: boolean, reducedMotion?: boolean, quality?: 'auto'|'low'|'medium'|'high' }} opts */
-    setOptions(opts) {
-      Object.assign(options, opts || {});
-      camera.setReducedMotion(options.reducedMotion);
-      if (opts && opts.quality) applyQualityPreset(opts.quality);
-    },
+    /** Presentation only; never changes simulation snapshots or random state. */
+    setOptions,
+    updateOptions: setOptions,
     getOptions() { return { ...options }; },
+    get options() { return { ...options }; },
     /** @returns {{ ships: Map<number, object>, tick: number }} */
     getView() { return { ships: interp.ships, tick: lastTick }; },
     camera: cameraApi,

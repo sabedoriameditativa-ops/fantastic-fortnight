@@ -33,6 +33,8 @@ export function mount(root, props, ctx) {
 
   const el = h('div.screen',
     h('div.screen-head', h('div.titles', h('h1', { text: T.howto.title })), h('div.actions', button(T.app.back, { test: 'back', onClick: () => ctx.go('menu') }))),
+    h('div.panel', h('h2', 'Seu primeiro comando em três passos'), h('p.small', 'Monte uma frota, escolha uma orientação e observe a batalha. Você pode voltar a este guia a qualquer momento.'),
+      button('Começar tutorial', { test: 'start-tutorial', primary: true, onClick: () => ctx.go('fleetBuilder', { mode: 'sp', tutorial: true, setup: { level: 1, difficulty: 'facil', teamSize: 1, allyDifficulty: 'normal' } }) })),
     h('div.howto-steps', steps),
     h('div.panel', { style: { marginTop: '12px' } }, h('h3', { text: T.howto.damageTitle }), h('div.tiny.muted', { style: { marginBottom: '8px' }, text: T.howto.damageHint }), h('div.table-wrap', matrix)),
     h('div.panel', h('h3', { text: T.howto.hullTypes }), h('dl.kv', FACTION_IDS.map((f) => [h('dt', { class: `f-${f}`, text: FACTIONS[f].short }), h('dd', `${HULL_TYPES[FACTIONS[f].hull].name}: ${HULL_TYPES[FACTIONS[f].hull].desc}`)]).flat())),

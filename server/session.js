@@ -115,12 +115,13 @@ export function createSessionStore({ graceMs = RECONNECT_GRACE_MS, onExpire = ()
   const byToken = new Map();
   let counter = 0;
 
-  function makeSession(name, ws) {
+  function makeSession(name, ws, profileId = null) {
     counter++;
     const session = {
       id: `p${counter}`,
       token: makeToken(),
       name,
+      profileId,
       ws,
       connected: true,
       roomCode: null,
@@ -176,25 +177,32 @@ export function createSessionStore({ graceMs = RECONNECT_GRACE_MS, onExpire = ()
 
   const store = {
     /** @returns {object} a fresh session bound to `ws` */
-    create(name, ws) {
-      return makeSession(name, ws);
+    create(name, ws, profileId = null) {
+      return makeSession(name, ws, profileId);
     },
     /**
      * Resume a session by token. The previous socket (if any) is replaced.
      * @returns {object|null}
      */
-    resume(token, ws) {
+    resume(token, ws, profileId = null) {
       if (typeof token !== 'string' || token.length === 0 || token.length > MAX_TOKEN_LENGTH) return null;
       const session = byToken.get(token);
       if (!session) return null;
+      // A WS bearer token cannot be moved between persistent profile cookies.
+      if (session.profileId !== profileId) return null;
       const old = session.ws;
-      if (old && old !== ws) {
-        try { old.close(CLOSE.REPLACED, 'replaced'); } catch { /* ignore */ }
-      }
+      // Consume the bearer token and bind its replacement before closing the
+      // previous transport: close handlers may run synchronously.
+      byToken.delete(token);
+      session.token = makeToken();
+      byToken.set(session.token, session);
       cancelExpiry(session);
       session.ws = ws;
       session.connected = true;
       session.disconnectedAt = 0;
+      if (old && old !== ws) {
+        try { old.close(CLOSE.REPLACED, 'replaced'); } catch { /* ignore */ }
+      }
       return session;
     },
     get(id) {
@@ -252,7 +260,7 @@ export function createSessionStore({ graceMs = RECONNECT_GRACE_MS, onExpire = ()
  * @param {number} [o.handshakeMs]     close sockets that never send `hello` after this long (default 10 s)
  */
 export function attachConnection(ws, {
-  sessions, lobby, clock = defaultClock, log = console, remoteAddress, limiter, handshakeMs = HANDSHAKE_TIMEOUT_MS,
+  sessions, lobby, clock = defaultClock, log = console, remoteAddress, limiter, handshakeMs = HANDSHAKE_TIMEOUT_MS, profileId = null,
 }) {
   let session = null;
   const bucket = createTokenBucket(RATE_LIMIT.perSecond, RATE_LIMIT.burst, clock.now);
@@ -304,7 +312,7 @@ export function attachConnection(ws, {
       try { ws.close(CLOSE.VERSION_MISMATCH, 'version'); } catch { /* ignore */ }
       return;
     }
-    const resumed = msg.token !== undefined ? sessions.resume(msg.token, ws) : null;
+    const resumed = msg.token !== undefined ? sessions.resume(msg.token, ws, profileId) : null;
     clearHandshakeTimer();
     if (resumed) {
       session = resumed;
@@ -316,13 +324,16 @@ export function attachConnection(ws, {
         log.warn('[session] reconnect handler error', err);
       }
     } else {
-      session = sessions.create(name, ws);
+      session = sessions.create(name, ws, profileId);
       session.remoteAddress = remoteAddress;
       welcome();
     }
   }
 
   ws.on('message', (data, isBinary) => {
+    // A replaced socket can still have queued messages before its close
+    // handshake finishes. It no longer has authority over this session.
+    if (session && session.ws !== ws) return;
     const now = clock.now();
     if (!bucket.take()) {
       while (violations.length && now - violations[0] > VIOLATION_WINDOW_MS) violations.shift();

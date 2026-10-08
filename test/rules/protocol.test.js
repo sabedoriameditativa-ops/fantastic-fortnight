@@ -224,3 +224,18 @@ describe('parseMessage', () => {
     assert.deepEqual(parseMessage('{"t":"pong","c":1,"s":2}', 's2c'), { ok: true, msg: { t: 'pong', c: 1, s: 2 } });
   });
 });
+
+test('pilot commands accept only bounded input, match identity, and known team roles', () => {
+  const input = { seq: 1, manual: true, moveX: 1, moveY: -1, aimX: 100, aimY: 50, fire: true, ability: false };
+  const valid = { t: 'pilot_input', matchId: 'battle-1', input };
+  assert.equal(validateMessage(valid).ok, true);
+  assert.equal(validateMessage({ ...valid, input: { seq: 2, manual: false } }).ok, true);
+  for (const bad of [{ moveX: 2 }, { aimX: NaN }, { seq: -1 }, { shipId: 55 }, { damage: 100000 }, { fire: 'yes' }]) {
+    assert.equal(validateMessage({ ...valid, input: { ...input, ...bad } }).ok, false, JSON.stringify(bad));
+  }
+  assert.equal(validateMessage({ ...valid, matchId: '' }).ok, false);
+  assert.equal(validateMessage({ t: 'set_role', role: 'support' }).ok, true);
+  assert.equal(validateMessage({ t: 'set_role', role: 'admin' }).ok, false);
+  assert.equal(validateMessage({ t: 'set_room', pilotsEnabled: true }).ok, true);
+  assert.equal(validateMessage({ t: 'set_room', pilotsEnabled: 1 }).ok, false);
+});

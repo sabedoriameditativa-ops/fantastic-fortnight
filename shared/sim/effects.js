@@ -3,8 +3,8 @@
 
 import { SHIPS, ABILITIES } from '../catalog.js';
 import { TICK_RATE, DT } from '../constants.js';
-import { queryBox, queryCircle, insertGrid } from './spatial.js';
-import { makeShip, isTargetable } from './ship.js';
+import { queryBox, queryCircle, insertGrid, relocateGrid } from './spatial.js';
+import { makeShip, isTargetable, addEffect } from './ship.js';
 import { queueDamage, heal } from './damage.js';
 
 export const MAX_LIVE_SHIPS = 800;
@@ -19,7 +19,7 @@ const buf = [];
 export function createArea(state, o) {
   const a = {
     id: state.nextAreaId++, kind: o.kind, x: o.x, y: o.y, r: o.r, team: o.team, ownerId: o.ownerId,
-    dps: o.dps || 0, trueDamage: !!o.trueDamage, pull: o.pull || 0, acid: !!o.acid,
+    dps: o.dps || 0, trueDamage: !!o.trueDamage, pull: o.pull || 0, acid: !!o.acid, slowMul: o.slowMul || 1,
     startTick: state.tick, until: state.tick + o.durationTicks, alive: true,
   };
   state.areas.push(a);
@@ -43,11 +43,12 @@ export function tickAreas(state) {
       const e = buf[k];
       if (!isTargetable(e, tick)) continue;
       if (a.acid) e.acidUntil = tick + 2;
+      if (a.slowMul < 1) addEffect(e, tick + 2, { slowMul: a.slowMul }, a.kind);
       if (a.pull > 0 && !e.latch) {
         const dx = a.x - e.x, dy = a.y - e.y;
         const d = Math.sqrt(dx * dx + dy * dy);
         if (d > 1) {
-          const step = Math.min(d, a.pull * DT);
+          const step = Math.min(d, a.pull * DT * (e.faction === 'astral' ? 0.7 : 1));
           e.x += (dx / d) * step; e.y += (dy / d) * step;
         }
       }
@@ -136,6 +137,9 @@ export function teleportShip(state, s, x, y) {
     if (!moved) break;
   }
   s.x = x; s.y = y;
+  // A teleport has no physical trajectory; swept projectiles start testing at the exit.
+  s.prevX = x; s.prevY = y;
+  relocateGrid(state.grid, s.id, x, y);
   if (s.latchedBy > 0) detachAll(state, s);
 }
 
@@ -165,7 +169,7 @@ export function tickLatches(state) {
     s.heading = Math.atan2(-L.oy, -L.ox);
     if ((tick - L.start) % PULSE === 0 && tick > L.start) {
       queueDamage(state, s.id, host.id, p.dps * 0.5, 'bio', LEECH_OPTS);
-      if (!state.suddenDeath) heal(state, s.id, s, p.healPerSec * 0.5, 'hull'); // continuous healing: off in sudden death (damage.js heal())
+      if (!state.suddenDeath && s.disruptedUntil <= tick) heal(state, s.id, s, p.healPerSec * 0.5, 'hull'); // continuous healing: disabled by disruption and sudden death
     }
   }
 }

@@ -1,11 +1,11 @@
 {
   "name": "frota-estelar",
-  "version": "0.1.0",
+  "version": "0.2.0-preview.1",
   "description": "Frota Estelar — jogo de estratégia espacial com batalhas automáticas (single-player e multiplayer)",
   "type": "module",
   "private": true,
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "start": "node server/index.js",
@@ -13,13 +13,17 @@
     "setup": "npm install --omit=dev --no-audit --no-fund",
     "test": "node --test \"test/**/*.test.js\"",
     "simulate": "node tools/simulate.js",
-    "e2e": "node test-e2e/run.js"
+    "e2e": "node test-e2e/run.js",
+    "e2e:ui": "node test-e2e/ui-regressions.js",
+    "e2e:features": "node test-e2e/features.js",
+    "build:windows": "node tools/build-windows.js"
   },
   "license": "MIT",
   "dependencies": {
     "ws": "^8.22.0"
   },
   "devDependencies": {
+    "fflate": "0.8.2",
     "playwright": "1.56.1"
   }
 }

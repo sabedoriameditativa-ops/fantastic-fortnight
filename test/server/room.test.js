@@ -620,3 +620,86 @@ describe('room: disconnects, host migration, destruction', () => {
     assert.equal(room.leave(host).code, ERR.NOT_IN_ROOM);
   });
 });
+
+test('every material budget change resets ready even when both fleets remain legal', () => {
+  const { room, host } = setup({ budget: 1500 });
+  const b = createFakeSession('b');
+  room.join(b);
+  const fleet = presetFleet('ter_linha', 800);
+  readyUp(room, host, fleet);
+  readyUp(room, b, fleet);
+  assert.equal(room.setRoom(host, { budget: 1500 }).ok, true);
+  assert.equal(room.toState('h').slots[0][0].ready, true, 'same budget is a no-op');
+  for (const budget of [2500, 800]) {
+    assert.equal(room.setRoom(host, { budget }).ok, true);
+    for (const slot of room.toState('h').slots.flat()) {
+      assert.equal(slot.hasFleet, true, 'legal fleet survives');
+      assert.equal(slot.ready, false, 'commander must approve the new match budget');
+    }
+    assert.equal(room.start(host).code, ERR.NOT_ALL_READY);
+    room.setReady(host, true);
+    room.setReady(b, true);
+  }
+});
+
+test('team roles are public coordination choices, reset readiness, and are guarded by phase/membership', () => {
+  const { room, host, clock } = setup();
+  readyUp(room, host);
+  assert.equal(room.setRole(host, 'support').ok, true);
+  assert.equal(room.toState('h').slots[0][0].role, 'support');
+  assert.equal(room.toState('h').slots[0][0].ready, false);
+  assert.equal(room.setRole(host, 'admin').code, ERR.BAD_MESSAGE);
+  const guest = createFakeSession('g');
+  room.join(guest);
+  const spectator = createFakeSession('s');
+  room.join(spectator);
+  assert.equal(room.setRole(spectator, 'striker').code, ERR.SLOT_INVALID);
+  readyUp(room, host);
+  readyUp(room, guest);
+  room.start(host);
+  assert.equal(room.setRole(host, 'striker').code, ERR.WRONG_PHASE);
+  clock.advance(5000);
+  assert.equal(host.last('battle_start').players.find((p) => p.id === 'h').role, 'support');
+});
+
+test('pilot mode reserves equal budget, validates match/owner, and returns to AI on disconnect', () => {
+  const { room, host, clock, startMatch } = setup({ budget: 800 });
+  readyUp(room, host, presetFleet('ter_linha', 800));
+  assert.equal(room.setRoom(host, { pilotsEnabled: true }).ok, true);
+  assert.equal(room.toState('h').fleetBudget, 600);
+  assert.equal(room.toState('h').slots[0][0].ready, false);
+  assert.equal(room.setFleet(host, presetFleet('ter_linha', 800)).code, ERR.FLEET_INVALID);
+  readyUp(room, host, presetFleet('ter_linha', 600));
+  assert.equal(room.start(host, { fillBots: true }).ok, true);
+  clock.advance(5000);
+  const start = host.last('battle_start');
+  const state = startMatch.calls[0].state;
+  assert.ok(start.matchId);
+  assert.equal(start.players.filter((p) => p.pilot).length, 2, 'bot and human both receive the special');
+  assert.equal(start.ships.filter((s) => s.pilot).length, 2);
+  for (const p of start.players) assert.equal(validateFleet(p.fleet, 600).ok, true);
+  const input = { seq: 1, manual: true, moveX: 1, moveY: 0, aimX: 300, aimY: 300, fire: true, ability: false };
+  assert.equal(room.pilotInput(host, 'old-match', input).code, ERR.STALE_MATCH);
+  assert.equal(room.pilotInput(host, start.matchId, input).ok, true);
+  assert.equal(state.pilots.h.manual, true);
+  const bot = start.players.find((p) => p.isBot);
+  assert.equal(state.pilots[bot.id].manual, false, 'the sender cannot pilot another owner');
+  assert.equal(room.pilotInput(host, start.matchId, input).code, 'PILOT_STALE_INPUT');
+  room.onDisconnect(host);
+  assert.equal(state.pilots.h.manual, false);
+  room.onReconnect(host);
+  assert.equal(host.last('battle_start').matchId, start.matchId, 'reconnect preserves battle identity');
+  assert.equal(room.pilotInput(host, start.matchId, { seq: 2, manual: false }).ok, true);
+});
+
+test('persistent profile gates fleet and pilot unlocks before ready/start', () => {
+  let pilotUnlocked = false;
+  const profiles = { validateFleet: () => ({ ok: true }), validatePilot: () => pilotUnlocked };
+  const { room, host } = setup({ budget: 800, room: { pilotsEnabled: true, profiles } });
+  const fleet = presetFleet('ter_linha', 600);
+  assert.equal(room.setFleet(host, fleet).code, 'CONTENT_LOCKED');
+  pilotUnlocked = true;
+  readyUp(room, host, fleet);
+  pilotUnlocked = false;
+  assert.equal(room.start(host, { fillBots: true }).code, ERR.NOT_ALL_READY, 'start rechecks server unlocks');
+});

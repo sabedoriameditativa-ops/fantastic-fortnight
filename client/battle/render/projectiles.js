@@ -40,7 +40,7 @@ export function createProjectiles(o) {
     const pr = {
       id: p.id, kind: p.kind, x: p.x, y: p.y, a, speed: p.speed || 400, dstId: p.dstId, tx: p.tx, ty: p.ty,
       team: p.team, col: p.col, colB: p.colB || '#ffffff', size: p.size || 1, born: p.now, lastEmit: p.now,
-      seed: p.seed ?? ((p.id * 7919) & 1023), arrived: false, aoe: p.aoe || 0,
+      seed: p.seed ?? ((p.id * 7919) & 1023), arrived: false, aoe: p.aoe || 0, directional: !!p.directional,
       maxLife: (range / Math.max(50, p.speed || 400)) * 1000 + 2500,
       colIdx: P.color(p.col), colBIdx: P.color(p.colB || '#ffffff'),
     };
@@ -58,13 +58,13 @@ export function createProjectiles(o) {
   function update(dt, now, view, density) {
     for (const pr of byId.values()) {
       if (now - pr.born > pr.maxLife) { byId.delete(pr.id); continue; }
-      const t = view(pr.dstId);
+      const t = pr.directional ? null : view(pr.dstId);
       if (t) { pr.tx = t.x; pr.ty = t.y; }
       const dx = pr.tx - pr.x, dy = pr.ty - pr.y;
       const dist = Math.hypot(dx, dy);
       if (dist < 6) { pr.arrived = true; continue; }
       let want = Math.atan2(dy, dx);
-      if (pr.kind === 'ltorpedo' || pr.kind === 'spore') want += Math.sin(now * 0.012 + pr.seed) * 0.35; // serpentine
+      if (!pr.directional && (pr.kind === 'ltorpedo' || pr.kind === 'spore')) want += Math.sin(now * 0.012 + pr.seed) * 0.35; // serpentine
       let d = want - pr.a;
       while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU;
       const turn = (TURN[pr.kind] || 6) * dt;
@@ -72,6 +72,7 @@ export function createProjectiles(o) {
       const step = Math.min(dist, pr.speed * dt);
       pr.x += Math.cos(pr.a) * step; pr.y += Math.sin(pr.a) * step;
       // trail emission
+      if (density <= 0) continue;
       const since = now - pr.lastEmit;
       switch (pr.kind) {
         case 'missile':
@@ -109,13 +110,27 @@ export function createProjectiles(o) {
     const vr = cam.visibleRect(60);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.lineCap = 'round';
-    const simple = z < 0.45;
+    const simple = z < 0.45 || quality < 0.5;
     // additive pass for all projectiles (they are emissive)
     ctx.globalCompositeOperation = 'lighter';
     for (const pr of byId.values()) {
       if (pr.x < vr.x0 || pr.x > vr.x1 || pr.y < vr.y0 || pr.y > vr.y1) continue;
       const sx = cam.worldToScreenX(pr.x), sy = cam.worldToScreenY(pr.y);
       const c = Math.cos(pr.a), s = Math.sin(pr.a);
+      if (quality < 0.5) {
+        // Keep every shot visible on low quality; a compact head and direction
+        // stroke replace bloom, flicker and multiple sub-particles.
+        const length = Math.max(3, (pr.kind === 'rail' ? 22 : 6) * z * pr.size);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = pr.col; ctx.lineWidth = Math.max(1, 1.5 * z); ctx.globalAlpha = 0.9;
+        ctx.beginPath(); ctx.moveTo(sx - c * length, sy - s * length); ctx.lineTo(sx, sy); ctx.stroke();
+        if (['missile', 'torpedo', 'ltorpedo', 'plasma', 'spore'].includes(pr.kind)) {
+          const r = Math.max(1.2, 2 * z);
+          ctx.fillStyle = pr.col;
+          ctx.beginPath(); ctx.arc(sx, sy, r, 0, TAU); ctx.fill();
+        }
+        continue;
+      }
       switch (pr.kind) {
         case 'tracer': {
           const l = 8 * z * pr.size;

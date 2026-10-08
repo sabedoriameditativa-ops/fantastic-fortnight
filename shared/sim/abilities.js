@@ -86,6 +86,47 @@ function shieldPulse(ctx, radius, shieldDamage, disruptSeconds, extra) {
 }
 
 export const ABILITY_REGISTRY = {
+  gravity_snare: {
+    trigger(ctx) {
+      const t = ctx.target;
+      return t && t.alive && t.untargetableUntil <= ctx.tick && dist(ctx.me, t) <= P('gravity_snare').range
+        && !t.fx.some((f) => f.key === 'gravity_snare' && f.until > ctx.tick) ? 1 : 0;
+    },
+    cast(ctx) {
+      const t = ctx.target; if (!t) return;
+      addEffect(t, ctx.tick + dur('gravity_snare'), { slowMul: P('gravity_snare').slowMul }, 'gravity_snare');
+      emitCast(ctx, t.id, t.x, t.y);
+    },
+  },
+  orbital_aegis: {
+    trigger(ctx) {
+      if (countEnemies(ctx.state, ctx.me, 650) === 0) return 0;
+      alliesWithin(ctx.state, ctx.me, P('orbital_aegis').radius, buf);
+      return buf.some((s) => s.extraShield < P('orbital_aegis').shield * 0.5) || ctx.me.extraShield === 0 ? 1 : 0;
+    },
+    cast(ctx) {
+      const { me, state } = ctx, p = P('orbital_aegis');
+      alliesWithin(state, me, p.radius, buf); buf.push(me);
+      for (const s of buf) { s.extraShield = Math.max(s.extraShield, p.shield); s.extraShieldUntil = Math.max(s.extraShieldUntil, ctx.tick + dur('orbital_aegis')); }
+      state.events.push(['aoe', Math.round(me.x), Math.round(me.y), p.radius, 'orbital_aegis']);
+      emitCast(ctx, 0, me.x, me.y);
+    },
+  },
+  gravity_well: {
+    trigger(ctx) {
+      const p = P('gravity_well');
+      const t = ctx.target;
+      if (!t || dist(ctx.me, t) > p.range || t.untargetableUntil > ctx.tick) return 0;
+      ctx.me.ability.castX = t.x; ctx.me.ability.castY = t.y;
+      return 1;
+    },
+    cast(ctx) {
+      const { me, state } = ctx, p = P('gravity_well');
+      createArea(state, { kind: 'gravity_well', x: me.ability.castX, y: me.ability.castY, r: p.radius,
+        durationTicks: dur('gravity_well'), team: me.team, ownerId: me.id, pull: p.pull, slowMul: p.slowMul });
+      emitCast(ctx, 0, me.ability.castX, me.ability.castY);
+    },
+  },
   // --- Terran ---------------------------------------------------------------
   afterburner: {
     trigger(ctx) {

@@ -14,8 +14,12 @@ numbers below reference it. Long-form design rationale: `docs/design/*.md`.
 - **Budget**: Escaramuça 800, Padrão 1500 (default), Guerra Total 2500 points per
   player, same for everybody in a match. Unspent points are allowed (UI warns).
 - **Caps per player**: mothership 1, capital 2, large 4, medium 12, small 24, tiny 24
-  (Vorrax tiny 32); total purchased ships ≤ 40, ≥ 1.
+  (Vorrax tiny 32); ordinary fleet ships ≤ 40, ≥ 1. Optional pilot mode adds exactly
+  one special ship and reserves 200 points from that commander's fleet budget.
 - **Factions**: a fleet contains ships of one faction only.
+- **Planning**: formation (`balanced`, `wedge`, `line`, `screen`), lane position
+  (`front`, `center`, `rear`) and target priority are chosen before battle. They
+  alter placement and AI scoring, not weapon statistics or the commander's budget.
 - **Deployment**: team 0 on the left facing +x, team 1 on the right facing −x
   (mirrored). Each player owns a horizontal lane (arena height / players per side,
   min 300 u); lanes are stacked and centered. Within a lane, ships are placed in
@@ -60,8 +64,10 @@ numbers below reference it. Long-form design rationale: `docs/design/*.md`.
   `hit = rng.next() < p`.
 - `speed = 0` → hitscan: damage applied this tick, event `shot`. Else a projectile is
   created with `hitRolled`, travels at `speed` toward the target's current position each
-  tick (all projectiles track their target visually/mechanically; a miss flies to an offset
+  tick (automatic fleet projectiles track their target visually/mechanically; a miss flies to an offset
   point and fizzles), impacts when within `target.radius + 6`. Events `proj` then `pend`.
+  Manually piloted specialist shots instead follow the aim direction and use swept
+  hull collisions; they can physically miss a moving target.
 - **Interceptable** projectiles (missile, torpedo) can be destroyed by PD/flak
   (`pend` outcome 2). `countermeasures` makes the next N incoming interceptables miss.
 - **AoE**: on impact, every enemy within `aoe` of the impact point takes damage scaled
@@ -88,10 +94,13 @@ if target.shield > 0:
 hull = raw × DAMAGE_MULT[type][hullType]
 if type !== 'railgun': hull = max(hull × armorFloor, hull − (dr + tempDr))
 hull = max(minHullDamage, hull) if raw > 0
-hp -= hull; lastHullHitTick = tick; dot applied if weapon.dot (ticks each 0.5 s, ignore DR); ion → disrupt
+effectiveHull = min(hp, hull); hp -= effectiveHull; lastHullHitTick = tick
+dot applied if weapon.dot (ticks each 0.5 s, ignore DR); ion → disrupt
 ```
 - Damage is queued during the tick and applied in `(srcId, sequence)` order; deaths are
   processed in a dedicated phase (two ships can kill each other in the same tick).
+  Statistics and tiebreaks count only shield actually absorbed and effective hull
+  removed; damage beyond the remaining health is not credited.
 - **Regen** (per tick, skipped while disrupted or in sudden death): shields regen after
   `delay` seconds without shield damage; organic hulls regen always; nanite hulls repair
   after 2 s without hull damage (`COMBAT.naniteRepairDelay`).
@@ -212,7 +221,7 @@ Effects of the same ability id refresh (longest duration wins) instead of stacki
 | teamWeight (focus fire) | 0 | 0.5 | 1 | 1 |
 | overkillAvoid | off | off | on | on |
 | retreat / formation / kiting | off | on | on | on |
-| budgetMul (enemy budget) | 0.8 | 1.0 | 1.05 | 1.2 |
+| budgetMul (legacy field, no hidden resources) | 1.0 | 1.0 | 1.0 | 1.0 |
 | builder | random | preset | counter | counter |
 Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
 
@@ -220,16 +229,27 @@ Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
 - Setup: level (1–15, endless after), difficulty, team size (1v1..6v6). Allies are bots of
   the player's chosen ally difficulty (default normal) with random factions and preset
   fleets; enemies follow the level.
-- Enemy budget = `round(1500 × level.enemyBudgetMul × profile.budgetMul)`; the player always has 1500.
+- Enemy budget = `round(1500 × level.enemyBudgetMul × setup.resourceMul)`;
+  `resourceMul` is an explicit 0.5–2 setting, independent of intelligence.
+  The player's total budget remains 1500, including the optional special ship.
 - Levels: 1 Primeiro Contato (terran ×0.5, random builder), 2 Patrulha de Fronteira (terran ×0.6),
   3 Bloqueio Orbital (terran ×0.7), 4 Ninho Vorrax (vorrax ×0.7), 5 Maré Viva (vorrax ×0.8),
   6 A Rainha Desperta (vorrax ×0.9, boss: Rainha guaranteed), 7 Luz Distante (lumen ×0.85),
   8 Coro de Cristal (lumen ×0.95), 9 Catedral Errante (lumen ×1.0, boss Catedral),
   10 Sinal Ferrix (ferrix ×0.95), 11 Linha de Ferro (ferrix ×1.05), 12 Mente Primária (ferrix ×1.15, boss),
   13 Aliança Rompida (random ×1.2, counter builder), 14 Armada Negra (random ×1.3, counter),
-  15 Fim dos Tempos (random ×1.5, counter + mothership guaranteed). Level n > 15: random,
+  15 Fim dos Tempos (random ×1.5, counter + mothership when the faction has one). Level n > 15: random,
   ×(1.5 + 0.1·(n−15)). Progress (max level cleared per difficulty) in `localStorage`.
 - Results screen offers: play again (same fleet, new seed), next level, edit fleet, menu.
+- Missions additionally include escort, defense, survival and waves. The displayed
+  enemy budget includes the initial force and scheduled reinforcements. Objective
+  ships have no weapons and do not contribute targeting pressure or coordination.
+- Bots choose balanced/aggressive/defensive/swarm/artillery personalities. Personality
+  changes composition and preferred combat range without granting extra resources.
+- Verified runs use server-generated configuration and seed, then server replay of
+  the accepted pilot commands. Training and explicit-seed runs preserve local
+  progress without granting server points. Profile rules are in
+  [PROFILES.md](PROFILES.md); acquired content never receives stat bonuses.
 
 ## 5. Multiplayer
 - Rooms with 4-letter codes; host picks team size, budget and default bot difficulty; players
@@ -237,6 +257,10 @@ Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
   (optionally auto-filling empty slots with bots). 5 s countdown during which bot fleets are
   built (counter builders see the human fleets of the other team). Server simulates and streams
   10 Hz frames; clients interpolate. Results → rematch vote.
+- Vanguarda/Apoio/Ataque are team coordination labels. Optional pilots reserve
+  200 points for every commander; humans need the appropriate permanent unlock.
+  The server validates owner, sequence, match, movement, firing and abilities.
+  Loss of connection returns control to AI; the remaining fleet stays automatic.
 
 ## 6. Art direction (summary; full detail in `docs/design/visuals.md`)
 - Procedural sprites per ship class described as data (mirrored polygon layers in a 100×100
@@ -266,7 +290,7 @@ Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
   defeat stingers; crossfades on bar boundaries; faction motifs.
 
 ## 8. Balance and acceptance criteria (headless, `tools/simulate.js`)
-1. Determinism: same config + seed → identical `hashState` at ticks 100, 1000 and end; identical event stream.
+1. Determinism: same config + seed + accepted pilot commands at the same ticks → identical `hashState` at ticks 100, 1000 and end; identical event stream.
 2. Mirror matches (each preset vs itself, sides swapped, ≥ 40 seeds): side win rate 50% ± 10, draws < 5%.
 3. Faction matrix (presets pooled, ≥ 20 seeds per pair, both sides): every faction vs every other within 35–65%.
 4. Per-preset pairs within 20–80% (hard counters allowed, stomps not).

@@ -9,13 +9,14 @@ import { validateFleet, fleetCost, presetFleet, fleetSummary } from '../../share
 import { DIFFICULTIES, BUDGETS } from '../../shared/constants.js';
 import { FACTION_IDS, SHIPS, PRESET_LIST, PRESETS, presetsOfFaction } from '../../shared/catalog.js';
 import { createRng } from '../../shared/rng.js';
+import { BOT_PERSONALITY_IDS, getAiProfile, AI_PROFILES } from '../../shared/aiProfiles.js';
 
 const BUDGET_POINTS = Object.values(BUDGETS).map((b) => b.points);
 
 const hasMothership = (fleet) => fleet.ships.some((e) => SHIPS[e.cls].sizeClass === 'mothership');
 
 describe('buildBotFleet', () => {
-  test('valid for 200 seeds × 4 difficulties × 4 factions × 3 budgets', () => {
+  test('valid for 200 seeds × every difficulty, faction and budget', () => {
     const enemyFleets = [presetFleet('lum_coro', 1500)];
     let n = 0;
     for (let seed = 0; seed < 200; seed++) {
@@ -32,10 +33,10 @@ describe('buildBotFleet', () => {
         }
       }
     }
-    assert.equal(n, 200 * 4 * 4 * 3);
+    assert.equal(n, 200 * DIFFICULTIES.length * FACTION_IDS.length * BUDGET_POINTS.length);
   });
 
-  test('facil: random builder, spends 60–85% of the budget and never buys a mothership', () => {
+  test('facil: random builder, spends 90–100% of the same allowance and never buys a mothership', () => {
     for (let seed = 0; seed < 300; seed++) {
       const faction = FACTION_IDS[seed % 4];
       const budget = BUDGET_POINTS[seed % 3];
@@ -82,7 +83,7 @@ describe('buildBotFleet', () => {
       assert.ok(FACTION_IDS.includes(f.faction));
       factions.add(f.faction);
     }
-    assert.equal(factions.size, 4);
+    assert.equal(factions.size, FACTION_IDS.length);
     assert.equal(buildBotFleet({ budget: 1500, difficulty: 'normal', rng: createRng('x') }).faction,
       buildBotFleet({ budget: 1500, difficulty: 'normal', rng: createRng('x') }).faction);
   });
@@ -114,6 +115,38 @@ describe('buildBotFleet', () => {
     const f = buildBotFleet({ budget: 1500, difficulty: 'normal', rng: createRng(2), faction: 'terran', mustInclude: ['vor_rainha'] });
     assert.equal(f.faction, 'terran');
     assert.ok(!f.ships.some((e) => e.cls === 'vor_rainha'));
+  });
+});
+
+describe('bot personalities', () => {
+  test('doctrine changes tactics without boosting intelligence or resources', () => {
+    for (const difficulty of DIFFICULTIES) for (const personality of BOT_PERSONALITY_IDS) {
+      const p = getAiProfile(difficulty, personality), base = AI_PROFILES[difficulty];
+      for (const key of ['thinkInterval', 'scoreNoise', 'randomTargetProb', 'abilityDelayTicks', 'abilityMiscastProb', 'abilityNoise', 'budgetMul']) {
+        assert.equal(p[key], base[key], `${difficulty}/${personality}/${key}`);
+      }
+      assert.equal(p.budgetMul, 1);
+    }
+    assert.equal(getAiProfile('especialista', 'aggressive').retreat, false);
+    assert.equal(getAiProfile('especialista', 'defensive').retreat, true);
+    assert.equal(getAiProfile('normal', 'swarm').formation, false);
+  });
+
+  test('personalities prefer different compositions and all obey the same budget', () => {
+    const seen = new Map(BOT_PERSONALITY_IDS.map((id) => [id, new Set()]));
+    for (const personality of BOT_PERSONALITY_IDS) for (let seed = 0; seed < 100; seed++) {
+      const options = { faction: 'terran', budget: 1500, difficulty: 'normal', personality };
+      const a = buildBotFleet({ ...options, rng: createRng(`personality:${seed}`) });
+      const b = buildBotFleet({ ...options, rng: createRng(`personality:${seed}`) });
+      assert.deepEqual(a, b);
+      assert.equal(validateFleet(a, 1500).ok, true);
+      seen.get(personality).add(JSON.stringify(a));
+    }
+    const options = { faction: 'vorrax', budget: 1500, difficulty: 'normal' };
+    const swarm = buildBotFleet({ ...options, personality: 'swarm', rng: createRng(3) });
+    const artillery = buildBotFleet({ ...options, personality: 'artillery', rng: createRng(3) });
+    assert.notDeepEqual(swarm, artillery);
+    for (const fleets of seen.values()) assert.ok(fleets.size > 1);
   });
 });
 
@@ -154,7 +187,7 @@ describe('counter builder', () => {
   test('picks differently for different enemy compositions (every faction)', () => {
     const swarm = [{ faction: 'vorrax', ships: [{ cls: 'vor_larva', count: 32 }, { cls: 'vor_zangao', count: 8 }] }];
     const heavyShield = [{ faction: 'terran', ships: [{ cls: 'ter_hercules', count: 4 }, { cls: 'ter_atlas', count: 1 }] }];
-    const expected = { terran: ['ter_atlas', 'ter_misseis'], vorrax: ['vor_chuva', 'vor_garras'], lumen: ['lum_catedral', 'lum_dissonancia'], ferrix: ['fer_fabrica', 'fer_ferro'] };
+    const expected = { terran: ['ter_atlas', 'ter_misseis'], vorrax: ['vor_chuva', 'vor_garras'], lumen: ['lum_catedral', 'lum_dissonancia'], ferrix: ['fer_fabrica', 'fer_ferro'], astral: ['ast_baluarte', 'ast_orbita'] };
     for (const faction of FACTION_IDS) {
       const a = pickCounterPreset(faction, swarm, createRng(1));
       const b = pickCounterPreset(faction, heavyShield, createRng(1));

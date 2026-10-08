@@ -90,6 +90,14 @@ export function fireWeapons(state) {
   for (let i = 0; i < ord.length; i++) {
     const s = ord[i];
     if (!s.alive || s.stunUntil > tick) continue;
+    if (s.pilotControl?.manual) {
+      if (s.pilotControl.fire) for (const w of s.weapons) {
+        if (w.readyAt > tick) continue;
+        spawnDirectional(state, s, w, s.heading, w.def.damage * s.mod.dmgMul * w.mod.dmgMul);
+        setCooldown(state, s, w);
+      }
+      continue;
+    }
     const target = s.ai.targetId > 0 ? ships[s.ai.targetId - 1] : null;
     const ws = s.weapons;
     for (let k = 0; k < ws.length; k++) {
@@ -114,7 +122,7 @@ export function fireWeapons(state) {
 function continueCharge(state, s, w) {
   const tick = state.tick;
   const t = state.ships[w.charging - 1];
-  if (!canShoot(s, w, t, tick) && !(t && t.alive && t.team !== s.team && t.sizeIdx >= w.minTargetIdx && withinLoose(s, w, t))) {
+  if (!canShoot(s, w, t, tick) && !(t && isTargetable(t, tick) && t.team !== s.team && t.sizeIdx >= w.minTargetIdx && withinLoose(s, w, t))) {
     w.charging = 0; w.readyAt = tick + 10; // cancelled: short re-aim delay
     return;
   }
@@ -143,6 +151,13 @@ export function fireAt(state, s, w, t) {
   const d = Math.sqrt((t.x - s.x) * (t.x - s.x) + (t.y - s.y) * (t.y - s.y));
   const salvo = Math.max(1, Math.round(w.def.salvo * w.mod.salvoMul));
   let dmg = w.def.damage * s.mod.dmgMul * w.mod.dmgMul;
+  if (w.def.directional) {
+    // AI leads a moving target using its current velocity; collision still decides the hit.
+    const flight = d / w.def.speed;
+    const angle = Math.atan2(t.y + t.vy * flight - s.y, t.x + t.vx * flight - s.x);
+    for (let k = 0; k < salvo; k++) spawnDirectional(state, s, w, angle, dmg);
+    setCooldown(state, s, w); return;
+  }
   if (w.def.type === 'torpedo' && s.stealthDmgMul > 1) { dmg *= s.stealthDmgMul; s.stealthDmgMul = 1; }
   if (s.pierceReady && w.def.type === 'railgun') {
     s.pierceReady = false;
@@ -222,7 +237,8 @@ function allocProjectile(state) {
   if (state.projFree.length > 0) p = pool[state.projFree.pop()];
   else {
     p = { slot: pool.length, id: 0, alive: false, srcId: 0, dstId: 0, team: 0, weaponIdx: 0, type: '', dmg: 0, x: 0, y: 0,
-      speed: 0, hit: false, aoe: 0, dot: null, interceptable: false, offX: 0, offY: 0, aimX: 0, aimY: 0, ttl: 0, claimedTick: -1, spawnTick: 0 };
+      speed: 0, hit: false, aoe: 0, dot: null, interceptable: false, offX: 0, offY: 0, aimX: 0, aimY: 0, ttl: 0, claimedTick: -1, spawnTick: 0,
+      directional: false, vx: 0, vy: 0, remaining: 0 };
     pool.push(p);
   }
   return p;
@@ -231,6 +247,7 @@ function allocProjectile(state) {
 /** Launch a projectile from `s` toward `t` with a pre-rolled outcome. */
 export function spawnProjectile(state, s, w, t, hit, dmg, k) {
   const p = allocProjectile(state);
+  p.directional = false;
   p.id = state.nextProjId++;
   p.alive = true; p.srcId = s.id; p.dstId = t.id; p.team = s.team; p.weaponIdx = w.idx; p.type = w.def.type;
   p.dmg = dmg; p.x = s.x; p.y = s.y; p.speed = w.def.speed; p.hit = hit; p.aoe = w.def.aoe; p.dot = w.def.dot;
@@ -248,6 +265,48 @@ export function spawnProjectile(state, s, w, t, hit, dmg, k) {
   state.projAlive++;
   state.events.push(['proj', p.id, s.id, t.id, w.idx, Math.round(s.x * 10) / 10, Math.round(s.y * 10) / 10]);
   return p;
+}
+
+/** Unguided shot: no target id or accuracy roll, only segment/circle collision. */
+export function spawnDirectional(state, s, w, angle, damage) {
+  const p = allocProjectile(state), range = weaponRange(s, w);
+  p.id = state.nextProjId++; p.alive = true; p.srcId = s.id; p.dstId = 0; p.team = s.team;
+  p.weaponIdx = w.idx; p.type = w.def.type; p.dmg = damage; p.speed = w.def.speed;
+  p.x = s.x; p.y = s.y; p.vx = Math.cos(angle) * p.speed; p.vy = Math.sin(angle) * p.speed;
+  p.directional = true; p.remaining = range; p.hit = true; p.aoe = w.def.aoe; p.dot = w.def.dot;
+  p.interceptable = w.def.interceptable; p.claimedTick = -1; p.spawnTick = state.tick;
+  p.aimX = p.x + Math.cos(angle) * range; p.aimY = p.y + Math.sin(angle) * range;
+  p.ttl = Math.ceil(range / p.speed * TICK_RATE); p.offX = 0; p.offY = 0;
+  state.projAlive++;
+  state.events.push(['proj', p.id, s.id, 0, w.idx, Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10,
+    Math.round(p.aimX * 10) / 10, Math.round(p.aimY * 10) / 10]);
+  return p;
+}
+
+const directionalBuf = [];
+function advanceDirectional(state, p) {
+  const step = Math.min(p.speed * DT, p.remaining);
+  const dx = p.vx / p.speed * step, dy = p.vy / p.speed * step;
+  // Grid was built before movement; extra margin covers this tick's displacement.
+  queryCircle(state.grid, state.ships, p.x + dx / 2, p.y + dy / 2, step / 2 + MAX_RADIUS + 40, directionalBuf, 1 - p.team);
+  let first = null, firstT = Infinity;
+  for (const s of directionalBuf) {
+    if (s.hp <= 0) continue;
+    const sx = p.spawnTick === state.tick ? s.x : (s.prevX ?? s.x);
+    const sy = p.spawnTick === state.tick ? s.y : (s.prevY ?? s.y);
+    const rx = p.x - sx, ry = p.y - sy;
+    const vx = dx - (s.x - sx), vy = dy - (s.y - sy);
+    const radius = s.radius + 3, a = vx * vx + vy * vy, b = 2 * (rx * vx + ry * vy), c = rx * rx + ry * ry - radius * radius;
+    let hitT = c <= 0 ? 0 : Infinity;
+    if (c > 0 && a > 1e-9) { const disc = b * b - 4 * a * c; if (disc >= 0) hitT = (-b - Math.sqrt(disc)) / (2 * a); }
+    if (hitT >= 0 && hitT <= 1 && (hitT < firstT || (hitT === firstT && s.id < first.id))) { first = s; firstT = hitT; }
+  }
+  if (first) {
+    p.x += dx * firstT; p.y += dy * firstT;
+    impact(state, p, first); return;
+  }
+  p.x += dx; p.y += dy; p.remaining -= step;
+  if (--p.ttl <= 0 || p.remaining <= 1e-9 || p.x < 0 || p.y < 0 || p.x > state.world.w || p.y > state.world.h) endProjectile(state, p, 0);
 }
 
 function endProjectile(state, p, outcome) {
@@ -268,6 +327,7 @@ export function advanceProjectiles(state) {
   for (let i = 0; i < pool.length; i++) {
     const p = pool[i];
     if (!p.alive) continue;
+    if (p.directional) { advanceDirectional(state, p); continue; }
     const t = ships[p.dstId - 1];
     if (t.alive) { p.aimX = t.x + p.offX; p.aimY = t.y + p.offY; }
     const dx = p.aimX - p.x, dy = p.aimY - p.y;

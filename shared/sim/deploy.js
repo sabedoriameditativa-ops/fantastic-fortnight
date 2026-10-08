@@ -4,6 +4,7 @@
 
 import { SHIPS, SHIP_LIST, SIZE_CLASSES, SIZE_CLASS } from '../catalog.js';
 import { SPAWN_X_FRACTION, LANE_HEIGHT_MIN } from '../constants.js';
+import { normalizePlanning } from '../planning.js';
 
 const COLUMN_GAP = 70;
 const CATALOG_ORDER = Object.fromEntries(SHIP_LIST.map((s, i) => [s.id, i]));
@@ -88,9 +89,17 @@ export function planDeployment(players, world) {
       const p = members[i];
       const classes = expandFleet(p.fleet);
       const placed = layoutLane(classes, top0 + i * laneH, laneH, startX);
+      const plan = normalizePlanning(p.fleet.planning);
+      const centerY = top0 + (i + 0.5) * laneH;
+      const shift = plan.position === 'front' ? 100 : plan.position === 'rear' ? -100 : 0;
       for (const s of placed) {
         const r = SHIPS[s.cls].radius;
-        let x = s.x, y = Math.min(world.h - r, Math.max(r, s.y));
+        let x = s.x + shift, y = s.y;
+        if (plan.formation === 'wedge') x += 100 - Math.abs(y - centerY) * 0.3;
+        else if (plan.formation === 'line') { x = startX + shift + (x - startX - shift) * 0.6; y = centerY + (y - centerY) * 1.25; }
+        else if (plan.formation === 'screen') { x += SHIPS[s.cls].sizeClass === 'tiny' || SHIPS[s.cls].sizeClass === 'small' ? 100 : -60; }
+        x = Math.min(world.w * 0.4 - r, Math.max(r, x));
+        y = Math.min(Math.min(world.h - r, top0 + (i + 1) * laneH - r), Math.max(Math.max(r, top0 + i * laneH + r), y));
         let a = 0;
         if (team === 1) { x = world.w - x; a = Math.PI; }
         out.push({ cls: s.cls, owner: p.id, team, x, y, a });

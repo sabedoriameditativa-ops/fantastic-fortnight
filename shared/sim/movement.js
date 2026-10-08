@@ -109,6 +109,18 @@ export function moveShips(state, desiredFn) {
     if (s.latch) continue; // positioned by the latch host
     const cap = maxSpeed(s, tick);
     if (s.stunUntil > tick) { s.vx *= 0.8; s.vy *= 0.8; s.x += s.vx * DT; s.y += s.vy * DT; clampToArena(s, w, h); continue; }
+    if (s.pilotControl?.manual) {
+      const c = s.pilotControl;
+      // Independent thrust and aim: arrows strafe, mouse/keyboard aim rotates the gun.
+      const ax = c.moveX * cap - s.vx, ay = c.moveY * cap - s.vy;
+      const delta = Math.hypot(ax, ay), f = delta > 0 ? Math.min(1, s.accel * 3 * DT / delta) : 0;
+      s.vx += ax * f; s.vy += ay * f;
+      const v = Math.hypot(s.vx, s.vy); if (v > cap) { s.vx *= cap / v; s.vy *= cap / v; }
+      const turn = s.turnRate * s.mod.turnMul * DT;
+      s.heading = wrapAngle(s.heading + clamp(angleDiff(Math.atan2(c.aimY - s.y, c.aimX - s.x), s.heading), -turn, turn));
+      s.x += s.vx * DT; s.y += s.vy * DT; clampToArena(s, w, h);
+      continue;
+    }
     desired.dx = 0; desired.dy = 0; desired.speed = 0;
     desiredFn(state, s, desired);
     let dx = desired.dx, dy = desired.dy, speed = desired.speed;

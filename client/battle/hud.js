@@ -4,8 +4,8 @@
 // sound) and the reconnect status. Updated at ~10 Hz by the battle screen from
 // renderer.getView() and from frame events.
 
-import { SHIPS, SIZE_CLASSES, SIZE_CLASS } from '/shared/catalog.js';
-import { TICK_RATE, MAX_TICKS, SUDDEN_DEATH_TICK } from '/shared/constants.js';
+import { SHIPS, SIZE_CLASSES } from '/shared/catalog.js';
+import { TICK_RATE, MAX_TICKS, SUDDEN_DEATH_TICK, FLAG } from '/shared/constants.js';
 import { T, fmt } from '../i18n.js';
 import { h, clear, svgIcon, add } from '../util/dom.js';
 import { ticksToClock, num } from '../util/format.js';
@@ -49,7 +49,7 @@ export function createHud(root, o) {
     }
     return r;
   }
-  for (const s of start.ships || []) register(s.id, s.cls, s.team, s.owner, false);
+  for (const s of start.ships || []) register(s.id, s.cls, s.team, s.owner, !!s.objective);
   function markDead(id) {
     const r = reg.get(id);
     if (!r || !r.alive) return;
@@ -59,6 +59,7 @@ export function createHud(root, o) {
   if (Array.isArray(start.dead)) for (const id of start.dead) markDead(id);
 
   const log = createEventLog({ lookup: (id) => reg.get(id), playerName: (id) => names.get(id) || id, myPlayerId: o.myPlayerId, max: 6, ttlMs: 7000 });
+  const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
 
   // ---- DOM ----
   const teamEls = [0, 1].map((t) => {
@@ -66,13 +67,20 @@ export function createHud(root, o) {
     const alive = h('span.num.alive', { test: `hud-alive-${t}` });
     const pctEl = h('span.muted.pct');
     const sizes = h('div.ht-sizes');
+    const sizeEls = new Map();
+    for (const sc of SIZE_CLASSES) {
+      if (!sizesAtStart[t][sc]) continue;
+      const count = h('b');
+      const item = h('span', count, ` ${T.builder.sizeShort[sc]}`);
+      sizeEls.set(sc, { item, count }); sizes.appendChild(item);
+    }
     const el = h('div.hud-team', { class: `t${t}` },
       h('div.ht-head', h('span.nm', { text: T.app.team[t] + (o.myTeam === t ? ` (${T.app.you})` : '') }), h('span', alive, ' ', pctEl)),
       h('div.bar.hull', hullFill, ghost),
       h('div.bar.shield', shFill),
       sizes,
     );
-    return { el, hullFill, ghost, shFill, alive, pctEl, sizes, ghostW: 100 };
+    return { el, hullFill, ghost, shFill, alive, pctEl, sizes, sizeEls, ghostW: 100 };
   });
   const timeEl = h('div.time', { test: 'hud-time', text: '00:00' });
   const speedWrap = h('div.speed');
@@ -89,6 +97,7 @@ export function createHud(root, o) {
   const top = h('div.hud-top', teamEls[0].el, clockEl, teamEls[1].el);
   const banner = h('div.hud-banner.hidden');
   const logEl = h('div.hud-log', { test: 'hud-log', 'aria-live': 'polite' });
+  const logRows = new Map();
   const btnNames = h('button.btn.btn-sm', { type: 'button', test: 'hud-names', class: o.settings.showNames ? 'on' : '', onClick: () => o.onToggle('names') }, svgIcon('tag', 11), T.battle.names);
   const btnGrid = h('button.btn.btn-sm', { type: 'button', test: 'hud-grid', class: o.settings.grid ? 'on' : '', onClick: () => o.onToggle('grid') }, svgIcon('grid', 11), T.battle.grid);
   const btnCam = h('button.btn.btn-sm', { type: 'button', test: 'hud-camera', onClick: () => o.onToggle('camera') }, svgIcon('camera', 11), T.battle.cameraAuto);
@@ -97,6 +106,10 @@ export function createHud(root, o) {
   const btnQuit = h('button.btn.btn-sm.btn-ghost', { type: 'button', test: 'hud-quit', onClick: () => o.onQuit() }, svgIcon('cross', 10), T.battle.quit);
   const left = h('div.hud-left', btnQuit);
   const playersEl = h('div.hud-players', { test: 'hud-players' });
+  const decisionTitle = h('b');
+  const decisionText = h('div.small');
+  const decision = h('div.hud-decision.hidden', { test: 'ship-decision' }, decisionTitle, decisionText);
+  const mission = h('div.hud-mission.hidden', { test: 'mission-status', role: 'status' });
   const playerRows = new Map();
   for (const ps of [...pstats.values()].sort((a, b) => a.team - b.team || a.name.localeCompare(b.name))) {
     const row = h('div.hp', { class: `t${ps.team}` }, h('span.pn', { text: ps.name + (ps.id === o.myPlayerId ? ` (${T.app.you})` : '') }), h('span.mono'));
@@ -105,7 +118,7 @@ export function createHud(root, o) {
   }
   clear(root);
   root.id = 'hud';
-  add(root, top, banner, logEl, right, left, playersEl);
+  add(root, top, banner, logEl, right, left, playersEl, decision, mission);
 
   // ---- state ----
   let suddenDeath = false;
@@ -124,7 +137,7 @@ export function createHud(root, o) {
   }
   function updatePausedBanner() {
     const show = o.isLocal && !intro && (speed === 0 || paused);
-    if (show) { banner.className = 'hud-banner paused'; banner.textContent = T.battle.paused; }
+    if (show) { if (!banner.classList.contains('paused')) { banner.className = 'hud-banner paused'; banner.textContent = T.battle.paused; } }
     else if (banner.classList.contains('paused')) { banner.className = 'hud-banner hidden'; banner.textContent = ''; }
   }
   function showBanner(kind) {
@@ -136,22 +149,16 @@ export function createHud(root, o) {
     bannerTimer = setTimeout(() => { banner.className = 'hud-banner hidden'; bannerTimer = null; updatePausedBanner(); }, kind === 'suddenDeath' ? 4000 : 2200);
   }
 
-  function sizesText(t, view) {
-    const counts = {};
-    for (const v of view.ships.values()) { const r = reg.get(v.id); if (r && !r.spawned && r.team === t) counts[r.sizeClass] = (counts[r.sizeClass] || 0) + 1; }
-    const parts = [];
-    for (const sc of SIZE_CLASSES) {
-      const m = sizesAtStart[t][sc] || 0;
-      if (!m) continue;
-      parts.push(h('span', { title: `${T.builder.sizeClass[sc]}: ${counts[sc] || 0}/${m}` }, h('b', { text: String(counts[sc] || 0) }), ` ${T.builder.sizeShort[sc]}`));
-    }
-    return parts;
-  }
-
   const api = {
     /** Consume a frame's events (arrival time). */
     onFrame(frame) {
       const at = frame.at;
+      if (frame.campaign) {
+        const c = frame.campaign;
+        mission.classList.remove('hidden');
+        const label = ({ escort: 'Escolta', defense: 'Defesa', survival: 'Sobrevivência', waves: 'Ondas' })[c.type] || 'Missão';
+        setText(mission, `${label} · onda ${c.wave}/${c.totalWaves}${c.objectiveHp !== null ? ` · objetivo ${Math.round(c.objectiveHp / 10)}%` : ''} · ${ticksToClock(c.ticksLeft, tickRate)}`);
+      }
       for (const e of frame.e) {
         const t = e[0];
         if (t === 'spawn') register(e[1], e[2], e[3], e[4], true);
@@ -171,7 +178,7 @@ export function createHud(root, o) {
       if (added.length) renderLog(at);
     },
     /** Refresh totals from the renderer view. */
-    update(now, view, viewport) {
+    update(now, view, viewport, selectedId) {
       if (viewport && (!lastVp || viewport.x !== lastVp.x || viewport.y !== lastVp.y || viewport.w !== lastVp.w || viewport.h !== lastVp.h || viewport.ch !== lastVp.ch)) {
         lastVp = { ...viewport };
         // Overlay the 16:9 arena; on short letterboxes (portrait phones) use the whole canvas instead.
@@ -181,11 +188,26 @@ export function createHud(root, o) {
         root.style.left = `${r.x}px`; root.style.top = `${r.y}px`; root.style.width = `${r.w}px`; root.style.height = `${r.h}px`;
       }
       if (!view) return;
+      const selected = view.ships.get(selectedId), selectedInfo = reg.get(selectedId);
+      decision.classList.toggle('hidden', !selected || !selectedInfo);
+      if (selected && selectedInfo) {
+        const ship = SHIPS[selectedInfo.cls];
+        const conditions = [];
+        if (selected.flags & FLAG.RETREATING) conditions.push('Recuando para tentar recuperar proteção; o recuo tem duração e intervalo limitados.');
+        if (selected.flags & FLAG.DISRUPTED) conditions.push('Disrupção ativa: reparos e regeneração interrompidos.');
+        if (selected.flags & FLAG.UNTARGETABLE) conditions.push('Fase ou camuflagem: temporariamente inalvejável.');
+        if (selected.flags & FLAG.CASTING) conditions.push('Preparando habilidade ou disparo pesado.');
+        if (selected.flags & FLAG.STATIONARY) conditions.push('Ancorada: posição fixa de combate.');
+        setText(decisionTitle, `${ship.name} · casco ${Math.round(selected.hp / 10)}%`);
+        const doctrine = ({ support: 'Doutrina: reparar e acompanhar aliados.', carrier: 'Doutrina: lançar unidades e manter distância.', escort: 'Doutrina: proteger aliados próximos.', kiter: 'Doutrina: preservar distância de tiro.', anchor: 'Doutrina: sustentar a linha.', diver: 'Doutrina: aproximar e atacar alvos vulneráveis.' })[ship.role] || 'Doutrina: buscar alvos conforme alcance, função e prioridade tática.';
+        setText(decisionText, conditions.length ? conditions.join(' ') : doctrine);
+      }
       const tick = Math.max(0, view.tick || 0);
-      timeEl.textContent = fmt(T.battle.timer, { time: ticksToClock(tick, tickRate), max: ticksToClock(maxTicks, tickRate) });
+      setText(timeEl, fmt(T.battle.timer, { time: ticksToClock(tick, tickRate), max: ticksToClock(maxTicks, tickRate) }));
       timeEl.classList.toggle('sd', suddenDeath || tick >= SUDDEN_DEATH_TICK);
       const tot = [{ hull: 0, sh: 0, n: 0 }, { hull: 0, sh: 0, n: 0 }];
       const aliveByOwner = new Map();
+      const sizes = [{}, {}];
       for (const v of view.ships.values()) {
         const r = reg.get(v.id);
         if (!r || r.spawned) continue;
@@ -193,6 +215,7 @@ export function createHud(root, o) {
         tot[t].hull += (v.hp / 1000) * r.maxHp;
         tot[t].sh += (v.sh / 1000) * r.maxSh;
         tot[t].n++;
+        sizes[t][r.sizeClass] = (sizes[t][r.sizeClass] || 0) + 1;
         aliveByOwner.set(r.owner, (aliveByOwner.get(r.owner) || 0) + 1);
       }
       const totalShips = maxTotals[0].n + maxTotals[1].n;
@@ -210,14 +233,20 @@ export function createHud(root, o) {
         te.ghost.style.left = t === 0 ? `${hw}%` : 'auto';
         te.ghost.style.right = t === 1 ? `${hw}%` : 'auto';
         te.shFill.style.width = `${Math.round(sf * 1000) / 10}%`;
-        te.alive.textContent = fmt(T.battle.alive, { alive: tot[t].n, total: m.n });
-        te.pctEl.textContent = `${Math.round(hf * 100)}%`;
-        clear(te.sizes); add(te.sizes, ...sizesText(t, view));
+        setText(te.alive, fmt(T.battle.alive, { alive: tot[t].n, total: m.n }));
+        setText(te.pctEl, `${Math.round(hf * 100)}%`);
+        for (const [sc, nodes] of te.sizeEls) {
+          const n = sizes[t][sc] || 0;
+          if (nodes.count.textContent !== String(n)) {
+            nodes.count.textContent = String(n);
+            nodes.item.title = `${T.builder.sizeClass[sc]}: ${n}/${sizesAtStart[t][sc]}`;
+          }
+        }
       }
       for (const [id, row] of playerRows) {
         const ps = pstats.get(id);
         const alive = aliveByOwner.get(id) || 0;
-        row.lastChild.textContent = `${alive}/${ps.total} · ${ps.kills} ✕`;
+        setText(row.lastChild, `${alive}/${ps.total} · ${ps.kills} ✕`);
         row.classList.toggle('dead', alive === 0 && ps.total > 0);
       }
       if (!o.isLocal) {
@@ -264,11 +293,15 @@ export function createHud(root, o) {
 
   function renderLog(now) {
     const entries = log.entries(now);
-    clear(logEl);
+    const live = new Set(entries.map(e => e.id));
+    for (const [id, node] of logRows) if (!live.has(id)) { node.remove(); logRows.delete(id); }
     for (const e of entries) {
-      const el = h('div.le', { class: `t${e.team === -1 ? 'x' : e.team} ${e.kind}`, text: e.text });
-      if (now - e.at > 5000) el.classList.add('fade');
-      logEl.appendChild(el);
+      let el = logRows.get(e.id);
+      if (!el) {
+        el = h('div.le', { class: `t${e.team === -1 ? 'x' : e.team} ${e.kind}`, text: e.text });
+        logRows.set(e.id, el); logEl.appendChild(el);
+      }
+      el.classList.toggle('fade', now - e.at > 5000);
     }
   }
 

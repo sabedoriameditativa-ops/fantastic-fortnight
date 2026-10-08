@@ -69,8 +69,8 @@ export function createFakeSession(id, name = id) {
  * resolves on the matching ack (rejects on error). `next(pred)` waits for the
  * next incoming message after the current read cursor that matches.
  */
-export function createTestClient(url, name) {
-  const ws = new WebSocket(url);
+export function createTestClient(url, name, options) {
+  const ws = new WebSocket(url, options);
   const inbox = [];
   const waiters = [];
   let rid = 0;

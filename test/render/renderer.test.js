@@ -119,4 +119,39 @@ describe('renderer ship registration', () => {
     assert.ok(counts.save >= 3);
     r.dispose();
   });
+
+  test('reduced effects survive auto quality recovery and leave the battle snapshot unchanged', () => {
+    const r = createRenderer(new FakeCanvas(), { start: makeStart(), myTeam: 0 });
+    const snapshot = [row(1, 100, 100), row(2, 900, 100)];
+    const before = structuredClone(snapshot);
+    r.onFrame({ k: 0, at: 0, s: snapshot, e: [] });
+    r.setOptions({ reducedEffects: true, highContrast: true, quality: 'auto' });
+    for (let i = 0; i < 250; i++) r.draw(i * 16);
+    assert.equal(r.effects.quality.density, 0.2);
+    assert.equal(r.effects.quality.trails, false);
+    assert.equal(r.effects.quality.glow, false);
+    assert.equal(r.effects.quality.reducedMotion, true);
+    assert.equal(r.options.highContrast, true);
+    assert.deepEqual(snapshot, before, 'presentation options must not write to snapshot rows');
+    r.updateOptions({ reducedEffects: false, quality: 'high' });
+    assert.equal(r.effects.quality.density, 1);
+    assert.equal(r.effects.quality.glow, true);
+    assert.equal(r.effects.quality.reducedMotion, false);
+    r.dispose();
+  });
+
+  test('options reject malformed values and return isolated snapshots', () => {
+    const r = createRenderer(new FakeCanvas(), { start: makeStart() });
+    r.setOptions({ quality: 'low', reducedMotion: true });
+    r.setOptions({ quality: 'ultra', reducedMotion: 'false', reducedEffects: 1, unknown: true });
+    const opts = r.getOptions();
+    assert.equal(opts.quality, 'low');
+    assert.equal(opts.reducedMotion, true);
+    assert.equal(opts.reducedEffects, false);
+    assert.equal(opts.unknown, undefined);
+    opts.quality = 'high';
+    assert.equal(r.getOptions().quality, 'low');
+    assert.equal(r.effects.quality.glow, false);
+    r.dispose();
+  });
 });

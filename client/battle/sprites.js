@@ -151,6 +151,18 @@ function drawMaterialDetail(g, L, def, pal, bb, li, opts) {
   tracePoly(g, L, def);
   g.clip();
   const px = 1 / k; // one device pixel in design units
+  // A baked key light separates armor planes without a per-frame lighting pass.
+  // Keep the material tint: organic shells, crystal facets and alloy stay distinct.
+  if (['grad:hull', 'crystal', 'cells'].includes(L.fill)) {
+    const light = g.createLinearGradient(bb.x, bb.y, bb.x + bb.w * 0.45, bb.y + bb.h);
+    light.addColorStop(0, rgba(pal.hullLight, 0.32));
+    light.addColorStop(0.45, 'rgba(0,0,0,0)');
+    light.addColorStop(1, 'rgba(0,0,0,0.28)');
+    g.fillStyle = light; g.fillRect(bb.x, bb.y, bb.w, bb.h);
+    g.strokeStyle = rgba(pal.hullLight, def.faction === 'lumen' ? 0.65 : 0.4);
+    g.lineWidth = Math.max(1.4, px * 1.5);
+    tracePoly(g, L, def, 0, 0.8); g.stroke();
+  }
   switch (def.faction) {
     case 'terran': {
       if (L.panels) {
@@ -294,6 +306,16 @@ function drawMaterialDetail(g, L, def, pal, bb, li, opts) {
         }
         g.stroke();
       }
+      break;
+    }
+    case 'astral': {
+      if (L.fill !== 'grad:hull') break;
+      g.strokeStyle = pal.accent; g.lineWidth = Math.max(0.7, px); g.globalAlpha = 0.4;
+      g.beginPath();
+      for (let i = 0; i < 3; i++) g.arc(-8, 0, 12 + i * 10, -Math.PI * 0.75, Math.PI * 0.75);
+      g.stroke();
+      g.fillStyle = pal.inner; g.globalAlpha = 0.5;
+      for (let i = 0; i < 3; i++) g.fillRect(-24 + i * 14, -2, 5, 1);
       break;
     }
     default: break;
@@ -531,7 +553,7 @@ function applyDamage(g, def, pal, dmgState, bb, opts) {
   }
   if (dmgState >= 2) {
     // glowing cracks / exposed inner
-    g.strokeStyle = def.faction === 'lumen' ? '#ffffff' : '#ff6a3d'; g.lineWidth = Math.max(0.7, 1 / opts.k); g.globalAlpha = 0.6;
+    g.strokeStyle = { lumen: '#cfe8ff', vorrax: '#b8ff80', ferrix: '#9bffd6', astral: '#d9b565', terran: '#ff6a3d' }[def.faction] || pal.accent; g.lineWidth = Math.max(0.7, 1 / opts.k); g.globalAlpha = 0.6;
     g.beginPath();
     for (let i = 0; i < 3 + (def.size > 60 ? 3 : 0); i++) {
       let x = bb.x + hash01(seed, i, 6) * bb.w, y = bb.y + hash01(seed, i, 7) * bb.h;
@@ -653,12 +675,18 @@ export function blitShip(ctx, s, sx, sy, cos, sin, zoom, dpr, alpha = 1, scaleY 
   if (alpha !== 1) ctx.globalAlpha = 1;
 }
 
-/** LOD 0: a tiny triangle in hull color with a team-colored dot. */
-export function drawLod0(ctx, pal, sx, sy, cos, sin, len, dpr) {
+/** LOD 0 preserves a faction silhouette even when the full hull is too small. */
+export function drawLod0(ctx, pal, sx, sy, cos, sin, len, dpr, faction = 'terran') {
   const l = Math.max(3, len) * dpr;
   ctx.setTransform(cos, sin, -sin, cos, sx * dpr, sy * dpr);
   ctx.fillStyle = pal.hullLight;
-  ctx.beginPath(); ctx.moveTo(l * 0.6, 0); ctx.lineTo(-l * 0.4, -l * 0.35); ctx.lineTo(-l * 0.4, l * 0.35); ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  if (faction === 'vorrax') ctx.ellipse(0, 0, l * 0.55, l * 0.3, 0, 0, TAU);
+  else if (faction === 'lumen') { ctx.moveTo(l * 0.6, 0); ctx.lineTo(0, -l * 0.38); ctx.lineTo(-l * 0.5, 0); ctx.lineTo(0, l * 0.38); ctx.closePath(); }
+  else if (faction === 'ferrix') ctx.rect(-l * 0.45, -l * 0.32, l * 0.9, l * 0.64);
+  else if (faction === 'astral') { ctx.arc(0, 0, l * 0.4, 0, TAU); ctx.moveTo(l * 0.65, 0); ctx.lineTo(l * 0.1, -l * 0.2); ctx.lineTo(l * 0.1, l * 0.2); ctx.closePath(); }
+  else { ctx.moveTo(l * 0.6, 0); ctx.lineTo(-l * 0.4, -l * 0.35); ctx.lineTo(-l * 0.4, l * 0.35); ctx.closePath(); }
+  ctx.fill();
   ctx.fillStyle = pal.team;
   ctx.fillRect(-l * 0.45, -1, 2, 2);
 }
@@ -691,7 +719,7 @@ function automatonCells(def) {
 export function drawShipDetails(ctx, def, pal, sx, sy, cos, sin, zoom, dpr, st, now, q) {
   const kd = (def.size / 100) * zoom * dpr;
   ctx.setTransform(cos * kd, sin * kd, -sin * kd, cos * kd, sx * dpr, sy * dpr);
-  const t = now / 1000;
+  const t = q.reducedMotion ? 0 : now / 1000;
   const id = st.id | 0;
   const phase = hash01(id, 11) * TAU;
   const disrupted = !!st.disrupted;
@@ -702,6 +730,12 @@ export function drawShipDetails(ctx, def, pal, sx, sy, cos, sin, zoom, dpr, st, 
   // --- engines ---
   const engines = def.engines || [];
   if (engines.length && !disrupted) {
+    if (q.glow && thrust > 0.1) {
+      const halo = getGlow(pal.team);
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.16 * thrust;
+      for (const e of engines) { const r = e.w * (1.2 + thrust); ctx.drawImage(halo, e.x - r, e.y - r, r * 2, r * 2); }
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    }
     if (ek === 'flame') {
       const n = noise1(t * 30 + phase, id) * 3;
       ctx.globalCompositeOperation = 'lighter';
@@ -740,7 +774,7 @@ export function drawShipDetails(ctx, def, pal, sx, sy, cos, sin, zoom, dpr, st, 
         ctx.fillRect(e.x - d, e.y - 0.6, 1.4, 1.2);
       }
       ctx.globalAlpha = 1;
-    } else if (ek === 'spore') {
+    } else if (ek === 'spore' && q.glow) {
       ctx.globalCompositeOperation = 'lighter';
       const g = getGlow(pal.team);
       ctx.globalAlpha = 0.5 + 0.2 * Math.sin(t * 6 + phase);
@@ -760,6 +794,7 @@ export function drawShipDetails(ctx, def, pal, sx, sy, cos, sin, zoom, dpr, st, 
     const L = def.layers[i];
     switch (L.kind) {
       case 'core': {
+        if (!q.glow) break;
         const col = pal[L.color] || L.color || pal.team;
         const p = L.pulse || { amp: 0, hz: 1 };
         const r = L.r * (1 + p.amp * Math.sin(t * p.hz * TAU + phase + (p.phase || 0)) * (disrupted ? 0.2 : 1));
@@ -801,7 +836,7 @@ export function drawShipDetails(ctx, def, pal, sx, sy, cos, sin, zoom, dpr, st, 
         break;
       }
       case 'spot': {
-        if (!L.pulse) break;
+        if (!L.pulse || !q.glow) break;
         beginGlow();
         const col = pal[L.color] || L.color || pal.team;
         const a = (0.5 + 0.5 * Math.sin(t * L.pulse * TAU + (L.phase || 0) * 1.7 + phase)) * (disrupted ? 0.3 : 1);
@@ -812,6 +847,7 @@ export function drawShipDetails(ctx, def, pal, sx, sy, cos, sin, zoom, dpr, st, 
         break;
       }
       case 'light': {
+        if (!q.glow) break;
         const col = pal[L.color] || L.color || pal.team;
         const on = L.strobe ? ((t * 0.5) % 1) < 0.05 : ((t * (L.blink || 1) + phase) % 1) < 0.5;
         beginGlow();
@@ -861,7 +897,7 @@ export function drawShipDetails(ctx, def, pal, sx, sy, cos, sin, zoom, dpr, st, 
         if (hash01(id, frame, j + 100) < 0.5) { const c = cells[ci]; ctx.fillRect(c[0] + 0.5, c[1] + 0.5, 3, 3); }
       }
       ctx.globalAlpha = 1;
-    } else if (A.type === 'twinkle') {
+    } else if (A.type === 'twinkle' && q.glow && !q.reducedMotion) {
       const per = A.every ? (A.every[0] + A.every[1]) / 2 : 0.5;
       const slot = Math.floor((t + phase) / per);
       const age = (t + phase) - slot * per;
@@ -877,7 +913,7 @@ export function drawShipDetails(ctx, def, pal, sx, sy, cos, sin, zoom, dpr, st, 
           ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
         }
       }
-    } else if (A.type === 'strobe') {
+    } else if (A.type === 'strobe' && q.glow && !q.reducedMotion) {
       if (((t * A.hz + phase) % 1) < 0.05) {
         ctx.globalCompositeOperation = 'lighter';
         ctx.drawImage(getGlow('#ffffff'), A.x - 8, A.y - 8, 16, 16);

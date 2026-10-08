@@ -239,3 +239,38 @@ describe('attachConnection', () => {
     assert.equal(s.send({ t: 'z' }), false, 'closed socket drops');
   });
 });
+
+test('concurrent resumes consume the token once and old sockets cannot dispatch commands', () => {
+  const clock = createFakeClock(0);
+  const sessions = createSessionStore({ clock });
+  const lobby = fakeLobby();
+  const opts = { sessions, lobby, clock, log: { warn() {} } };
+  const a = fakeSocket();
+  attachConnection(a, opts);
+  a.message({ t: 'hello', name: 'Ana', version: PROTOCOL_VERSION });
+  const first = a.last('welcome');
+  const b = fakeSocket();
+  attachConnection(b, opts);
+  b.message({ t: 'hello', name: 'Ana', version: PROTOCOL_VERSION, token: first.token });
+  assert.equal(b.last('welcome').playerId, first.playerId);
+  assert.notEqual(b.last('welcome').token, first.token, 'resume rotates the bearer token');
+  assert.ok(!lobby.calls.some((c) => c[0] === 'disconnect'), 'replacing transport must not change lobby readiness');
+  const c = fakeSocket();
+  attachConnection(c, opts);
+  c.message({ t: 'hello', name: 'Ana', version: PROTOCOL_VERSION, token: first.token });
+  assert.notEqual(c.last('welcome').playerId, first.playerId, 'replayed token cannot take over again');
+  assert.equal(b.closed, null, 'first resume remains connected');
+  a.message({ t: 'start', rid: 1 });
+  assert.ok(!lobby.calls.some((call) => call[0] === 'msg'), 'buffered messages from old transport are ignored');
+});
+
+test('profile-bound sessions need both the WS token and the same authenticated cookie', () => {
+  const store = createSessionStore();
+  const first = store.create('Ana', fakeWs(), 'profile-a');
+  const token = first.token;
+  assert.equal(store.resume(token, fakeWs()), null);
+  assert.equal(store.resume(token, fakeWs(), 'profile-b'), null);
+  assert.equal(first.token, token, 'failed attempts must not consume the owner credential');
+  assert.equal(store.resume(token, fakeWs(), 'profile-a'), first);
+  store.clear();
+});

@@ -34,6 +34,11 @@ export const FACTION_PALETTES = {
     accent: '#9bffd6', panelLine: '#0c1213', cellOff: '#1a2426',
     debris: '#263538', spark: '#9bffd6', spark2: '#7fb3a8', smoke: '#3a4a4c',
   },
+  astral: {
+    hullDark: '#101a2c', hullMid: '#203953', hullLight: '#658fac', hullEdge: '#bdcae0',
+    accent: '#d9b565', panelLine: '#111f34', inner: '#8de4ec',
+    debris: '#31506c', spark: '#8de4ec', spark2: '#d9b565', smoke: '#28354c',
+  },
 };
 
 export const FACTION_IDS = Object.keys(FACTION_PALETTES);

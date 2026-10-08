@@ -85,7 +85,7 @@ export function createShields(o) {
    * @param {number} rPx bubble radius in screen px
    * @param {number} pct shield 0..1
    */
-  function drawBubble(ctx, sx, sy, rPx, pct, teamColor, now, id, dpr, lod) {
+  function drawBubble(ctx, sx, sy, rPx, pct, teamColor, now, id, dpr, lod, reducedEffects = false) {
     let r = rPx;
     const rs = restores.get(id);
     if (rs !== undefined) {
@@ -104,7 +104,7 @@ export function createShields(o) {
     if (bk !== undefined) {
       const age = now - bk;
       if (age > 200) breaks.delete(id);
-      else if (((age / 80) | 0) % 2 === 0) {
+      else if (!reducedEffects && ((age / 80) | 0) % 2 === 0) {
         ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.globalAlpha = 0.9 * (1 - age / 200);
         ctx.beginPath(); ctx.arc(sx, sy, rPx, 0, TAU); ctx.stroke();
       }
@@ -116,7 +116,7 @@ export function createShields(o) {
   /**
    * Draw active ripples. `look(id)` → { x, y, r (world shield radius), team color, size } or null.
    */
-  function drawRipples(ctx, cam, dpr, now, look) {
+  function drawRipples(ctx, cam, dpr, now, look, reducedEffects = false) {
     if (!ripples.length) return;
     const z = cam.zoom;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -132,7 +132,10 @@ export function createShields(o) {
       const cx = cam.worldToScreenX(L.x), cy = cam.worldToScreenY(L.y);
       if (!cam.isVisible(L.x, L.y, L.r)) continue;
       const ix = cx + Math.cos(rp.ang) * R, iy = cy + Math.sin(rp.ang) * R;
-      if (R >= 26) {
+      if (reducedEffects) {
+        ctx.strokeStyle = L.color; ctx.lineWidth = 1; ctx.globalAlpha = 0.35 * (1 - u);
+        ctx.beginPath(); ctx.arc(cx, cy, R, rp.ang - Math.PI / 4, rp.ang + Math.PI / 4); ctx.stroke();
+      } else if (R >= 26) {
         const outer = u * R * 1.5 + 2, inner = Math.max(0, outer - 10 * Math.max(0.6, z) - u * R * 0.5);
         ctx.save();
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();

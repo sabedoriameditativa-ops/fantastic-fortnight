@@ -11,6 +11,7 @@ import { isTargetable, ehp, maxSpeed } from './ship.js';
 import { enemiesWithin, alliesWithin, nearestEnemy, nearestEnemyGlobal, orderedShips } from './queries.js';
 import { ABILITY_REGISTRY } from './abilities.js';
 import { ABILITIES } from '../catalog.js';
+import { priorityBonus } from '../planning.js';
 
 const KILL_HORIZON = 20;      // s of my dps needed for killability 0
 const COMMIT_TICKS = 2 * TICK_RATE;
@@ -69,6 +70,9 @@ export function recomputeTargeting(state) {
   for (let i = 0; i < ships.length; i++) {
     const s = ships[i];
     if (!s.alive) continue;
+    // Objectives have no weapons. A manual pilot aims a physical ray rather
+    // than the AI target; neither contributes fictitious focused fire.
+    if (s.campaignObjective || s.pilotControl?.manual) continue;
     let t = s.ai.targetId > 0 ? ships[s.ai.targetId - 1] : null;
     if (!t || !t.alive || t.team === s.team || (!isTargetable(t, tick) && t.untargetableUntil - tick > SHORT_PHASE_TICKS)) {
       t = ensureTarget(state, s);
@@ -90,7 +94,7 @@ export function recomputeTargeting(state) {
     const p = pool[i];
     if (!p.alive) continue;
     const t = ships[p.dstId - 1];
-    if (!t.alive) continue;
+    if (!t || !t.alive) continue;
     if (p.hit) t.incoming += p.dmg;
     if (p.interceptable) t.incomingInterceptables++;
   }
@@ -207,6 +211,7 @@ export function teamThink(state, team) {
   }
   for (let i = 0; i < order.length; i++) {
     const s = order[i];
+    if (s.campaignObjective || s.pilotControl?.manual) { s.ai.assignedId = 0; continue; }
     const R = s.maxRange * 1.3;
     enemiesWithin(state, s, R, qbuf);
     // keep the 8 nearest
@@ -246,18 +251,21 @@ export function teamThink(state, team) {
     const s = ships[ours[i] - 1];
     if (s.role !== 'escort' && s.role !== 'support') continue;
     alliesWithin(state, s, 500, qbuf);
+    const hasLine = qbuf.some((a) => a.role !== 'support' && a.role !== 'anchor' && a.role !== 'carrier');
     let best = null;
     for (let k = 0; k < qbuf.length; k++) {
       const a = qbuf[k];
-      if (s.role === 'support' && (a.role === 'anchor' || a.role === 'carrier') && qbuf.length > 1) continue; // supports follow the fighting line
+      // Two supports following a slot behind each other retreat forever. Follow
+      // the fighting line, then a capital; a fleet of only supports fights directly.
+      if (s.role === 'support' && (a.role === 'support' || (hasLine && (a.role === 'anchor' || a.role === 'carrier')))) continue;
       if (!best || a.cost > best.cost) best = a;
       else if (a.cost === best.cost) { // ties: nearest (grid order is x-sorted and would favour one side)
         const da = (a.x - s.x) * (a.x - s.x) + (a.y - s.y) * (a.y - s.y), db = (best.x - s.x) * (best.x - s.x) + (best.y - s.y) * (best.y - s.y);
         if (da < db) best = a;
       }
     }
-    if (!best && qbuf.length > 0) best = qbuf[0];
-    s.ai.protecteeId = best ? best.id : (T.anchorId && T.anchorId !== s.id ? T.anchorId : 0);
+    const fallback = T.anchorId && T.anchorId !== s.id ? ships[T.anchorId - 1] : null;
+    s.ai.protecteeId = best ? best.id : (fallback && !(s.role === 'support' && fallback.role === 'support') ? fallback.id : 0);
   }
 }
 
@@ -314,7 +322,7 @@ function scoreTarget(state, me, t, W, P, TB) {
   const protect = W.protect > 0 && me.ai.protecteeId && t.ai.targetId === me.ai.protecteeId ? 1 : 0;
   const sticky = t.id === me.ai.targetId ? 0.15 : 0;
   return W.range * rangeFit + W.dmg * dmgMult + W.kill * killability + W.value * value + W.threat * threat
-    + W.focus * focus + W.team * P.teamWeight * teamPri + W.protect * protect + sticky + roleBias(me, t);
+    + W.focus * focus + W.team * P.teamWeight * teamPri + W.protect * protect + sticky + roleBias(me, t) + priorityBonus(me.planning, t);
 }
 
 /** Gather ≤ 16 nearest targetable enemies within max(1.5R, 600) ∪ {assigned, current}. */
@@ -378,13 +386,13 @@ export function decide(state, s) {
   const canRetreat = P.retreat && s.role !== 'anchor' && !state.suddenDeath && !s.kamikaze && !s.latch && (s.regen > 0 || s.shieldMax > 0);
   if (canRetreat) {
     const frac = s.hp / s.hpMax, th = RETREAT_AT[s.role] || 0.3;
-    if (!s.ai.retreating && frac < th && tick >= s.ai.retreatBlockedUntil) {
+    const recovered = s.regen > 0 || s.hot ? frac > th + 0.2 : s.shield >= RETREAT_SHIELD_EXIT * s.shieldMax;
+    if (!s.ai.retreating && !recovered && frac < th && tick >= s.ai.retreatBlockedUntil) {
       if (alliesWithin(state, s, 600, qbuf).length > 0) { s.ai.retreating = true; s.ai.retreatSince = tick; } // alone = fight
     } else if (s.ai.retreating) {
-      const recovered = s.regen > 0 || s.hot ? frac > th + 0.2 : s.shield >= RETREAT_SHIELD_EXIT * s.shieldMax;
-      if (tick - s.ai.retreatSince > MAX_RETREAT_TICKS) { s.ai.retreating = false; s.ai.retreatBlockedUntil = tick + RETREAT_COOLDOWN_TICKS; }
-      else if (recovered) s.ai.retreating = false;
-      else if (alliesWithin(state, s, 600, qbuf).length === 0) s.ai.retreating = false;
+      if (tick - s.ai.retreatSince > MAX_RETREAT_TICKS || recovered || alliesWithin(state, s, 600, qbuf).length === 0) {
+        s.ai.retreating = false; s.ai.retreatBlockedUntil = tick + RETREAT_COOLDOWN_TICKS;
+      }
     }
   } else s.ai.retreating = false;
   // ---- bile burst dive (larva passive) ----
@@ -509,7 +517,7 @@ export function computeDesired(state, s, out) {
     case 'hold': {
       dx = t.x - s.x; dy = t.y - s.y;
       const d = Math.sqrt(dx * dx + dy * dy);
-      let holdAt = AREA_HOLD[s.cls] !== undefined ? Math.min(0.7 * R, AREA_HOLD[s.cls]) : 0.7 * R;
+      let holdAt = AREA_HOLD[s.cls] !== undefined ? Math.min(0.7 * R, AREA_HOLD[s.cls]) : Math.min(0.95 * R, 0.7 * R * (state.profiles[s.owner].holdRangeMul || 1));
       if (ai.holdOverride > 0 && ai.holdOverride < holdAt) holdAt = ai.holdOverride; // e.g. closing in for an EMP storm
       if (d > holdAt) {
         speed = cap;

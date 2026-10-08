@@ -23,8 +23,9 @@
 // (set E2E_VERBOSE=1 to stream the server's stderr live).
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { overBudgetAdds } from './overBudget.js';
 
@@ -60,7 +61,8 @@ async function loadPlaywright() {
  */
 function startServer() {
   return new Promise((resolveStart, reject) => {
-    const env = { ...process.env, PORT: '0', FE_MAX_TICKS: '600', FE_COUNTDOWN_MS: process.env.FE_COUNTDOWN_MS || '2000' };
+    const profileDataDir = mkdtempSync(join(tmpdir(), 'frota-e2e-'));
+    const env = { ...process.env, FE_DATA_DIR: profileDataDir, PORT: '0', FE_MAX_TICKS: '600', FE_COUNTDOWN_MS: process.env.FE_COUNTDOWN_MS || '2000' };
     const child = spawn(process.execPath, [resolve(ROOT, 'server', 'index.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let started = false;
@@ -86,6 +88,7 @@ function startServer() {
       tail = (tail + s).slice(-STDERR_TAIL_BYTES);
     });
     child.on('exit', (code, signal) => {
+      rmSync(profileDataDir, { recursive: true, force: true });
       handle.exitCode = code ?? signal;
       if (!started) { started = true; reject(new Error(`server exited early (code ${code ?? signal}): ${out}${tail}`)); return; }
       if (!killed) for (const cb of exitListeners) cb(code ?? signal);
@@ -318,7 +321,9 @@ async function main() {
     else { failed++; console.log(`FAIL  ${name} — ${r.reason && r.reason.message ? r.reason.message : r.reason}`); }
   }
   try {
-    browser = await chromium.launch({ headless: !HEADED, args: ['--autoplay-policy=no-user-gesture-required'] });
+    browser = await chromium.launch({ headless: !HEADED,
+      ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+      args: ['--autoplay-policy=no-user-gesture-required'] });
     // (a) and (b) are the long ones: run them concurrently, then the quick checks
     const results = await Promise.allSettled([run(cases[0][1]), run(cases[1][1])]);
     for (let i = 0; i < 2; i++) report(cases[i][0], results[i]);

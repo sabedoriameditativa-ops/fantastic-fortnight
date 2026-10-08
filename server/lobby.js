@@ -99,7 +99,7 @@ export function createLobby({
     return null;
   }
 
-  function createRoomFor(session, { teamSize, budget, botDifficulty }) {
+  function createRoomFor(session, { teamSize, budget, botDifficulty, pilotsEnabled }) {
     if (rooms.size >= maxRooms) return { ok: false, code: ERR.ROOM_FULL, detail: 'server' };
     const current = roomOf(session);
     const addr = typeof session.remoteAddress === 'string' && session.remoteAddress ? session.remoteAddress : null;
@@ -116,6 +116,7 @@ export function createLobby({
       teamSize,
       budget,
       botDifficulty,
+      pilotsEnabled,
       log,
       onDestroy: (r) => {
         rooms.delete(r.code);
@@ -175,6 +176,10 @@ export function createLobby({
           return reply(session, rid, room.removeBot(session, msg.team, msg.slot));
         case C2S.SET_FLEET:
           return reply(session, rid, room.setFleet(session, msg.fleet));
+        case C2S.SET_ROLE:
+          return reply(session, rid, room.setRole(session, msg.role));
+        case C2S.PILOT_INPUT:
+          return reply(session, rid, room.pilotInput(session, msg.matchId, msg.input));
         case C2S.READY:
           return reply(session, rid, room.setReady(session, msg.ready));
         case C2S.START:

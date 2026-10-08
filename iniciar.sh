@@ -10,7 +10,7 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 NODE_MAJOR=$(node -v | sed 's/^v//' | cut -d. -f1)
-if [ "$NODE_MAJOR" -lt 18 ]; then
+if [ "$NODE_MAJOR" -lt 24 ]; then
   echo "  Sua versão do Node.js ($(node -v)) é muito antiga. Instale a versão LTS em https://nodejs.org"
   exit 1
 fi

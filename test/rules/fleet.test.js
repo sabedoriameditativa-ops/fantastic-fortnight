@@ -197,7 +197,8 @@ describe('autoComplete', () => {
       const start = normalizeFleet({ faction, ships: [{ cls: pool[seed % pool.length].id, count: 1 }] });
       const f = autoComplete(start, budget, rng);
       const { cost, bySize } = assertWithinRules(f, budget, `autoComplete ${faction}@${budget}#${seed}`);
-      assert.ok(cost >= budget - 60, `fills the budget (${cost}/${budget})`);
+      const cheapest = Math.min(...pool.map((s) => s.cost));
+      assert.ok(cost >= budget - Math.max(60, cheapest - 1), `fills the budget (${cost}/${budget}; cheapest ${cheapest})`);
       assert.ok(bySize.mothership <= 1);
       for (const e of start.ships) {
         const kept = f.ships.find((x) => x.cls === e.cls);

@@ -46,7 +46,10 @@ export function createSimLoop(o) {
     const e = pending;
     pending = [];
     lastFrameTick = snap.k;
-    o.onFrame({ k: snap.k, s: snap.s, e });
+    o.onFrame({ k: snap.k, s: snap.s, e,
+      ...(snap.p?.length ? { p: snap.p } : {}),
+      ...(snap.campaign ? { campaign: snap.campaign } : {}),
+    });
   }
 
   function finish() {

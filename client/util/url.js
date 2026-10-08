@@ -53,6 +53,15 @@ export function defaultWsUrl(loc) {
   return `${secure ? 'wss' : 'ws'}://${host}`;
 }
 
+/** Canonical endpoint used to isolate bearer credentials between servers/routes. */
+export function canonicalWsUrl(raw) {
+  const url = new URL(raw);
+  if (!['ws:', 'wss:'].includes(url.protocol) || url.username || url.password || url.hash) {
+    throw new TypeError('Invalid WebSocket endpoint');
+  }
+  return url.href;
+}
+
 /** Random seed string (not for the simulation itself: it hashes this). */
 export function randomSeed() {
   const n = typeof crypto !== 'undefined' && crypto.getRandomValues ? crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 0xffffffff);

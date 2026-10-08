@@ -8,6 +8,8 @@ import { animateShip } from '../util/shipCanvas.js';
 import { createRenderer } from '../battle/renderer.js';
 import { createLocalRunner } from '../battle/localRunner.js';
 import { createHud } from '../battle/hud.js';
+import { createBattleChatter } from '../battle/chatter.js';
+import { createPilotControls, normalizePilotBindings, pilotKeyLabel } from '../battle/pilotControls.js';
 import { FACTIONS, SHIPS } from '/shared/catalog.js';
 import { fleetToArray } from '/shared/fleet.js';
 
@@ -30,6 +32,9 @@ export function mount(root, props, ctx) {
   let feed = null;
   let renderer = null;
   let hud = null;
+  let pilotControls = null;
+  let chatter = null;
+  const reward = { status: isLocal ? (props.runId ? 'pending' : 'practice') : 'server', runId: props.runId, promise: null };
   let raf = 0;
   let lastHud = 0;
   let disposed = false;
@@ -81,13 +86,15 @@ export function mount(root, props, ctx) {
       try { if (hud) hud.resync(start); } catch (e) { ctx.reportError(e); }
       return;
     }
+    if (pilotControls) { pilotControls.dispose(); pilotControls = null; }
+    if (chatter) { chatter.dispose(); chatter = null; }
     if (renderer) { renderer.dispose(); renderer = null; }
     if (hud) { hud.dispose(); hud = null; }
     startedOnce = true;
     currentSeed = start.seed;
     result = null; endShown = false;
     renderer = createRenderer(arena, { start, myTeam, audio, isLocal });
-    renderer.setOptions({ showNames: state.settings.showNames, grid: state.settings.grid, reducedMotion: ctx.reducedMotion(), quality: state.settings.quality });
+    renderer.setOptions({ showNames: state.settings.showNames, grid: state.settings.grid, reducedMotion: ctx.reducedMotion(), quality: state.settings.quality, reducedEffects: state.settings.reducedEffects, highContrast: state.settings.highContrast });
     renderer.onEnd(() => { if (result) showEnd(); else endShown = 'pending'; });
     state.renderer = renderer;
     hud = createHud(hudRoot, {
@@ -99,6 +106,28 @@ export function mount(root, props, ctx) {
       latency: () => (state.net ? state.net.latencyMs : 0),
     });
     hud.setStatus(feed.isLocal ? 'ok' : (state.net ? (state.net.status === 'ok' ? 'ok' : state.net.status === 'reconnecting' ? 'reconnecting' : 'lost') : 'ok'));
+    const subtitle = h('div.battle-subtitle', { test: 'battle-subtitle', role: 'status', 'aria-live': 'polite' });
+    hudRoot.appendChild(subtitle);
+    chatter = createBattleChatter({ faction: me(start)?.faction || me(start)?.fleet?.faction, myTeam, myPlayerId, ships: start.ships,
+      getSettings: () => state.settings, onLine: line => { subtitle.textContent = line?.text || ''; subtitle.classList.toggle('visible', !!line); } });
+    const pilotStatus = h('span.small');
+    const pilotButton = h('button.btn.btn-sm', { type: 'button', test: 'pilot-toggle',
+      // Preserve the intended toggle: focusing a control releases manual input
+      // before click; a pointer activation must not flip that release back on.
+      onPointerdown: e => { if (e.button === 0) e.preventDefault(); },
+      onClick: e => { e.currentTarget.blur(); pilotControls?.setEnabled(!pilotControls.state.manual); } }, 'Assumir controle');
+    const binds = normalizePilotBindings(state.settings.pilotBindings);
+    const pilotPanel = h('div.hud-pilot.hidden', { test: 'pilot-panel' }, pilotButton, pilotStatus,
+      h('div.tiny.muted', `${pilotKeyLabel(binds.toggle)} alterna · ${pilotKeyLabel(binds.fire)} dispara · ${pilotKeyLabel(binds.ability)} habilidade · mouse aponta`));
+    hudRoot.appendChild(pilotPanel);
+    pilotControls = createPilotControls({ canvas: arena, feed, renderer, bindings: binds, myPlayerId, onState: p => {
+      pilotPanel.classList.toggle('hidden', !p.available);
+      pilotButton.disabled = !p.alive;
+      pilotButton.textContent = p.manual ? 'Voltar ao automático' : 'Assumir controle';
+      pilotButton.setAttribute('aria-pressed', String(p.manual));
+      pilotStatus.textContent = !p.alive ? 'Nave destruída · a frota continua' : `${p.manual ? 'Controle manual' : 'Piloto automático'} · ${p.abilityReady ? 'Habilidade pronta' : 'Recarregando'}`;
+    } });
+    pilotControls.setSuspended(!skipIntro);
     try { audio.setScene('battle'); audio.setFactionHint(me(start) ? me(start).faction : null); } catch { /* ignore */ }
     if (!raf) raf = requestAnimationFrame(loop);
     if (skipIntro) { startClock(); }
@@ -110,6 +139,7 @@ export function mount(root, props, ctx) {
     if (introEl) { introEl.remove(); introEl = null; }
     if (introTimer) { clearTimeout(introTimer); introTimer = null; }
     if (hud) hud.setIntro(false);
+    if (pilotControls) pilotControls.setSuspended(false);
     if (isLocal) setSpeed(speed > 0 ? speed : 1);
   }
 
@@ -150,6 +180,7 @@ export function mount(root, props, ctx) {
     if (v > 0 && v !== state.settings.speed) { state.settings.speed = v; try { ctx.persistSettings(); } catch { /* storage may be unavailable */ } }
     if (v > 0) speed = v;
     feed.controls.setSpeed(v);
+    if (pilotControls) pilotControls.setSuspended(v === 0 || quitting || !!introEl);
     if (hud) hud.setSpeed(v);
   }
   function togglePause() {
@@ -170,9 +201,10 @@ export function mount(root, props, ctx) {
   async function quit() {
     if (quitting) return;
     quitting = true;
+    pilotControls?.setSuspended(true);
     let ok = false;
     try { ok = await confirmDialog(T.battle.quitConfirm, { ok: T.battle.quit, cancel: T.app.cancel, test: 'quit' }); }
-    finally { quitting = false; }
+    finally { quitting = false; pilotControls?.setSuspended(!!introEl || feed.controls.speed === 0); }
     if (!ok || disposed) return;
     if (!isLocal && state.net) { state.net.leaveRoom().catch(() => {}); ctx.go('lobby'); }
     else ctx.go('menu');
@@ -196,13 +228,18 @@ export function mount(root, props, ctx) {
   function goResults() {
     if (disposed) return;
     const start = feed.lastStart;
-    ctx.go('results', { mode, result, start, meta: props.meta || null, myTeam, myPlayerId, cleared: props.meta ? clearedLevel : false, speed });
+    ctx.go('results', { mode, result, start, meta: props.meta || null, myTeam, myPlayerId, cleared: props.meta ? clearedLevel : false, speed, reward });
   }
 
   let clearedLevel = false;
   function onEnd(r) {
     if (disposed || !r) return;
     result = r;
+    chatter?.onEnd(r);
+    if (isLocal && props.runId && !reward.promise) {
+      const inputs = feed.controls.getPilotReplay?.() || [];
+      reward.promise = ctx.profile.completeRun(props.runId, { inputs }).then(value => { reward.status = 'verified'; reward.value = value; return value; }).catch(error => { reward.status = 'error'; reward.error = error; return null; });
+    } else if (!isLocal) ctx.profile.refresh().catch(() => {});
     if (isLocal && props.meta && r.winner === 0) {
       ctx.markLevelCleared(props.meta.setup.difficulty, props.meta.setup.level);
       clearedLevel = true;
@@ -219,7 +256,7 @@ export function mount(root, props, ctx) {
       try { renderer.draw(t); } catch (e) { ctx.reportError(e); }
       if (t - lastHud >= 100) {
         lastHud = t;
-        if (hud) { try { hud.update(t, renderer.getView(), renderer.viewport); hud.setPaused(feed.controls.paused === true); } catch (e) { ctx.reportError(e); } }
+        if (hud) { try { const view = renderer.getView(); hud.update(t, view, renderer.viewport, renderer.camera.followId); hud.setPaused(feed.controls.paused === true); pilotControls?.update(view); } catch (e) { ctx.reportError(e); } }
         if (hud && audio && typeof audio.setBattleState === 'function') {
           try { audio.setBattleState({ ...hud.battleState, aliveFrac: hud.battleState.aliveFrac.slice() }); } catch { /* ignore */ }
         }
@@ -230,7 +267,7 @@ export function mount(root, props, ctx) {
 
   // ---- keyboard ----
   const onKey = (e) => {
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.defaultPrevented || e.target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(e.target?.tagName || '')) return;
     if (quitting) return; // the quit dialog owns the keyboard (Esc / Enter / Space on its buttons)
     if (e.key === ' ') { e.preventDefault(); if (introEl) startClock(); else togglePause(); }
     else if (e.key === '1') setSpeed(1);
@@ -246,7 +283,7 @@ export function mount(root, props, ctx) {
   window.addEventListener('resize', onResize);
 
   offs.push(feed.onStart(onStart));
-  offs.push(feed.onFrame((f) => { if (renderer) renderer.onFrame(f); if (hud) hud.onFrame(f); }));
+  offs.push(feed.onFrame((f) => { if (renderer) renderer.onFrame(f); if (hud) hud.onFrame(f); chatter?.onFrame(f); }));
   offs.push(feed.onEnd(onEnd));
   offs.push(feed.onStatus((s) => { if (hud) hud.setStatus(s); if (s === 'lost') ctx.toast(T.mp.connectionLost, 'error'); }));
   if (!isLocal && state.net) {
@@ -263,6 +300,8 @@ export function mount(root, props, ctx) {
       window.removeEventListener('resize', onResize);
       for (const off of offs) { try { off(); } catch { /* ignore */ } }
       for (const s of stops) s();
+      pilotControls?.dispose();
+      chatter?.dispose();
       if (hud) hud.dispose();
       if (renderer) renderer.dispose();
       if (isLocal && feed) feed.dispose();

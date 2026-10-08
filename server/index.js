@@ -13,6 +13,7 @@ import { MAX_MESSAGE_BYTES } from '../shared/protocol.js';
 import { createStaticHandler } from './static.js';
 import { createSessionStore, attachConnection, createAddressLimiter, CLOSE } from './session.js';
 import { createLobby } from './lobby.js';
+import { createProfileService } from './profiles.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -29,6 +30,23 @@ function envCount(name) {
   if (v === undefined || v === '') return undefined;
   const n = Number(v);
   return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
+/** Reject browser cross-origin upgrades before any cookie or token is read. */
+function permitsBrowserOrigin(req, secure) {
+  const origin = req.headers.origin;
+  // Native clients do not send Origin; their credentials remain explicit.
+  if (origin === undefined) return true;
+  if (typeof origin !== 'string') return false;
+  try {
+    const candidate = new URL(origin);
+    if (!['http:', 'https:'].includes(candidate.protocol) || candidate.origin !== origin) return false;
+    const scheme = secure || req.socket.encrypted ? 'https' : 'http';
+    const expected = new URL(`${scheme}://${req.headers.host}`);
+    return candidate.origin === expected.origin;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -54,6 +72,8 @@ export function envConfig(log = console) {
     maxRooms: envInt('MAX_ROOMS'),
     maxSocketsPerAddress: envCount('MAX_SOCKETS_PER_IP'),
     maxRoomsPerAddress: envCount('MAX_ROOMS_PER_IP'),
+    profileDataDir: process.env.FE_DATA_DIR || path.join(ROOT, '..', 'frota-estelar-data'),
+    secure: process.env.FE_COOKIE_SECURE === '1',
   };
 }
 
@@ -70,12 +90,20 @@ export function envConfig(log = console) {
  * @param {number} [o.maxSocketsPerAddress]  concurrent sockets per remote address (default 16, 0 = unlimited)
  * @param {number} [o.maxRoomsPerAddress]    alive rooms per creator address (default 4, 0 = unlimited)
  * @param {number} [o.handshakeMs]           close sockets that never send `hello` (default 10 s)
+ * @param {string} [o.profileDataDir]        durable SQLite directory; omitted uses an in-memory store for embedding/tests
+ * @param {object} [o.profileService]        caller-owned profile service (caller also closes it)
+ * @param {boolean} [o.secure]              explicit HTTPS proxy mode; defaults to FE_COOKIE_SECURE=1 (never inferred from forwarded headers)
  * @param {{log:Function, warn:Function}} [o.log]
  * @returns {Promise<{ port:number, httpServer: http.Server, wss: WebSocketServer, lobby: object, sessions: object, close(): Promise<void> }>}
  */
 export async function startServer(o = {}) {
   const log = o.log || console;
-  const roomOptions = {};
+  const secure = o.secure ?? process.env.FE_COOKIE_SECURE === '1';
+  const profiles = o.profileService || createProfileService({
+    ...(o.profileDataDir ? { dataDir: o.profileDataDir } : { filename: ':memory:' }),
+    secureCookie: secure,
+  });
+  const roomOptions = { profiles };
   if (o.maxTicks) roomOptions.maxTicks = o.maxTicks;
   if (o.tickMs) roomOptions.tickMs = o.tickMs;
   if (o.countdownMs) roomOptions.countdownMs = o.countdownMs;
@@ -99,15 +127,28 @@ export async function startServer(o = {}) {
     sharedDir: path.join(ROOT, 'shared'),
     health: () => ({ ...lobby.health(), sessions: sessions.size }),
   });
-  const httpServer = http.createServer(handler);
+  const httpServer = http.createServer(async (req, res) => {
+    try {
+      if (!await profiles.handleHttp(req, res)) handler(req, res);
+    } catch (err) {
+      log.warn('[http] request failed', err);
+      if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'INTERNAL_ERROR' }));
+    }
+  });
   const wss = new WebSocketServer({
     server: httpServer,
     perMessageDeflate: { threshold: 512 },
     maxPayload: MAX_MESSAGE_BYTES,
+    verifyClient: ({ req }, done) => {
+      if (!permitsBrowserOrigin(req, secure)) return done(false, 403, 'Origin forbidden');
+      done(true);
+    },
   });
   wss.on('connection', (ws, req) => attachConnection(ws, {
     sessions, lobby, log, limiter, handshakeMs: o.handshakeMs,
     remoteAddress: req && req.socket ? req.socket.remoteAddress : undefined,
+    profileId: profiles.authenticateRequest(req),
   }));
   // ws re-emits the http server's errors; the listen failure is already reported by startServer's rejection.
   wss.on('error', (err) => {
@@ -115,13 +156,16 @@ export async function startServer(o = {}) {
     log.warn('[ws] server error', err);
   });
 
-  await new Promise((resolve, reject) => {
+  try { await new Promise((resolve, reject) => {
     httpServer.once('error', reject);
     httpServer.listen(o.port ?? 3000, o.host, () => {
       httpServer.off('error', reject);
       resolve();
     });
-  });
+  }); } catch (err) {
+    if (!o.profileService) profiles.close();
+    throw err;
+  }
   const addr = httpServer.address();
   const port = typeof addr === 'object' && addr ? addr.port : o.port;
 
@@ -134,6 +178,7 @@ export async function startServer(o = {}) {
         try { client.close(CLOSE.SHUTDOWN, 'shutdown'); } catch { /* ignore */ }
       }
       sessions.clear();
+      if (!o.profileService) profiles.close();
       const force = setTimeout(() => {
         for (const client of wss.clients) {
           try { client.terminate(); } catch { /* ignore */ }
@@ -152,7 +197,7 @@ export async function startServer(o = {}) {
     return closing;
   }
 
-  return { port, httpServer, wss, lobby, sessions, close };
+  return { port, httpServer, wss, lobby, sessions, profiles, close };
 }
 
 /** Best-effort: open the default browser on the given URL (used by the one-click launchers). */

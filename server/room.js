@@ -6,7 +6,7 @@
 // Sessions are plain objects the room only touches through `id`, `name`,
 // `roomCode` and `sendRaw(str)`, so tests can use fakes.
 
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import {
   COUNTDOWN_SECONDS, RECONNECT_GRACE_MS, TICK_RATE, SNAPSHOT_EVERY, MAX_TICKS, DEFAULT_BUDGET, DIFFICULTIES, TEAM_SIZES, BUDGETS,
 } from '../shared/constants.js';
@@ -15,7 +15,8 @@ import { validateFleet } from '../shared/fleet.js';
 import { buildBotFleet } from '../shared/botFleet.js';
 import { createRng } from '../shared/rng.js';
 import { createBattle, getInitialShips, battleWorld } from '../shared/sim/battle.js';
-import { S2C, ERR, MAX_CHAT_LENGTH } from '../shared/protocol.js';
+import { S2C, ERR, MAX_CHAT_LENGTH, TEAM_ROLES } from '../shared/protocol.js';
+import { PILOT_COST, applyPilotInput, releasePilot } from '../shared/pilot.js';
 import { startMatch as defaultStartMatch } from './match.js';
 
 const BUDGET_POINTS = Object.values(BUDGETS).map((b) => b.points);
@@ -41,6 +42,8 @@ const fail = (code, detail) => (detail === undefined ? { ok: false, code } : { o
  * @param {number} [o.teamSize]             1..6
  * @param {number} [o.budget]               one of BUDGETS points
  * @param {string} [o.botDifficulty]        default difficulty for auto-filled bots
+ * @param {boolean} [o.pilotsEnabled]       both teams reserve PILOT_COST for each commander's special ship
+ * @param {object} [o.profiles]             trusted profile service for content access and authoritative rewards
  * @param {Function} [o.onDestroy]          (room) => void, after members were notified
  * @param {Function} [o.startMatch]         match runner (injectable for tests)
  * @param {{now():number,setTimeout:Function,clearTimeout:Function}} [o.clock]
@@ -66,6 +69,7 @@ export function createRoom(o) {
   let teamSize = TEAM_SIZES.includes(o.teamSize) ? o.teamSize : 1;
   let budget = BUDGET_POINTS.includes(o.budget) ? o.budget : DEFAULT_BUDGET;
   let botDifficulty = DIFFICULTIES.includes(o.botDifficulty) ? o.botDifficulty : DEFAULT_BOT_DIFFICULTY;
+  let pilotsEnabled = o.pilotsEnabled === true;
   let phase = 'lobby';
   let hostId = null;
   let destroyed = false;
@@ -84,6 +88,15 @@ export function createRoom(o) {
   let destroyTimer = null;
   /** @type {null | {seed:any, runner:any, startInfo:object, dead:Set<number>, spawned:Map<number, object>, lastFrame:string|null, result:object|null}} */
   let match = null;
+  const fleetBudget = () => budget - (pilotsEnabled ? PILOT_COST : 0);
+
+  function fleetAccess(session, fleet) {
+    if (!o.profiles) return ok();
+    const access = o.profiles.validateFleet(session.profileId, fleet);
+    if (!access.ok) return access;
+    if (pilotsEnabled && !o.profiles.validatePilot(session.profileId, fleet.faction)) return fail('CONTENT_LOCKED', 'pilot');
+    return ok();
+  }
 
   for (let t = 0; t < 2; t++) for (let i = 0; i < teamSize; i++) grid[t].push(null);
 
@@ -217,7 +230,7 @@ export function createRoom(o) {
 
   function makeBot(difficulty, faction, name) {
     const id = `bot_${++botIdCounter}`;
-    const bot = { id, name: name || nextBotName(), difficulty, faction: faction || null, fixedFleet: null, assignedFaction: null, fleet: null };
+    const bot = { id, name: name || nextBotName(), difficulty, faction: faction || null, fixedFleet: null, assignedFaction: null, fleet: null, role: TEAM_ROLES[(botIdCounter - 1) % TEAM_ROLES.length] };
     bots.set(id, bot);
     return bot;
   }
@@ -233,12 +246,14 @@ export function createRoom(o) {
       return {
         kind: 'human', playerId: m.id, name: m.name, faction: m.fleet ? m.fleet.faction : undefined,
         ready: m.ready, hasFleet: !!m.fleet, connected: m.connected, isHost: m.id === hostId,
+        role: m.role,
       };
     }
     const b = bots.get(c.id);
     return {
       kind: 'bot', playerId: b.id, name: b.name, difficulty: b.difficulty, faction: botFaction(b),
       ready: true, hasFleet: true, connected: true, isHost: false,
+      role: b.role,
     };
   }
 
@@ -252,6 +267,8 @@ export function createRoom(o) {
       hostId,
       teamSize,
       budget,
+      fleetBudget: fleetBudget(),
+      pilotsEnabled,
       botDifficulty,
       phase,
       slots: grid.map((row) => row.map(slotView)),
@@ -311,7 +328,7 @@ export function createRoom(o) {
     if (members.size >= MAX_MEMBERS) return fail(ERR.ROOM_FULL);
     const m = {
       id: session.id, session, name: session.name, connected: true, joinedAt: ++joinCounter,
-      team: -1, slot: -1, fleet: null, ready: false, graceTimer: null, expired: false,
+      team: -1, slot: -1, fleet: null, ready: false, graceTimer: null, expired: false, role: 'vanguard',
     };
     members.set(m.id, m);
     session.roomCode = code;
@@ -332,6 +349,7 @@ export function createRoom(o) {
   }
 
   function removeMember(m, reason) {
+    if (match?.runner?.state) releasePilot(match.runner.state, m.id);
     clearGrace(m);
     members.delete(m.id);
     rematchVotes.delete(m.id);
@@ -360,6 +378,7 @@ export function createRoom(o) {
   function onDisconnect(session) {
     const m = members.get(session.id);
     if (!m || !m.connected) return;
+    if (match?.runner?.state) releasePilot(match.runner.state, m.id);
     m.connected = false;
     if (phase === 'countdown' && m.team >= 0) abortCountdown();
     if (phase !== 'battle') m.ready = false;
@@ -440,6 +459,11 @@ export function createRoom(o) {
       if (!DIFFICULTIES.includes(opts.botDifficulty)) return fail(ERR.BAD_MESSAGE, 'botDifficulty');
       next.botDifficulty = opts.botDifficulty;
     }
+    if (opts.pilotsEnabled !== undefined) {
+      if (typeof opts.pilotsEnabled !== 'boolean') return fail(ERR.BAD_MESSAGE, 'pilotsEnabled');
+      next.pilotsEnabled = opts.pilotsEnabled;
+    }
+    const settingsChanged = Object.entries(next).some(([key, value]) => value !== ({ teamSize, budget, botDifficulty, pilotsEnabled })[key]);
     if (next.teamSize !== undefined && next.teamSize !== teamSize) {
       for (let t = 0; t < 2; t++) {
         const row = grid[t];
@@ -457,16 +481,17 @@ export function createRoom(o) {
       }
       teamSize = next.teamSize;
     }
-    if (next.budget !== undefined && next.budget !== budget) {
-      budget = next.budget;
+    if (next.budget !== undefined) budget = next.budget;
+    if (next.pilotsEnabled !== undefined) pilotsEnabled = next.pilotsEnabled;
+    if (settingsChanged) {
       for (const hm of members.values()) {
-        if (hm.fleet && !validateFleet(hm.fleet, budget).ok) {
+        hm.ready = false;
+        if (hm.fleet && (!validateFleet(hm.fleet, fleetBudget()).ok || !fleetAccess(hm.session, hm.fleet).ok)) {
           hm.fleet = null;
-          hm.ready = false;
         }
       }
       for (const b of bots.values()) {
-        if (b.fixedFleet && !validateFleet(b.fixedFleet, budget).ok) b.fixedFleet = null;
+        if (b.fixedFleet && !validateFleet(b.fixedFleet, fleetBudget()).ok) b.fixedFleet = null;
       }
     }
     if (next.botDifficulty !== undefined) botDifficulty = next.botDifficulty;
@@ -526,12 +551,34 @@ export function createRoom(o) {
     const { m, err } = requireMember(session);
     if (err) return err;
     if (phase !== 'lobby' && phase !== 'results') return fail(ERR.WRONG_PHASE, phase);
-    const v = validateFleet(fleet, budget);
+    const v = validateFleet(fleet, fleetBudget());
     if (!v.ok) return fail(ERR.FLEET_INVALID, { code: v.code, detail: v.detail });
+    const access = fleetAccess(session, v.fleet);
+    if (!access.ok) return access;
     m.fleet = v.fleet;
     m.ready = false;
     broadcastState();
     return ok();
+  }
+
+  function setRole(session, role) {
+    const { m, err } = requireMember(session);
+    if (err) return err;
+    if (phase !== 'lobby') return fail(ERR.WRONG_PHASE, phase);
+    if (m.team < 0) return fail(ERR.SLOT_INVALID, 'spectator');
+    if (!TEAM_ROLES.includes(role)) return fail(ERR.BAD_MESSAGE, 'role');
+    if (m.role !== role) { m.role = role; m.ready = false; }
+    broadcastState();
+    return ok();
+  }
+
+  function pilotInput(session, matchId, input) {
+    const { m, err } = requireMember(session);
+    if (err) return err;
+    if (phase !== 'battle') return fail(ERR.WRONG_PHASE, phase);
+    if (!pilotsEnabled || m.team < 0) return fail(ERR.PILOT_DISABLED);
+    if (match.id !== matchId) return fail(ERR.STALE_MATCH);
+    return applyPilotInput(match.runner.state, session.id, input);
   }
 
   function setReady(session, ready) {
@@ -559,6 +606,7 @@ export function createRoom(o) {
         const hm = members.get(c.id);
         if (!hm.connected) missing.push({ team: t, slot: i, reason: 'disconnected' });
         else if (!hm.fleet) missing.push({ team: t, slot: i, reason: 'no_fleet' });
+        else if (!validateFleet(hm.fleet, fleetBudget()).ok || !fleetAccess(hm.session, hm.fleet).ok) missing.push({ team: t, slot: i, reason: 'fleet_invalid' });
         else if (!hm.ready) missing.push({ team: t, slot: i, reason: 'not_ready' });
       }
     }
@@ -625,12 +673,12 @@ export function createRoom(o) {
           k++;
           b.assignedFaction = faction;
         }
-        if (b.fixedFleet && validateFleet(b.fixedFleet, budget).ok) {
-          b.fleet = validateFleet(b.fixedFleet, budget).fleet;
+        if (b.fixedFleet && validateFleet(b.fixedFleet, fleetBudget()).ok) {
+          b.fleet = validateFleet(b.fixedFleet, fleetBudget()).fleet;
           continue;
         }
         b.fleet = buildBotFleet({
-          budget, difficulty: b.difficulty, rng: createRng(`${seed}:${b.id}`), faction, enemyFleets,
+          budget: fleetBudget(), difficulty: b.difficulty, rng: createRng(`${seed}:${b.id}`), faction, enemyFleets,
         });
       }
     }
@@ -651,7 +699,7 @@ export function createRoom(o) {
       return;
     }
     const startAt = clock.now() + countdownMs;
-    match = { seed, runner: null, startInfo: null, dead: new Set(), spawned: new Map(), lastFrame: null, result: null };
+    match = { id: randomUUID(), seed, runner: null, startInfo: null, dead: new Set(), spawned: new Map(), lastFrame: null, result: null };
     broadcastObj({ t: S2C.COUNTDOWN, seconds: countdownMs / 1000, startAt });
     broadcastState();
     countdownTimer = clock.setTimeout(() => {
@@ -680,10 +728,10 @@ export function createRoom(o) {
         if (!c) continue;
         if (c.kind === 'human') {
           const hm = members.get(c.id);
-          players.push({ id: hm.id, name: hm.name, team: t, isBot: false, fleet: hm.fleet, ai: 'especialista' });
+          players.push({ id: hm.id, name: hm.name, team: t, isBot: false, fleet: hm.fleet, ai: 'especialista', role: hm.role, ...(pilotsEnabled ? { pilot: true } : {}) });
         } else {
           const b = bots.get(c.id);
-          players.push({ id: b.id, name: b.name, team: t, isBot: true, fleet: b.fleet, ai: b.difficulty });
+          players.push({ id: b.id, name: b.name, team: t, isBot: true, fleet: b.fleet, ai: b.difficulty, role: b.role, ...(pilotsEnabled ? { pilot: true } : {}) });
         }
       }
     }
@@ -709,8 +757,9 @@ export function createRoom(o) {
       return;
     }
     match.startInfo = {
+      matchId: match.id,
       seed: match.seed,
-      players: players.map((p) => ({ id: p.id, name: p.name, team: p.team, isBot: p.isBot, faction: p.fleet.faction, fleet: p.fleet, ai: p.ai })),
+      players: players.map((p) => ({ id: p.id, name: p.name, team: p.team, isBot: p.isBot, faction: p.fleet.faction, fleet: p.fleet, ai: p.ai, role: p.role, ...(p.pilot ? { pilot: true } : {}) })),
       ships: getInitialShips(state),
       world: battleWorld(state),
       tickRate: TICK_RATE,
@@ -721,6 +770,7 @@ export function createRoom(o) {
     broadcastRaw(battleStartMessage(false));
     broadcastState();
     const thisMatch = match;
+    thisMatch.participants = players.map((p) => ({ playerId: p.id, team: p.team, profileId: members.get(p.id)?.session.profileId || null }));
     thisMatch.runner = startMatch({
       config,
       state,
@@ -757,6 +807,12 @@ export function createRoom(o) {
     if (phase !== 'battle') return;
     match.result = result;
     phase = 'results';
+    // Only the authoritative match runner can award progression; aborted
+    // simulations never turn a synthetic draw into a reward.
+    if (o.profiles && match.runner?.stats?.errors === 0) {
+      try { o.profiles.recordMatch({ matchId: match.id, result, participants: match.participants, mode: 'multiplayer' }); }
+      catch (err) { log.warn('[room] progression save failed', err); }
+    }
     broadcastObj({ t: S2C.BATTLE_END, result });
     // Humans that never came back keep their slot as a normal bot with the same fleet.
     for (const hm of humansInSlots()) {
@@ -863,6 +919,8 @@ export function createRoom(o) {
     addBot,
     removeBot,
     setFleet,
+    setRole,
+    pilotInput,
     setReady,
     start,
     rematch,

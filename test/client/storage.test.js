@@ -27,9 +27,11 @@ describe('storage helpers', () => {
     assert.equal(n.master, 1); assert.equal(n.music, 0); assert.equal(n.sfx, 0.3); assert.equal(n.muted, true);
     assert.equal(n.reducedMotion, 'auto'); assert.equal(n.quality, 'low'); assert.equal(n.speed, 1); assert.equal(n.showNames, true);
     const s = memoryStore();
-    saveSettings({ ...DEFAULT_SETTINGS, speed: 4, quality: 'high' }, s);
+    saveSettings({ ...DEFAULT_SETTINGS, speed: 4, quality: 'high', reducedEffects: true, highContrast: true }, s);
     assert.equal(loadSettings(s).speed, 4);
     assert.equal(loadSettings(s).quality, 'high');
+    assert.equal(loadSettings(s).reducedEffects, true);
+    assert.equal(loadSettings(s).highContrast, true);
   });
 
   test('progress: cleared levels per difficulty, max and best', () => {

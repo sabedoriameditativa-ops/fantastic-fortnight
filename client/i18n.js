@@ -44,7 +44,7 @@ export const T = {
     nameHint: 'Usado nas partidas (até 16 caracteres).',
     progress: 'Progresso: nível {level} em {difficulty}',
     noProgress: 'Nenhum nível concluído ainda.',
-    footer: 'Jogo de estratégia espacial com batalhas automáticas · 4 facções · 32 naves',
+    footer: 'Jogo de estratégia espacial com batalhas automáticas · 5 facções · 40 naves',
   },
 
   sp: {
@@ -299,7 +299,7 @@ export const T = {
 
   codex: {
     title: 'Galeria de naves',
-    subtitle: '32 naves em 4 facções. Clique em uma nave para ver a ficha completa.',
+    subtitle: '40 naves em 5 facções. Clique em uma nave para ver a ficha completa.',
     all: 'Todas',
     stats: 'Atributos',
     hp: 'Casco',
@@ -397,6 +397,14 @@ export const T = {
     DISCONNECTED: 'Conexão com o servidor perdida.',
     CONNECT_FAILED: 'Não foi possível conectar ao servidor.',
     NOT_CONNECTED: 'Você não está conectado.',
+    SESSION_REPLACED: 'Esta sessão foi aberta em outra conexão. Reconecte para continuar aqui.',
+    PILOT_DISABLED: 'O controle manual não está disponível nesta partida.',
+    STALE_MATCH: 'Este comando pertence a uma partida anterior. Aguarde a sincronização.',
+    FLEET_LOCKED: 'Sua frota contém conteúdo ainda não desbloqueado neste perfil.',
+    CONTENT_LOCKED: 'Este conteúdo exige desbloqueio no Perfil para partidas verificadas.',
+    INSUFFICIENT_POINTS: 'Pontos insuficientes para este desbloqueio.',
+    PREREQUISITE_LOCKED: 'Desbloqueie primeiro a facção exigida.',
+    RUN_TOO_EARLY: 'A partida ainda não pode ser verificada. Tente novamente em instantes.',
     UNKNOWN: 'Erro desconhecido ({code}).',
   },
 

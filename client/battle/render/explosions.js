@@ -84,18 +84,21 @@ export function createExplosions(o) {
     const main = () => {
       const t0 = now + delay;
       const x = ev.x, y = ev.y;
+      const blastColor = ev.faction === 'terran' ? '#ffd2b8' : pal.accent || pal.teamGlow;
       flash({ x, y, r: 10 * S, col: '#ffffff', t0, dur: 120 });
       flash({ x, y, r: 20 * S, col: pal.teamGlow, t0, dur: 220, a: 0.6 });
-      ring({ x, y, r0: 6 * S, r1: 96 * S, lw: 1.2 * S, col: '#ffd2b8', t0, dur: 600 * Math.sqrt(S), a0: 0.6 });
+      ring({ x, y, r0: 6 * S, r1: 96 * S, lw: 1.2 * S, col: blastColor, t0, dur: 600 * Math.sqrt(S), a0: 0.6 });
       ring({ x, y, r0: 4 * S, r1: 70 * S, lw: 0.6 * S + 0.5, col: '#ffffff', t0: t0 + 40, dur: 450 * Math.sqrt(S), a0: 0.5 });
       if (S >= 5) {
         ring({ x, y, r0: 4 * S, r1: 110 * S, lw: 1.2, col: '#ffffff', t0: t0 + 150, dur: 700 * Math.sqrt(S), a0: 0.6 });
         flash({ x, y, r: 60 * S, col: '#ffffff', t0, dur: 220, a: 0.18 });
       }
       const nFire = Math.round((8 + 6 * S) * d);
+      const fireKind = ev.faction === 'terran' ? KIND.FIRE : ev.faction === 'ferrix' ? KIND.GLOW : KIND.PLASMA;
+      const fireColor = P.color(ev.faction === 'vorrax' ? pal.accent : pal.inner || pal.teamGlow);
       for (let i = 0; i < nFire; i++) {
         const a = rand.range(0, TAU), v = rand.range(20, 90) * (0.6 + 0.4 * Math.sqrt(S));
-        P.spawn(KIND.FIRE, x + rand.range(-2, 2) * S, y + rand.range(-2, 2) * S, Math.cos(a) * v, Math.sin(a) * v, rand.range(300, 520) * Math.sqrt(S), 4 * S, 0.5, C.white, 0, 0, 0.96);
+        P.spawn(fireKind, x + rand.range(-2, 2) * S, y + rand.range(-2, 2) * S, Math.cos(a) * v, Math.sin(a) * v, rand.range(300, 520) * Math.sqrt(S), 4 * S, 0.5, fireColor, 0, 0, 0.96);
       }
       const nDeb = Math.round(Math.min(46, 6 + 4 * S) * d);
       if (ev.faction === 'ferrix' && !ev.secondary) timed(t0 + 150, () => debrisFor('ferrix', x, y, S, pal, nDeb, d));
@@ -149,22 +152,23 @@ export function createExplosions(o) {
   }
 
   /** Draw rings and flashes (additive). Base transform [dpr,0,0,dpr,0,0]. */
-  function draw(ctx, cam, dpr, now) {
+  function draw(ctx, cam, dpr, now, reducedEffects = false) {
     if (!rings.length && !flashes.length) return;
     const z = cam.zoom;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalCompositeOperation = reducedEffects ? 'source-over' : 'lighter';
     for (const r of rings) {
       const u = (now - r.t0) / r.dur;
       if (u < 0 || u >= 1) continue;
       const rr = (r.r0 + (r.r1 - r.r0) * easeOut(u)) * z;
       if (!cam.isVisible(r.x, r.y, rr / z)) continue;
-      ctx.strokeStyle = r.col; ctx.globalAlpha = r.a0 * (1 - u); ctx.lineWidth = Math.max(0.8, r.lw * (1 - u) * z);
+      ctx.strokeStyle = r.col; ctx.globalAlpha = (reducedEffects ? Math.min(0.25, r.a0) : r.a0) * (1 - u); ctx.lineWidth = reducedEffects ? 1 : Math.max(0.8, r.lw * (1 - u) * z);
       if (r.dash) ctx.setLineDash([r.dash * z, r.dash * z]);
       ctx.beginPath(); ctx.arc(cam.worldToScreenX(r.x), cam.worldToScreenY(r.y), rr, 0, TAU); ctx.stroke();
       if (r.dash) ctx.setLineDash([]);
     }
     for (const f of flashes) {
+      if (reducedEffects) break;
       const u = (now - f.t0) / f.dur;
       if (u < 0 || u >= 1) continue;
       const rr = f.r * z * (1 + u * 0.3);

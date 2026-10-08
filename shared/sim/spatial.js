@@ -14,7 +14,7 @@ export function createGrid(w, h, cell = CELL_SIZE) {
   const rows = Math.max(1, Math.ceil(h / cell) + 1);
   const cells = new Array(cols * rows);
   for (let i = 0; i < cells.length; i++) cells[i] = [];
-  return { w, h, cell, cols, rows, cells, count: 0 };
+  return { w, h, cell, cols, rows, cells, count: 0, locations: [] };
 }
 
 /** Empty every cell (keeps arrays). */
@@ -22,6 +22,7 @@ export function clearGrid(grid) {
   const cells = grid.cells;
   for (let i = 0; i < cells.length; i++) cells[i].length = 0;
   grid.count = 0;
+  grid.locations.length = 0;
 }
 
 function cellX(grid, x) {
@@ -35,8 +36,21 @@ function cellY(grid, y) {
 
 /** Insert an id at (x, y). Call in ascending id order for determinism. */
 export function insertGrid(grid, id, x, y) {
-  grid.cells[cellY(grid, y) * grid.cols + cellX(grid, x)].push(id);
+  const index = cellY(grid, y) * grid.cols + cellX(grid, x);
+  grid.cells[index].push(id); grid.locations[id] = index;
   grid.count++;
+}
+
+/** Update an instant relocation without waiting for the next tick's rebuild. */
+export function relocateGrid(grid, id, x, y) {
+  const before = grid.locations[id], after = cellY(grid, y) * grid.cols + cellX(grid, x);
+  if (before === undefined || before === after) return;
+  const old = grid.cells[before], at = old.indexOf(id);
+  if (at >= 0) old.splice(at, 1);
+  const cell = grid.cells[after];
+  let i = cell.length;
+  while (i > 0 && cell[i - 1] > id) i--;
+  cell.splice(i, 0, id); grid.locations[id] = after;
 }
 
 /**

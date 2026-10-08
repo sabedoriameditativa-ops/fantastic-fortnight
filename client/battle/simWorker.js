@@ -8,8 +8,10 @@
 import { createBattle, stepBattle, makeSnapshot, getResult, getInitialShips, battleWorld } from '/shared/sim/battle.js';
 import { TICK_MS, TICK_RATE, SNAPSHOT_EVERY, MAX_TICKS } from '/shared/constants.js';
 import { createSimLoop } from '../util/simLoop.js';
+import { applyPilotInput, pilotSnapshot } from '/shared/pilot.js';
 
 let loop = null;
+let state = null;
 
 /** BattleStartInfo for a config + fresh state (mirrors localRunner.buildStartInfo). */
 function startInfo(config, state) {
@@ -17,7 +19,7 @@ function startInfo(config, state) {
     seed: config.seed,
     players: config.players.map((p) => ({
       id: p.id, name: p.name, team: p.team, isBot: !!p.isBot, faction: p.fleet.faction, fleet: p.fleet,
-      ai: p.ai || (p.isBot ? 'normal' : 'especialista'),
+      ai: p.ai || (p.isBot ? 'normal' : 'especialista'), pilot: !!p.pilot,
     })),
     ships: getInitialShips(state),
     world: battleWorld(state),
@@ -25,6 +27,8 @@ function startInfo(config, state) {
     snapshotEvery: SNAPSHOT_EVERY,
     maxTicks: config.maxTicks || MAX_TICKS,
     isLocal: true,
+    p: pilotSnapshot(state),
+    ...(config.campaign ? { campaign: config.campaign } : {}),
   };
 }
 
@@ -33,16 +37,19 @@ self.onmessage = (ev) => {
   try {
     if (m.t === 'init') {
       if (loop) loop.stop();
-      const state = createBattle(m.config);
+      state = createBattle(m.config);
       loop = createSimLoop({
         state, step: stepBattle, snapshot: makeSnapshot, result: getResult,
         tickMs: TICK_MS, snapshotEvery: SNAPSHOT_EVERY, speed: m.speed ?? 1,
-        onFrame: (f) => self.postMessage({ t: 'frame', k: f.k, s: f.s, e: f.e }),
+        onFrame: (f) => self.postMessage({ t: 'frame', ...f }),
         onEnd: (r) => self.postMessage({ t: 'end', result: r }),
       });
       self.postMessage({ t: 'start', info: startInfo(m.config, state) });
       if (m.paused) loop.setPaused(true);
       loop.start();
+    } else if (m.t === 'pilot' && state) {
+      const applied = applyPilotInput(state, m.ownerId, m.input);
+      if (applied.ok) self.postMessage({ t: 'pilot_applied', tick: state.tick, ownerId: m.ownerId, input: m.input });
     } else if (m.t === 'speed') {
       if (loop) loop.setSpeed(m.x);
     } else if (m.t === 'pause') {

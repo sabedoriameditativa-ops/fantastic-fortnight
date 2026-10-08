@@ -1,5 +1,57 @@
 /* Frota Estelar — dark sci-fi HUD theme (docs/design/visuals.md §5) */
 
+/* Official Google Fonts files bundled unchanged for offline play.
+   Copyright and SIL OFL 1.1 notices: fonts/LICENSES.txt. */
+/* Keep the original hosted weight matching: Orbitron 500/700, Exo 2 400/600. */
+@font-face {
+  font-family: 'Exo 2';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(./fonts/exo2-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Exo 2';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(./fonts/exo2-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Exo 2';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(./fonts/exo2-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Exo 2';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(./fonts/exo2-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Orbitron';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(./fonts/orbitron-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Orbitron';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(./fonts/orbitron-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   --bg: #05070c;
   --panel: rgba(10, 16, 30, 0.82);
@@ -50,7 +102,7 @@ canvas { display: block; }
 #arena.visible { display: block; }
 #arena.dimmed { filter: blur(4px) brightness(0.45); }
 #app { position: fixed; inset: 0; z-index: 2; overflow: auto; overscroll-behavior: contain; }
-#app.battle { overflow: hidden; }
+#app.battle { overflow: hidden; pointer-events: none; }
 #toasts { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; max-width: min(92vw, 560px); }
 #scanlines { position: fixed; inset: 0; z-index: 3; pointer-events: none; background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255, 255, 255, 0.015) 3px 4px); mix-blend-mode: screen; }
 html[data-rm="on"] #scanlines { display: none; }
@@ -234,7 +286,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .fb-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
 .fb-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .fb-side { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; }
-.faction-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.faction-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .faction-card { position: relative; border: 1px solid var(--line); background: rgba(5, 7, 12, 0.55); cursor: pointer; padding: 8px 10px 10px; text-align: left; color: var(--text); font: inherit; transition: all var(--dur); border-radius: var(--radius); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .faction-card canvas { width: 100%; height: 86px; }
 .faction-card .fname { font-family: var(--font-title); font-size: 13px; letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -323,7 +375,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 
 /* ---- battle HUD ---- */
 #hud { position: absolute; inset: 0; pointer-events: none; font-size: 13px; }
-#hud > * { pointer-events: auto; }
+#hud button, #hud input, #hud select { pointer-events: auto; }
 .hud-top { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; width: min(96%, 980px); }
 .hud-team { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .hud-team.t1 { text-align: right; }
@@ -369,6 +421,23 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .hud-players .hp.dead { opacity: 0.45; }
 .battle-overlay { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px; background: rgba(5, 7, 12, 0.55); pointer-events: auto; }
 .battle-overlay.transparent { background: transparent; pointer-events: none; }
+.library > summary, details.panel > summary { cursor: pointer; font-weight: 600; margin-bottom: 10px; }
+.library-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.formation-preview { height: 90px; position: relative; border: 1px solid var(--border); background: linear-gradient(90deg, #35c8ff10, transparent); margin-bottom: 12px; }
+.formation-preview::after { content: 'inimigo →'; position: absolute; right: 6px; top: 5px; color: var(--muted); font-size: 10px; }
+.formation-preview > span { position: absolute; width: 12px; height: 8px; background: var(--team-a); clip-path: polygon(0 0, 100% 50%, 0 100%, 20% 50%); }
+.formation-preview[data-position=rear] > span { margin-left: -12%; }
+.formation-preview[data-position=front] > span { margin-left: 12%; }
+.room-body { margin-bottom: 12px; }
+.battle-subtitle { position: absolute; bottom: 82px; left: 50%; transform: translateX(-50%); max-width: min(560px, 80%); text-align: center; padding: 7px 12px; background: rgba(5, 7, 12, .88); border: 1px solid #6a839d; border-radius: 6px; opacity: 0; }
+.battle-subtitle.visible { opacity: 1; }
+.hud-pilot { position: absolute; left: 50%; bottom: 58px; transform: translateX(-50%); width: min(520px, 75%); text-align: center; background: rgba(5, 7, 12, .88); padding: 8px; border: 1px solid var(--accent); border-radius: 5px; }
+#hud:has(.hud-pilot:not(.hidden)) .battle-subtitle { bottom: 155px; }
+#hud:has(.hud-pilot:not(.hidden)) .hud-log { width: min(30%, 320px); }
+.hud-pilot button { margin-right: 10px; }
+.hud-decision { position: absolute; top: 95px; left: 12px; width: min(270px, 34%); background: rgba(5,7,12,.85); border-left: 2px solid var(--accent); padding: 9px; }
+.hud-decision .small { margin-top: 5px; color: var(--muted); }
+.hud-mission { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); max-width: 85%; text-align: center; background: rgba(5,7,12,.88); padding: 4px 10px; border-radius: 3px; font-size: 12px; }
 .battle-overlay .big { font-family: var(--font-title); font-weight: 700; font-size: clamp(28px, 6vw, 64px); letter-spacing: 0.2em; text-align: center; text-shadow: 0 0 24px currentColor; animation: count-pop 600ms ease-out; padding: 0 16px; }
 .battle-overlay .sub { font-family: var(--font-title); color: var(--muted); letter-spacing: 0.15em; font-size: 14px; }
 
@@ -421,12 +490,18 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
   .hud-team .ht-sizes { display: none; }
 }
 @media (max-width: 640px) {
+  .hud-pilot { bottom: 80px; width: calc(100% - 24px); display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  .hud-pilot.hidden { display: none; }
+  .hud-pilot button { margin-right: 0; }
+  #hud:has(.hud-pilot:not(.hidden)) .hud-log { bottom: 184px; width: 62%; max-height: 90px; overflow: hidden; }
+  #hud:has(.hud-pilot:not(.hidden)) .battle-subtitle { bottom: 285px; }
+  .hud-decision { top: 120px; }
   .screen { padding: 16px var(--gutter) 32px; }
   .level-grid { grid-template-columns: repeat(3, 1fr); }
   .slots { grid-template-columns: 1fr; }
   .roster { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
   .hud-log { width: 62%; bottom: 44px; }
-  .hud-right { max-width: 40%; }
+  .hud-right { max-width: none; width: calc(100% - 110px); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hud-right .btn { font-size: 10px; padding: 4px 6px; }
   .hud-left { top: auto; bottom: 12px; }
   .hud-top { top: 6px; gap: 6px; }

@@ -54,7 +54,7 @@ export function applyDamageQueue(state) {
  */
 export function applyDamage(state, srcId, dstId, raw, type, o) {
   const dst = state.ships[dstId - 1];
-  if (!dst || !dst.alive || raw <= 0) return 0;
+  if (!dst || !dst.alive || dst.hp <= 0 || !Number.isFinite(raw) || raw <= 0) return 0;
   const tick = state.tick, ev = state.events;
   const src = srcId > 0 ? state.ships[srcId - 1] : null;
   if (type === 'kinetic' && dst.targetedByTerran >= COMBAT.terranCoordinationShips) raw *= 1 + COMBAT.terranCoordinationBonus;
@@ -87,7 +87,7 @@ export function applyDamage(state, srcId, dstId, raw, type, o) {
     if (type !== 'railgun' && !(o && o.ignoreDr)) {
       hull = Math.max(hull * COMBAT.armorFloor, hull - (dst.dr + dst.mod.drAdd));
     }
-    hull = Math.max(COMBAT.minHullDamage, hull);
+    hull = Math.min(dst.hp, Math.max(COMBAT.minHullDamage, hull));
     dst.hp -= hull; dst.lastHullHitTick = tick; hullDmg = hull;
     if (o && o.dot) addDot(dst, srcId, o.dot, type, tick);
   }
@@ -216,7 +216,7 @@ export function regenPhase(state) {
     }
     if (s.hot) { // reconstruction heal-over-time: continuous healing, off in sudden death (see heal())
       if (s.hot.until <= tick || !passive) s.hot = null;
-      else if (s.hp < s.hpMax) {
+      else if (!disrupted && s.hp < s.hpMax) {
         const add = Math.min(s.hot.perTick, s.hpMax - s.hp);
         s.hp += add;
         const st = state.stats[s.hot.owner]; if (st) st.healing += add;
@@ -266,7 +266,7 @@ function killShip(state, s, killerId) {
     if (s.purchased) { killer.kills++; const ks = state.stats[killer.owner]; if (ks) ks.kills++; }
     // Vorrax 'Fome': purchased victims only (spawned units are free and would heal a Vorrax ship faster than
     // spawners lose them) and never in sudden death (see heal()), so the damage ramp always converges
-    if (killer.alive && killer.faction === 'vorrax' && killer.team !== s.team && s.purchased && !state.suddenDeath) {
+    if (killer.alive && killer.faction === 'vorrax' && killer.team !== s.team && s.purchased && !state.suddenDeath && killer.disruptedUntil <= tick) {
       heal(state, killer.id, killer, killer.hpMax * COMBAT.vorraxHungerHeal, 'hull');
     }
   }

@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseParams, roomLink, defaultWsUrl, randomSeed } from '../../client/util/url.js';
+import { parseParams, roomLink, defaultWsUrl, canonicalWsUrl, randomSeed } from '../../client/util/url.js';
 
 describe('url params', () => {
   test('parses the documented parameters', () => {
@@ -34,5 +34,13 @@ describe('url params', () => {
     assert.equal(defaultWsUrl({ protocol: 'http:', host: 'localhost:3000' }), 'ws://localhost:3000');
     assert.match(randomSeed(), /^\d+$/);
     assert.notEqual(randomSeed(), randomSeed());
+  });
+
+  test('credential scope canonicalizes endpoint ports and rejects unsafe URL forms', () => {
+    assert.equal(canonicalWsUrl('wss://GAME.example:443'), 'wss://game.example/');
+    assert.equal(canonicalWsUrl('ws://game.example:80/room?mode=1'), 'ws://game.example/room?mode=1');
+    for (const raw of ['https://game.example/', 'javascript:alert(1)', 'wss://user:secret@game.example/', 'wss://game.example/#fragment']) {
+      assert.throws(() => canonicalWsUrl(raw), TypeError);
+    }
   });
 });

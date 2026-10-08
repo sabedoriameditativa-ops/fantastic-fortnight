@@ -19,6 +19,8 @@ import { tickAreas, tickLatches, tickKamikaze, registerShip } from './effects.js
 import { makeTeamState, recomputeTargeting, teamThink, decide, executePendingCasts, computeDesired } from './ai.js';
 import { orderedShips } from './queries.js';
 import { makeStats, checkEnd } from './stats.js';
+import { initPilots, tickPilots, pilotSnapshot } from '../pilot.js';
+import { initCampaign, tickCampaign, campaignDesired, campaignResult, campaignSnapshot } from '../campaign.js';
 
 export { AI_PROFILES };
 
@@ -57,7 +59,7 @@ export function createBattle(config) {
   const perSide = Math.max(players.filter((p) => p.team === 0).length, players.filter((p) => p.team === 1).length, 1);
   const world = worldSize(perSide);
   const profiles = {};
-  for (const p of players) profiles[p.id] = p.isBot ? getAiProfile(p.ai || 'normal') : HUMAN_AI_PROFILE;
+  for (const p of players) profiles[p.id] = p.isBot ? getAiProfile(p.ai || 'normal', p.personality) : HUMAN_AI_PROFILE;
   const state = {
     tick: 0, rng: createRng(config.seed ?? 1), config, world,
     ships: [], alive: [[], []], alivePurchased: [0, 0],
@@ -79,6 +81,7 @@ export function createBattle(config) {
     // the global id) so that mirrored fleets get identical staggers on both sides (SPEC §8.2)
     const slot = state.alive[d.team].length;
     const s = makeShip({ id, cls: d.cls, owner: d.owner, team: d.team, x: d.x, y: d.y, heading: d.a, tick: 0, slot });
+    s.planning = players.find((p) => p.id === d.owner).fleet.planning;
     s.ai.nextThink = slot % profiles[d.owner].thinkInterval;
     state.ships.push(s);
     state.alive[d.team].push(id);
@@ -87,6 +90,8 @@ export function createBattle(config) {
     registerShip(state, s);
     state.initialShips.push({ id, cls: d.cls, owner: d.owner, team: d.team, x: d.x, y: d.y, a: d.a });
   }
+  initPilots(state);
+  initCampaign(state);
   rebuildGrid(state);
   for (let t = 0; t < 2; t++) {
     const T = state.teams[t];
@@ -138,6 +143,7 @@ export function stepBattle(state) {
   state.events = events;
   state.tick++;
   const tick = state.tick, ships = state.ships;
+  for (const s of ships) { s.prevX = s.x; s.prevY = s.y; }
   // the team that decides / casts / fires / moves first (and whose damage applies first) alternates from tick to
   // tick, so neither side has a systematic within-tick ordering edge (SPEC §8.2 mirror symmetry). A hashed tick bit
   // (not tick parity) so that it still alternates for ships that think every 4 / 8 / 16 ticks.
@@ -150,13 +156,14 @@ export function stepBattle(state) {
     state.sdMul = 1 + SUDDEN_DEATH_RAMP * Math.floor((tick - state.suddenDeathTick) / SUDDEN_DEATH_RAMP_TICKS);
   }
   for (let i = 0; i < ships.length; i++) { const s = ships[i]; if (s.alive) updateStatus(s, tick); }
+  tickPilots(state);
   const ord = orderedShips(state);
   for (let i = 0; i < ord.length; i++) {
     const s = ord[i];
-    if (s.ai.nextThink <= tick && s.stunUntil <= tick) decide(state, s);
+    if (!s.pilotControl?.manual && !s.campaignObjective && s.ai.nextThink <= tick && s.stunUntil <= tick) decide(state, s);
   }
   executePendingCasts(state);
-  moveShips(state, computeDesired);
+  moveShips(state, (st, s, out) => { if (!campaignDesired(st, s, out)) computeDesired(st, s, out); });
   tickLatches(state);
   tickAreas(state);
   tickKamikaze(state);
@@ -167,8 +174,9 @@ export function stepBattle(state) {
   applyDamageQueue(state);
   processDeaths(state);
   regenPhase(state);
+  tickCampaign(state);
   pruneRecentDeaths(state);
-  const result = checkEnd(state);
+  const result = state.campaign ? campaignResult(state) : checkEnd(state);
   if (result) {
     state.ended = result;
     events.push(['end', result.winner, result.reason]);
@@ -201,7 +209,7 @@ export function makeSnapshot(state) {
     const shq = sh.shieldMax > 0 ? Math.max(0, Math.min(HP_SCALE, Math.round(((sh.shield + sh.extraShield) / sh.shieldMax) * HP_SCALE))) : (sh.extraShield > 0 ? HP_SCALE : 0);
     s.push([sh.id, Math.round(sh.x * POS_SCALE), Math.round(sh.y * POS_SCALE), hq, hp, shq, sh.flags]);
   }
-  return { k: state.tick, s };
+  return { k: state.tick, s, p: pilotSnapshot(state), ...(state.campaign ? { campaign: campaignSnapshot(state) } : {}) };
 }
 
 /** The BattleResult once the battle ended, else null. */

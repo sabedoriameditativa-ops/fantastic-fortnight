@@ -13,6 +13,7 @@ import { setShipAnimations } from './util/shipCanvas.js';
 import { buildSpConfig, autotestSetup, normalizeSpSetup } from './util/spConfig.js';
 import { audio } from './audio/index.js';
 import { createNetClient } from './battle/netClient.js';
+import { createProfileClient } from './util/profile.js';
 import { validateName } from '/shared/protocol.js';
 import { DEFAULT_BUDGET } from '/shared/constants.js';
 
@@ -25,8 +26,10 @@ import * as battle from './screens/battle.js';
 import * as results from './screens/results.js';
 import * as codex from './screens/codex.js';
 import * as options from './screens/options.js';
+import * as profile from './screens/profile.js';
 
-const screens = { menu, howto, spSetup, fleetBuilder, lobby, battle, results, codex, options };
+const screens = { menu, howto, spSetup, fleetBuilder, lobby, battle, results, codex, options, profile };
+const profileClient = createProfileClient();
 
 const root = document.getElementById('app');
 const arena = document.getElementById('arena');
@@ -74,7 +77,7 @@ function applySettings() {
     audio.setVolume('ui', state.settings.ui);
     audio.setMuted(state.settings.muted);
   } catch (e) { reportError(e); }
-  if (state.renderer) state.renderer.setOptions({ reducedMotion: reducedMotion(), quality: state.settings.quality, showNames: state.settings.showNames, grid: state.settings.grid });
+  if (state.renderer) state.renderer.setOptions({ reducedMotion: reducedMotion(), quality: state.settings.quality, reducedEffects: state.settings.reducedEffects, highContrast: state.settings.highContrast, showNames: state.settings.showNames, grid: state.settings.grid });
   ambient.refresh();
 }
 
@@ -163,7 +166,11 @@ async function getNet() {
     state.net.onChat((m) => { state.mpChat.push(m); if (state.mpChat.length > 80) state.mpChat.shift(); });
     state.net.onLeft(() => { state.mpChat.length = 0; state.mpFleet = null; });
   }
-  if (!state.net.connected) await state.net.connect(name);
+  if (!state.net.connected) {
+    // Establish the same-origin HttpOnly profile cookie before the WS handshake.
+    await profileClient.ensure().catch(() => null);
+    await state.net.connect(name);
+  }
   return state.net;
 }
 
@@ -173,6 +180,7 @@ async function getNet() {
 
 const ctx = {
   state, params, T, toast, audio, ambient, reducedMotion, applySettings, persistSettings, getNet, reportError,
+  profile: profileClient,
   go: (name, props) => go(name, props),
   setArena(mode) { setArena(mode); },
   setPlayerName(name) {
@@ -189,7 +197,7 @@ const ctx = {
   },
   resetProgress() { state.progress = {}; saveProgress(state.progress); },
   /** Start a single-player battle from a setup + fleet. */
-  startSinglePlayer(setup, fleet, { seed, speed } = {}) {
+  startSinglePlayer(setup, fleet, { seed, speed, practice = false } = {}) {
     const s = seed ?? params.seed ?? randomSeed();
     let built;
     try {
@@ -201,7 +209,23 @@ const ctx = {
     }
     ctx.saveLastFleet(fleet);
     ctx.saveSpSetup(setup);
-    go('battle', { mode: 'sp', config: built.config, meta: built.meta, speed: speed ?? state.settings.speed });
+    const launch = {};
+    state.pendingLaunch = launch;
+    const start = (battle, rated, runId) => {
+      if (state.pendingLaunch !== launch) return;
+      state.pendingLaunch = null;
+      go('battle', { mode: 'sp', config: battle.config, meta: battle.meta, rated, runId, speed: speed ?? state.settings.speed });
+    };
+    // Explicit seeds and the automated harness remain reproducible practice.
+    if (params.autotest || practice || params.seed != null) start(built, false);
+    else {
+      toast('Preparando partida…', 'ok', 1800);
+      profileClient.beginRun({ setup, fleet, playerName: state.playerName || 'Comandante' }).then(run => start(run, true, run.runId)).catch(() => {
+        if (state.pendingLaunch !== launch) return;
+        toast('Treino local: esta partida não concede pontos verificados.', 'warn', 5000);
+        start(built, false);
+      });
+    }
     return true;
   },
 };
@@ -220,6 +244,7 @@ function setArena(mode) {
 function go(name, props = {}) {
   const mod = screens[name];
   if (!mod) { reportError(new Error(`unknown screen ${name}`)); return; }
+  state.pendingLaunch = null;
   if (state.screen && typeof state.screen.unmount === 'function') {
     try { state.screen.unmount(); } catch (e) { reportError(e); }
   }
@@ -237,6 +262,8 @@ function go(name, props = {}) {
   } catch (e) {
     reportError(e);
     clear(root);
+    root.className = '';
+    setArena('hidden');
     root.appendChild(h('div.screen.narrow',
       h('div.panel', h('h1', T.app.errorTitle), h('p', { text: T.app.unexpectedError }), h('p.small.muted', { text: String(e && e.message || e) }),
         h('button.btn', { type: 'button', test: 'error-menu', onClick: () => go('menu') }, T.results.menu)),

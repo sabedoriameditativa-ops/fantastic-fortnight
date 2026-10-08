@@ -8,10 +8,11 @@ import { roomLink } from '../util/url.js';
 import { animateShip } from '../util/shipCanvas.js';
 import { TEAM_SIZES, BUDGETS, DIFFICULTIES, DEFAULT_BUDGET } from '/shared/constants.js';
 import { FACTIONS, FACTION_IDS, shipsOfFaction } from '/shared/catalog.js';
-import { isRoomCode, normalizeRoomCode } from '/shared/protocol.js';
+import { isRoomCode, normalizeRoomCode, TEAM_ROLES } from '/shared/protocol.js';
 import { fleetSummary } from '/shared/fleet.js';
 
 const BUDGET_LIST = Object.values(BUDGETS);
+const ROLE_NAMES = { vanguard: 'Vanguarda', support: 'Suporte', striker: 'Ataque' };
 
 export function mount(root, props, ctx) {
   const { state } = ctx;
@@ -24,6 +25,8 @@ export function mount(root, props, ctx) {
   let countdownEl = null;
   let countdownTimer = null;
   let chatLog = null;
+  let chatPanel = null;
+  const roomBody = h('div.room-body');
   const chatMessages = state.mpChat || (state.mpChat = []);  // shared with app.js: survives screen changes
 
   const container = h('div.screen.wide');
@@ -154,7 +157,11 @@ export function mount(root, props, ctx) {
     // the server is the authority on whether this room has our fleet; the local
     // copy is only a convenience (badge / preload for the builder)
     const myFleet = mine && mine.s.hasFleet ? (state.mpFleet || null) : null;
-    clear(container);
+    // Keep the chat subtree mounted: room pushes must not interrupt typing,
+    // selection or input-method composition.
+    if (!roomBody.isConnected) { clear(container); container.appendChild(roomBody); }
+    clear(roomBody);
+    for (const stop of stops.splice(0)) stop();
     const link = roomLink(room.code, location);
     const copy = async (text, msg) => {
       try { await navigator.clipboard.writeText(text); ctx.toast(msg, 'ok', 1800); }
@@ -178,6 +185,7 @@ export function mount(root, props, ctx) {
     let hostPanel = null;
     if (host) {
       hostPanel = h('div.panel.tight.row.gap.wrap',
+        h('label.check', h('input', { type: 'checkbox', test: 'room-pilots', checked: room.pilotsEnabled, disabled: room.phase !== 'lobby', onChange: e => net.setRoom({ pilotsEnabled: e.target.checked }).catch(fail) }), 'Naves pilotáveis · reserva de 200 pontos por comandante'),
         h('label.field', h('span.lbl', { text: T.lobby.teamSize }), select(TEAM_SIZES.map((n) => ({ value: n, label: `${n}v${n}` })), { value: room.teamSize, test: 'room-teamsize', onChange: (e) => net.setRoom({ teamSize: Number(e.target.value) }).catch(fail) })),
         h('label.field', h('span.lbl', { text: T.lobby.budget }), select(BUDGET_LIST.map((b) => ({ value: b.points, label: `${b.name} · ${b.points}` })), { value: room.budget, test: 'room-budget', onChange: (e) => net.setRoom({ budget: Number(e.target.value) }).catch(fail) })),
         h('label.field', h('span.lbl', { text: T.lobby.botDifficulty }), select(DIFFICULTIES.map((d) => ({ value: d, label: difficultyName(d) })), { value: room.botDifficulty, test: 'room-botdiff', onChange: (e) => net.setRoom({ botDifficulty: e.target.value }).catch(fail) })),
@@ -199,6 +207,8 @@ export function mount(root, props, ctx) {
     if (mine) {
       const sum = myFleet ? fleetSummary(myFleet) : null;
       add(fleetPanel, h('h3', { text: T.lobby.yourFleet }),
+        h('label.field', h('span.lbl', 'Meu papel no time'), select(TEAM_ROLES.map(role => ({ value: role, label: ROLE_NAMES[role] })), { value: mine.s.role || 'vanguard', test: 'team-role', onChange: e => net.setRole(e.target.value).catch(fail) })),
+        h('p.tiny.muted', 'O papel comunica sua intenção ao time; não concede bônus. Mudá-lo exige confirmar Pronto novamente.'),
         myFleet ? h('div.small', h('span.badge', { class: `f-${myFleet.faction}`, text: FACTIONS[myFleet.faction].short }), ` ${sum.count} ${T.app.ships} · ${num(sum.cost)} ${T.app.points}`) : h('div.small.muted', { text: T.lobby.noFleet }),
         button(myFleet ? T.lobby.editFleet : T.lobby.buildFleet, { test: 'build-fleet', class: 'btn-block', disabled: room.phase !== 'lobby', onClick: () => ctx.go('fleetBuilder', { mode: 'mp', budget: room.budget, fleet: myFleet || state.mpFleet || null, room }) }),
         readyBtn);
@@ -220,16 +230,27 @@ export function mount(root, props, ctx) {
     // spectators
     const specEl = room.spectators && room.spectators.length ? h('div.panel.tight.small', h('span.muted', `${T.lobby.spectators}: `), room.spectators.map((s) => s.name).join(', ')) : null;
 
-    // chat (persistent element)
-    chatLog = h('div.chat-log', { test: 'chat-log' });
-    const chatInput = h('input.input.grow', { type: 'text', test: 'chat-input', placeholder: T.lobby.chatPlaceholder, maxlength: 200, onKeydown: (e) => { if (e.key === 'Enter') sendChat(); } });
-    const sendChat = () => { const t = chatInput.value.trim(); if (!t) return; chatInput.value = ''; net.chat(t).catch(fail); };
-    const chatPanel = h('div.panel.chat', h('h3', { text: T.lobby.chat }), chatLog, h('div.row.gap', chatInput, button(T.lobby.send, { test: 'chat-send', class: 'btn-sm', onClick: sendChat })));
+    if (!chatPanel) {
+      chatLog = h('div.chat-log', { test: 'chat-log', role: 'log', 'aria-live': 'polite' });
+      const chatInput = h('input.input.grow', { type: 'text', test: 'chat-input', placeholder: T.lobby.chatPlaceholder, maxlength: 200,
+        onKeydown: (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendChat(); } } });
+      let sending = false;
+      const sendChat = async () => {
+        const draft = chatInput.value, text = draft.trim();
+        if (!text || sending) return;
+        sending = true;
+        try { await net.chat(text); if (chatInput.value === draft) chatInput.value = ''; }
+        catch (e) { fail(e); }
+        finally { sending = false; }
+      };
+      chatPanel = h('div.panel.chat', h('h3', { text: T.lobby.chat }), chatLog, h('div.row.gap', chatInput, button(T.lobby.send, { test: 'chat-send', class: 'btn-sm', onClick: sendChat })));
+    }
+    if (!chatPanel.isConnected) container.appendChild(chatPanel);
 
-    add(container, headEl,
+    add(roomBody, headEl,
       h('div.lobby-layout',
         h('div.stack', hostPanel, h('div.panel', slotsEl), specEl),
-        h('div.stack', fleetPanel, startPanel, chatPanel),
+        h('div.stack', fleetPanel, startPanel),
       ));
     renderChat();
   }
@@ -260,6 +281,7 @@ export function mount(root, props, ctx) {
     if (s.kind === 'bot') add(meta, h('span', svgIcon('bot', 11), ` ${T.app.bot} · ${difficultyName(s.difficulty)}`), s.faction ? h('span', { class: `f-${s.faction}`, text: FACTIONS[s.faction].short }) : h('span.muted', { text: T.lobby.anyFaction }));
     else {
       add(meta, 
+        s.role ? h('span', { text: ROLE_NAMES[s.role] || s.role }) : null,
         s.faction ? h('span', { class: `f-${s.faction}`, text: FACTIONS[s.faction].short }) : null,
         h('span', { class: s.hasFleet ? 'ok' : 'muted', text: s.hasFleet ? T.lobby.fleetReady : T.lobby.fleetMissing }),
         h('span', { class: s.ready ? 's-ready' : 's-wait', text: s.ready ? `● ${T.lobby.ready}` : `○ ${T.lobby.notReady}` }),

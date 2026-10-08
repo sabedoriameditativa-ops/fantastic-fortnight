@@ -65,6 +65,7 @@ export function startMatch({
   function emitFrame() {
     const snap = makeSnapshot(st);
     const frame = { t: S2C.FRAME, k: snap.k, s: snap.s, e: pending };
+    if (snap.p?.length) frame.p = snap.p;
     pending = [];
     const str = JSON.stringify(frame);
     last = str;

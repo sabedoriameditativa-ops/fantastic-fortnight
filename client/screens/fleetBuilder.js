@@ -4,7 +4,8 @@
 // pt-BR validation messages.
 
 import { T, fmt, fleetErrorMessage, errorMessage, difficultyName } from '../i18n.js';
-import { h, clear, button, tooltip, svgIcon, statBar, add } from '../util/dom.js';
+import { h, clear, button, tooltip, svgIcon, statBar, add, select } from '../util/dom.js';
+import { createFleetLibraryPanel } from './fleetLibraryPanel.js';
 import { num, dec } from '../util/format.js';
 import { animateShip } from '../util/shipCanvas.js';
 import { randomSeed } from '../util/url.js';
@@ -13,6 +14,7 @@ import { FACTIONS, FACTION_IDS, SHIPS, SHIP_LIST, SIZE_CLASSES, SIZE_CLASS, ABIL
 import { validateFleet, normalizeFleet, fleetCost, fleetShipCount, fleetSummary, presetFleet, autoComplete, sizeClassCap } from '/shared/fleet.js';
 import { createRng } from '/shared/rng.js';
 import { levelInfo } from '/shared/levels.js';
+import { PILOT_COST } from '/shared/pilot.js';
 
 const MAX = {
   hp: Math.max(...SHIP_LIST.map((s) => s.hp)),
@@ -28,7 +30,9 @@ const scale = (v, max) => Math.sqrt(Math.max(0, v) / max);
 export function mount(root, props, ctx) {
   const { state } = ctx;
   const mode = props.mode || 'sp';
-  const budget = props.budget || DEFAULT_BUDGET;
+  const matchBudget = props.budget || DEFAULT_BUDGET;
+  let pilot = mode === 'mp' ? !!props.room?.pilotsEnabled : !!props.fleet?.pilot;
+  let budget = matchBudget - (pilot ? PILOT_COST : 0);
   const initial = props.fleet && FACTION_IDS.includes(props.fleet.faction) ? normalizeFleet(props.fleet) : null;
   let faction = initial ? initial.faction : (state.lastFleet && FACTION_IDS.includes(state.lastFleet.faction) ? state.lastFleet.faction : 'terran');
   /** @type {Record<string, Map<string, number>>} per-faction drafts */
@@ -37,15 +41,54 @@ export function mount(root, props, ctx) {
   if (initial) for (const e of initial.ships) draft().set(e.cls, e.count);
   const stops = [];
   let busy = false;
+  let tutorialUpdate = () => {};
+  let planning = { formation: 'balanced', position: 'center', priority: 'balanced', ...(initial?.planning || {}) };
 
   function fleet() {
-    return normalizeFleet({ faction, ships: [...draft()].map(([cls, count]) => ({ cls, count })) });
+    return { ...normalizeFleet({ faction, ships: [...draft()].map(([cls, count]) => ({ cls, count })) }), planning: { ...planning }, ...(pilot ? { pilot: true } : {}) };
   }
   function setFleet(f) {
+    if (f.planning) planning = { ...planning, ...f.planning };
+    if (planningControls) for (const [key, control] of planningControls) control.value = planning[key];
+    updateFormation();
     const d = draft(); d.clear();
     for (const e of normalizeFleet(f).ships) d.set(e.cls, e.count);
     refresh();
   }
+
+  const planningControls = new Map();
+  const planSelect = (key, label, values, hint) => {
+    const control = select(values.map(([value, label]) => ({ value, label })), { value: planning[key], test: `plan-${key}`, onChange: () => { planning[key] = control.value; updateFormation(); } });
+    planningControls.set(key, control);
+    return h('label.field', h('span.lbl', label), control, h('span.tiny.muted', hint));
+  };
+  const formationPreview = h('div.formation-preview', { test: 'formation-preview', 'aria-label': 'Prévia esquemática da formação' });
+  function updateFormation() {
+    clear(formationPreview);
+    const shape = planning.formation;
+    const points = shape === 'wedge' ? [[65,50],[45,30],[45,70],[25,15],[25,85]]
+      : shape === 'line' ? [[50,10],[50,30],[50,50],[50,70],[50,90]]
+      : shape === 'screen' ? [[70,20],[70,50],[70,80],[30,35],[30,65]]
+      : [[60,25],[60,75],[40,50],[20,25],[20,75]];
+    for (const [x, y] of points) formationPreview.appendChild(h('span', { style: { left: `${x}%`, top: `${y}%` } }));
+    formationPreview.dataset.position = planning.position;
+  }
+  const planningPanel = h('details.panel', { open: true, test: 'fleet-planning' }, h('summary', 'Plano de batalha'),
+    formationPreview,
+    planSelect('formation', 'Formação', [['balanced','Equilibrada'],['wedge','Cunha'],['line','Linha'],['screen','Tela de proteção']], 'Distribuição inicial; cada nave continua decidindo como lutar.'),
+    planSelect('position', 'Posição inicial', [['front','Avançada'],['center','Central'],['rear','Retaguarda']], 'Ajusta a distância inicial até o inimigo.'),
+    planSelect('priority', 'Prioridade de alvo', [['balanced','Equilibrada'],['weakest','Enfraquecidos'],['support','Suporte'],['capital','Naves capitais']], 'A IA pondera essa prioridade junto com alcance e função.'),
+  );
+  updateFormation();
+  const pilotCheck = h('input', { type: 'checkbox', test: 'fleet-pilot', checked: pilot, disabled: mode === 'mp', onChange: () => { pilot = pilotCheck.checked; budget = matchBudget - (pilot ? PILOT_COST : 0); refresh(); } });
+  const pilotPanel = h('div.panel.stack', h('label.check', pilotCheck, 'Pilotar a nave especial'),
+    h('p.tiny.muted', `Reserva ${PILOT_COST} pontos para uma nave especial da sua facção. A frota continua automática. Setas movem; F dispara, E usa a habilidade e P alterna o piloto automático. Remapeie em Opções.`),
+    h('p.tiny.muted', mode === 'mp' ? 'A disponibilidade é definida para os dois times pelo anfitrião; a licença do Perfil é necessária.' : 'Experimente no treino local. A licença do Perfil é necessária para partidas verificadas e pontos.'));
+  const libraryPanel = createFleetLibraryPanel({ getFleet: fleet, onLoad: f => {
+    selectFaction(f.faction);
+    if (mode === 'sp') { pilot = !!f.pilot; pilotCheck.checked = pilot; budget = matchBudget - (pilot ? PILOT_COST : 0); }
+    setFleet(f);
+  }, toast: ctx.toast });
   function countBySize(f) {
     const by = {};
     for (const sc of SIZE_CLASSES) by[sc] = 0;
@@ -103,7 +146,7 @@ export function mount(root, props, ctx) {
   const roster = h('div.roster', { test: 'roster' });
   const cards = new Map();
   function buildRoster() {
-    for (const s of stops.splice(4)) s();
+    for (const s of stops.splice(FACTION_IDS.length)) s();
     clear(roster); cards.clear();
     for (const ship of shipsOfFaction(faction)) {
       const cv = h('canvas', { width: 180, height: 96 });
@@ -119,7 +162,7 @@ export function mount(root, props, ctx) {
       const countBadge = h('span.sc-count.hidden');
       const card = h('div.ship-card', { test: `ship-card-${ship.id}`, role: 'button', tabindex: '0', title: T.builder.hint,
         onClick: () => buyShip(ship.id),
-        onKeydown: (e) => { if (e.key === 'Enter' || e.key === '+') { e.preventDefault(); buyShip(ship.id); } else if (e.key === '-' || e.key === 'Backspace') { e.preventDefault(); sellShip(ship.id); } },
+        onKeydown: (e) => { if (e.target !== e.currentTarget) return; if (e.key === 'Enter' || e.key === '+' || e.key === ' ') { e.preventDefault(); buyShip(ship.id); } else if (e.key === '-' || e.key === 'Backspace') { e.preventDefault(); sellShip(ship.id); } },
         onPointermove: (e) => { const r = cv.getBoundingClientRect(); hoverA = ((e.clientX - r.left) / Math.max(1, r.width) - 0.5) * 0.5; },
         onPointerleave: () => { hoverA = 0; },
       },
@@ -212,6 +255,7 @@ export function mount(root, props, ctx) {
     else { validEl.className = 'validation ok'; validEl.textContent = T.builder.valid; }
     confirmBtn.disabled = !v.ok || busy;
     confirmBtn.classList.toggle('btn-pulse', v.ok && !busy);
+    tutorialUpdate();
   }
 
   function selectFaction(fid) {
@@ -240,13 +284,13 @@ export function mount(root, props, ctx) {
     const v = validateFleet(f, budget);
     if (!v.ok) { ctx.toast(fleetErrorMessage(v.code, v.detail), 'error'); return; }
     if (mode === 'sp') {
-      ctx.startSinglePlayer(props.setup || state.spSetup, v.fleet);
+      ctx.startSinglePlayer(props.setup || state.spSetup, f, props.tutorial ? { seed: 'tutorial-v1', speed: 1, practice: true } : {});
       return;
     }
     busy = true; refresh();
     try {
-      if (props.onConfirm) await props.onConfirm(v.fleet);
-      else if (state.net) { await state.net.setFleet(v.fleet); state.mpFleet = v.fleet; ctx.saveLastFleet(v.fleet); ctx.toast(T.builder.fleetSent, 'ok'); ctx.go('lobby'); }
+      if (props.onConfirm) await props.onConfirm(f);
+      else if (state.net) { await state.net.setFleet(f); state.mpFleet = f; ctx.saveLastFleet(f); ctx.toast(T.builder.fleetSent, 'ok'); ctx.go('lobby'); }
     } catch (e) {
       // server rejections carry protocol codes (FLEET_INVALID{code}, WRONG_PHASE, NOT_CONNECTED…), not only fleet codes
       ctx.toast(errorMessage(e && e.code || 'UNKNOWN', e && e.detail), 'error');
@@ -256,20 +300,37 @@ export function mount(root, props, ctx) {
   const subtitle = mode === 'sp'
     ? (() => { const s = props.setup || state.spSetup; const lv = levelInfo(s.level); return fmt(T.builder.subtitleSp, { level: lv.n, levelName: lv.name, difficulty: difficultyName(s.difficulty) }); })()
     : fmt(T.builder.subtitleMp, { code: props.room ? props.room.code : (state.net && state.net.room ? state.net.room.code : '—'), budget: num(budget) });
+  let tutorialStage = 0;
+  const lessonTitle = h('h2'), lessonText = h('p.small');
+  const nextLesson = button('Próximo passo', { test: 'tutorial-next', onClick: () => { tutorialStage = Math.min(2, tutorialStage + 1); tutorialUpdate(); } });
+  const tutorialPanel = props.tutorial ? h('div.panel.tutorial', { test: 'tutorial-panel', role: 'region', 'aria-label': 'Tutorial' }, lessonTitle, lessonText, nextLesson) : null;
+  tutorialUpdate = () => {
+    if (!tutorialPanel) return;
+    const lessons = [
+      ['1 de 3 · Escolha uma frota', 'Selecione uma facção e aplique uma predefinição abaixo, ou compre naves com +. Cada nave usa parte do orçamento. Para continuar, adicione pelo menos uma nave.'],
+      ['2 de 3 · Dê uma orientação', 'Abra o Plano de batalha. Experimente uma formação, posição inicial e prioridade de alvo. Elas orientam a IA; sua frota continua lutando automaticamente. Salve uma composição na Biblioteca para reutilizá-la.'],
+      ['3 de 3 · Observe e aprenda', 'Inicie o treino no botão de confirmação. Use a roda do mouse para zoom, arraste para mover a câmera e clique em uma nave para acompanhá-la e ler sua doutrina. Espaço pausa; o relatório explica o resultado.'],
+    ];
+    lessonTitle.textContent = lessons[tutorialStage][0]; lessonText.textContent = lessons[tutorialStage][1];
+    nextLesson.hidden = tutorialStage === 2; nextLesson.disabled = tutorialStage === 0 && fleetShipCount(fleet()) === 0;
+  };
 
   const el = h('div.screen.wide',
     h('div.screen-head',
       h('div.titles', h('h1', { text: T.builder.title }), h('div.subtitle', { text: subtitle })),
       h('div.actions', button(T.app.back, { test: 'back', onClick: () => { if (props.onBack) props.onBack(); else ctx.go(mode === 'sp' ? 'spSetup' : 'lobby'); } })),
     ),
+    tutorialPanel,
     h('div.fb-layout',
       h('div.fb-main',
         h('div.panel.tight', h('h3', { text: T.builder.faction }), factionCards, h('div', { style: { marginTop: '10px' } }, loreEl)),
         h('div.panel.tight', budgetHead),
         h('div.panel.tight', h('div.panel-title', h('h3', { text: T.builder.presets })), presetRow),
+        libraryPanel,
         h('div.panel.tight', h('div.panel-title', h('h3', { text: T.builder.roster }), h('span.tiny.muted', { text: T.builder.hint })), roster),
       ),
       h('div.fb-side',
+        planningPanel, pilotPanel,
         h('div.panel', h('h3', { text: T.builder.summary }), listEl,
           h('div', { style: { marginTop: '10px' } }, h('div.tiny.muted', { text: T.builder.composition }), compBar, compLegend),
           h('div', { style: { marginTop: '8px' } }, totalsEl),

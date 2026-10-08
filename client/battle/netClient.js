@@ -1,6 +1,6 @@
 // WebSocket client: lobby API + BattleFeed (docs/ARCHITECTURE.md §4.2, §5.2).
-// Requests carry an incrementing `rid`; `ack`/`error` (or the resulting `room`
-// push) resolve/reject the returned Promise. Reconnects with backoff
+// Requests carry an incrementing `rid`; only matching `ack`/`error`
+// replies resolve/reject the returned Promise. Reconnects with backoff
 // 0.5/1/2/4/4 s (5 tries) sending hello{token}; the token lives in
 // sessionStorage so a reload resumes the session. Pure enough to be tested in
 // Node 22 (global WebSocket) against a fake `ws` server.
@@ -9,12 +9,16 @@ import { C2S, S2C } from '/shared/protocol.js';
 import { PROTOCOL_VERSION } from '/shared/constants.js';
 import { createEmitter, createFeedBase, nowMs } from './feed.js';
 import { sessionStore, readString, writeString, KEYS } from '../util/storage.js';
+import { canonicalWsUrl, defaultWsUrl } from '../util/url.js';
 
 const BACKOFF_MS = [500, 1000, 2000, 4000, 4000];
 const REQUEST_TIMEOUT_MS = 10000;
 const PING_INTERVAL_MS = 5000;
-/** Requests whose response is the next `room` push (the server may ack too). */
-const ROOM_REQUESTS = new Set([C2S.CREATE_ROOM, C2S.JOIN_ROOM, C2S.SET_ROOM, C2S.PICK_SLOT, C2S.ADD_BOT, C2S.REMOVE_BOT, C2S.SET_FLEET, C2S.READY, C2S.START, C2S.REMATCH]);
+
+export function sessionKeysForUrl(url) {
+  const scope = encodeURIComponent(canonicalWsUrl(url));
+  return { token: `${KEYS.token}:${scope}`, playerId: `${KEYS.playerId}:${scope}` };
+}
 
 /** Error with a protocol code. */
 export function netError(code, detail, message) {
@@ -29,23 +33,31 @@ export function netError(code, detail, message) {
  * @param {{ WebSocket?: any, store?: Storage|null, backoff?: number[], requestTimeoutMs?: number, pingIntervalMs?: number, version?: number }} [opts]
  */
 export function createNetClient(url, opts = {}) {
+  url = canonicalWsUrl(url);
   const WS = opts.WebSocket || (typeof WebSocket !== 'undefined' ? WebSocket : null);
   const store = opts.store !== undefined ? opts.store : sessionStore();
   const backoff = opts.backoff || BACKOFF_MS;
   const requestTimeoutMs = opts.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   const pingIntervalMs = opts.pingIntervalMs ?? PING_INTERVAL_MS;
   const version = opts.version ?? PROTOCOL_VERSION;
+  const keys = sessionKeysForUrl(url);
+  const loc = opts.location ?? (typeof location !== 'undefined' ? location : null);
+  // Legacy credentials have no endpoint binding. Migrate only to the page's
+  // default endpoint; a URL parameter must never export them to another server.
+  const migrateLegacy = loc && canonicalWsUrl(defaultWsUrl(loc)) === url;
 
   const base = createFeedBase({ isLocal: false });
   const ev = { room: createEmitter(), countdown: createEmitter(), error: createEmitter(), chat: createEmitter(), left: createEmitter(), status: createEmitter() };
 
   let ws = null;
   let name = '';
-  let playerId = readString(store, KEYS.playerId, '') || null;
-  let token = readString(store, KEYS.token, '') || null;
+  let playerId = readString(store, keys.playerId, '') || (migrateLegacy ? readString(store, KEYS.playerId, '') : '') || null;
+  let token = readString(store, keys.token, '') || (migrateLegacy ? readString(store, KEYS.token, '') : '') || null;
   let status = 'idle'; // idle | connecting | ok | reconnecting | lost | closed
   let room = null;
   let rid = 0;
+  let pilotSeq = 0;
+  let pilotMatchId = null;
   /** @type {Map<number, {resolve:Function, reject:Function, t:string}>} */
   const pending = new Map();
   let connectWaiters = [];
@@ -94,18 +106,18 @@ export function createNetClient(url, opts = {}) {
     });
   }
 
-  function resolveRoomRequests(r) {
-    for (const [id, p] of [...pending]) if (ROOM_REQUESTS.has(p.t)) { pending.delete(id); p.resolve(r); }
-  }
-
   function handle(msg) {
     switch (msg.t) {
       case S2C.WELCOME: {
         const prevId = playerId;
         playerId = msg.playerId;
         token = msg.token || token;
-        writeString(store, KEYS.token, token);
-        writeString(store, KEYS.playerId, playerId);
+        writeString(store, keys.token, token);
+        writeString(store, keys.playerId, playerId);
+        if (migrateLegacy) {
+          writeString(store, KEYS.token, null);
+          writeString(store, KEYS.playerId, null);
+        }
         attempt = 0;
         const wasReconnect = everWelcomed;
         everWelcomed = true;
@@ -122,7 +134,7 @@ export function createNetClient(url, opts = {}) {
       }
       case S2C.ACK: {
         const p = pending.get(msg.rid);
-        if (p) p.resolve(room);
+        if (p) p.resolve(msg.room ?? room);
         break;
       }
       case S2C.ERROR: {
@@ -133,22 +145,21 @@ export function createNetClient(url, opts = {}) {
           for (const w of connectWaiters) w.reject(err);
           connectWaiters = [];
         }
-        // A late error (after a client-side TIMEOUT, or after a room push already
-        // settled the request) has no owner: surface it as unsolicited so the app toasts it.
+        // A late error after a client-side TIMEOUT has no owner: surface it
+        // as unsolicited so the app toasts it.
         ev.error.emit({ code: msg.code || 'UNKNOWN', detail: msg.detail, rid: owned ? msg.rid : undefined });
         break;
       }
       case S2C.ROOM: {
         const { t, ...state } = msg;
         room = state;
-        resolveRoomRequests(room);
         ev.room.emit(room);
         break;
       }
       case S2C.LEFT: {
         room = null;
+        pilotMatchId = null;
         base.resetBattle();
-        for (const [id, p] of [...pending]) if (p.t === C2S.LEAVE_ROOM) { pending.delete(id); p.resolve(); }
         ev.left.emit(msg.reason || 'left');
         break;
       }
@@ -158,12 +169,16 @@ export function createNetClient(url, opts = {}) {
       case S2C.BATTLE_START: {
         const { t, ...info } = msg;
         info.isLocal = false;
+        if (info.matchId !== pilotMatchId) { pilotMatchId = info.matchId; pilotSeq = 0; }
         base.emitStart(info);
         break;
       }
-      case S2C.FRAME:
-        base.emitFrame({ k: msg.k, s: msg.s, e: msg.e || [], at: nowMs() });
+      case S2C.FRAME: {
+        const ownPilot = msg.p?.find((p) => p.owner === playerId);
+        if (Number.isSafeInteger(ownPilot?.lastSeq)) pilotSeq = Math.max(pilotSeq, ownPilot.lastSeq);
+        base.emitFrame({ k: msg.k, s: msg.s, e: msg.e || [], ...(msg.p ? { p: msg.p } : {}), at: nowMs() });
         break;
+      }
       case S2C.BATTLE_END:
         base.emitEnd(msg.result);
         break;
@@ -205,9 +220,9 @@ export function createNetClient(url, opts = {}) {
     // A refused connection fires 'error' (and, in browsers, 'close'); Node's
     // WebSocket may fire only 'error'. Settle exactly once either way.
     let settled = false;
-    const failed = () => { if (settled) return; settled = true; if (sock === ws) onClosed(); };
+    const failed = (code) => { if (settled) return; settled = true; if (sock === ws) onClosed(code); };
     sock.onerror = () => { if (sock.readyState !== 1) failed(); };
-    sock.onclose = () => failed();
+    sock.onclose = (event) => failed(event.code);
   }
 
   function rejectConnectWaiters(code) {
@@ -217,11 +232,19 @@ export function createNetClient(url, opts = {}) {
     for (const w of ws_) w.reject(err);
   }
 
-  function onClosed() {
+  function onClosed(code) {
     ws = null;
     stopPing();
     rejectAll('DISCONNECTED');
     if (disposed || intentionalClose) { rejectConnectWaiters('DISCONNECTED'); setStatus('closed'); return; }
+    if (code === 4001) {
+      // Another transport owns this session. Do not start a reconnect duel.
+      token = null;
+      rejectConnectWaiters('SESSION_REPLACED');
+      setStatus('lost');
+      ev.error.emit({ code: 'SESSION_REPLACED' });
+      return;
+    }
     if (!everWelcomed) {
       // initial connection failed
       rejectConnectWaiters('CONNECT_FAILED');
@@ -242,7 +265,7 @@ export function createNetClient(url, opts = {}) {
 
   const feed = {
     onStart: base.onStart, onFrame: base.onFrame, onEnd: base.onEnd, onStatus: base.onStatus,
-    controls: { isLocal: false, setSpeed() { /* the server owns the clock */ } },
+    controls: { isLocal: false, setSpeed() { /* the server owns the clock */ }, pilot: (input) => client.sendPilot(input) },
     get isLocal() { return false; },
     get lastStart() { return base.lastStart; },
     get lastEnd() { return base.lastEnd; },
@@ -276,18 +299,25 @@ export function createNetClient(url, opts = {}) {
       setStatus(everWelcomed ? 'reconnecting' : 'connecting');
       open();
     },
-    createRoom({ teamSize, budget }) { return request(C2S.CREATE_ROOM, { teamSize, budget }); },
+    createRoom({ teamSize, budget, pilotsEnabled }) { return request(C2S.CREATE_ROOM, { teamSize, budget, ...(pilotsEnabled === undefined ? {} : { pilotsEnabled }) }); },
     joinRoom(code) { return request(C2S.JOIN_ROOM, { code: String(code || '').trim().toUpperCase() }); },
     leaveRoom() {
       // optimistic: a battle we walked out of must not be replayed to the next screen
       base.resetBattle();
       return request(C2S.LEAVE_ROOM, {}).then(() => { room = null; });
     },
-    setRoom(o) { const p = {}; if (o.teamSize !== undefined) p.teamSize = o.teamSize; if (o.budget !== undefined) p.budget = o.budget; if (o.botDifficulty !== undefined) p.botDifficulty = o.botDifficulty; return request(C2S.SET_ROOM, p); },
+    setRoom(o) { const p = {}; for (const k of ['teamSize', 'budget', 'botDifficulty', 'pilotsEnabled']) if (o[k] !== undefined) p[k] = o[k]; return request(C2S.SET_ROOM, p); },
     pickSlot(team, slot) { return request(C2S.PICK_SLOT, { team, slot }); },
     addBot(team, slot, difficulty, faction) { const p = { team, slot, difficulty }; if (faction) p.faction = faction; return request(C2S.ADD_BOT, p); },
     removeBot(team, slot) { return request(C2S.REMOVE_BOT, { team, slot }); },
     setFleet(fleet) { return request(C2S.SET_FLEET, { fleet }); },
+    setRole(role) { return request(C2S.SET_ROLE, { role }); },
+    sendPilot(input) {
+      if (status !== 'ok' || !pilotMatchId || !base.lastStart || base.lastEnd || !input || typeof input !== 'object') return false;
+      const seq = Number.isSafeInteger(input.seq) ? input.seq : pilotSeq + 1;
+      pilotSeq = Math.max(pilotSeq, seq);
+      return send({ t: C2S.PILOT_INPUT, matchId: pilotMatchId, input: { ...input, seq } });
+    },
     setReady(ready) { return request(C2S.READY, { ready: !!ready }); },
     start({ fillBots = false } = {}) { return request(C2S.START, { fillBots: !!fillBots }); },
     rematch() { return request(C2S.REMATCH, {}); },

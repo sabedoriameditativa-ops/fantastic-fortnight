@@ -3,6 +3,7 @@
 // pure data out. See docs/ARCHITECTURE.md §2.1 and docs/SPEC.md §1.
 
 import { DEFAULT_BUDGET, FLEET_LIMITS } from './constants.js';
+import { normalizePlanning } from './planning.js';
 import {
   FACTIONS, FACTION_IDS, SHIPS, SHIP_LIST, SIZE_CLASSES, SIZE_CLASS, PRESETS,
   shipsOfFaction, shipDps, shipEhp,
@@ -100,7 +101,7 @@ export function normalizeFleet(fleet) {
   }
   const ships = [...counts].map(([cls, count]) => ({ cls, count }));
   ships.sort(compareEntries);
-  return { faction, ships };
+  return { faction, ships, ...(fleet?.planning ? { planning: normalizePlanning(fleet.planning) } : {}), ...(fleet?.pilot === true ? { pilot: true } : {}) };
 }
 
 function compareEntries(a, b) {
@@ -144,7 +145,7 @@ export function validateFleet(fleet, budget = DEFAULT_BUDGET) {
   const norm = normalizeFleet(fleet);
   for (const e of norm.ships) {
     const ship = SHIPS[e.cls];
-    if (!ship) return { ok: false, code: FLEET_ERR.UNKNOWN_CLASS, detail: { cls: e.cls } };
+    if (!ship || ship.pilotOnly) return { ok: false, code: FLEET_ERR.UNKNOWN_CLASS, detail: { cls: e.cls } };
     if (ship.faction !== norm.faction) {
       return { ok: false, code: FLEET_ERR.WRONG_FACTION, detail: { cls: e.cls, faction: ship.faction } };
     }

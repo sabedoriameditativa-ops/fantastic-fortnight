@@ -19,6 +19,8 @@ export const C2S = Object.freeze({
   ADD_BOT: 'add_bot',
   REMOVE_BOT: 'remove_bot',
   SET_FLEET: 'set_fleet',
+  SET_ROLE: 'set_role',
+  PILOT_INPUT: 'pilot_input',
   READY: 'ready',
   START: 'start',
   REMATCH: 'rematch',
@@ -60,10 +62,15 @@ export const ERR = Object.freeze({
   NOT_ALL_READY: 'NOT_ALL_READY',
   COUNTDOWN_ABORTED: 'COUNTDOWN_ABORTED',
   NOT_IN_ROOM: 'NOT_IN_ROOM',
+  PILOT_DISABLED: 'PILOT_DISABLED',
+  STALE_MATCH: 'STALE_MATCH',
+  FLEET_LOCKED: 'FLEET_LOCKED',
 });
 
 export const LEFT_REASONS = Object.freeze(['left', 'kicked', 'room_closed']);
 export const ROOM_PHASES = Object.freeze(['lobby', 'countdown', 'battle', 'results']);
+/** Coordination labels, without stat bonuses or exclusive seats. */
+export const TEAM_ROLES = Object.freeze(['vanguard', 'support', 'striker']);
 
 export const MAX_MESSAGE_BYTES = 16 * 1024;
 export const MAX_CHAT_LENGTH = 200;
@@ -161,6 +168,7 @@ const C2S_CHECKS = {
   [C2S.CREATE_ROOM]: (m) => {
     if (!isInt(m.teamSize, 1, 6) || !TEAM_SIZES.includes(m.teamSize)) return 'teamSize';
     if (!Number.isInteger(m.budget) || !BUDGET_POINTS.includes(m.budget)) return 'budget';
+    if (m.pilotsEnabled !== undefined && !isBool(m.pilotsEnabled)) return 'pilotsEnabled';
     return null;
   },
   [C2S.JOIN_ROOM]: (m) => (isRoomCode(m.code) ? null : 'code'),
@@ -169,6 +177,7 @@ const C2S_CHECKS = {
     if (m.teamSize !== undefined && (!isInt(m.teamSize, 1, 6) || !TEAM_SIZES.includes(m.teamSize))) return 'teamSize';
     if (m.budget !== undefined && (!Number.isInteger(m.budget) || !BUDGET_POINTS.includes(m.budget))) return 'budget';
     if (m.botDifficulty !== undefined && !DIFFICULTIES.includes(m.botDifficulty)) return 'botDifficulty';
+    if (m.pilotsEnabled !== undefined && !isBool(m.pilotsEnabled)) return 'pilotsEnabled';
     return null;
   },
   [C2S.PICK_SLOT]: checkTeamSlot,
@@ -181,6 +190,18 @@ const C2S_CHECKS = {
   },
   [C2S.REMOVE_BOT]: checkTeamSlot,
   [C2S.SET_FLEET]: (m) => fleetShapeError(m.fleet),
+  [C2S.SET_ROLE]: (m) => (TEAM_ROLES.includes(m.role) ? null : 'role'),
+  [C2S.PILOT_INPUT]: (m) => {
+    if (!isStr(m.matchId, 64) || !m.matchId.length) return 'matchId';
+    const p = m.input;
+    if (!isObj(p) || !isInt(p.seq, 0, MAX_RID) || !isBool(p.manual)) return 'input';
+    if (Object.keys(p).some((key) => !['seq', 'manual', 'moveX', 'moveY', 'aimX', 'aimY', 'fire', 'ability'].includes(key))) return 'input';
+    if (!p.manual) return null;
+    if (!Number.isFinite(p.moveX) || Math.abs(p.moveX) > 1 || !Number.isFinite(p.moveY) || Math.abs(p.moveY) > 1) return 'input.move';
+    if (!Number.isFinite(p.aimX) || !Number.isFinite(p.aimY) || Math.abs(p.aimX) > 100_000 || Math.abs(p.aimY) > 100_000) return 'input.aim';
+    if (!isBool(p.fire) || !isBool(p.ability)) return 'input.actions';
+    return null;
+  },
   [C2S.READY]: (m) => (isBool(m.ready) ? null : 'ready'),
   [C2S.START]: (m) => (m.fillBots === undefined || isBool(m.fillBots) ? null : 'fillBots'),
   [C2S.REMATCH]: () => null,

@@ -8,9 +8,10 @@ import { isLevelCleared } from '../util/storage.js';
 import { normalizeSpSetup } from '../util/spConfig.js';
 import { DIFFICULTIES, TEAM_SIZES, DEFAULT_BUDGET } from '/shared/constants.js';
 import { FACTIONS, SHIPS } from '/shared/catalog.js';
-import { LEVELS, levelInfo, enemyBudget, levelBuilder } from '/shared/levels.js';
-import { AI_PROFILES } from '/shared/aiProfiles.js';
+import { LEVELS, levelInfo, enemyBudget, levelBuilder, levelCampaign } from '/shared/levels.js';
+import { AI_PROFILES, BOT_PERSONALITIES } from '/shared/aiProfiles.js';
 import { validateFleet } from '/shared/fleet.js';
+import { PILOT_COST } from '/shared/pilot.js';
 
 export function mount(root, props, ctx) {
   const { state } = ctx;
@@ -52,7 +53,7 @@ export function mount(root, props, ctx) {
 
   function renderInfo() {
     const lv = levelInfo(setup.level);
-    const budget = enemyBudget(lv, setup.difficulty, DEFAULT_BUDGET);
+    const budget = enemyBudget(lv, setup.difficulty, DEFAULT_BUDGET, setup.resourceMul);
     const builder = levelBuilder(lv, setup.difficulty);
     const faction = FACTIONS[lv.enemyFaction];
     const boss = lv.boss && SHIPS[lv.boss] ? SHIPS[lv.boss].name : lv.bossSizeClass ? T.builder.sizeClass[lv.bossSizeClass] : null;
@@ -61,6 +62,7 @@ export function mount(root, props, ctx) {
       h('div.lv-name', { test: 'level-name', text: `${T.sp.level} ${lv.n} · ${lv.name}` }),
       h('p.small', { text: lv.desc }),
       h('dl.kv',
+        h('dt', 'Objetivo'), h('dd', { test: 'mission-objective', text: levelCampaign(lv).name }),
         h('dt', T.sp.enemyFaction), h('dd', faction ? h('span', { class: `f-${faction.id}` }, faction.name) : T.sp.randomFaction),
         h('dt', T.sp.enemyBudget), h('dd', { test: 'enemy-budget' }, `${num(budget)} ${T.app.points}`, h('span.muted.small', ` (${T.sp.builder[builder]})`)),
         h('dt', T.sp.yourBudget), h('dd', `${num(DEFAULT_BUDGET)} ${T.app.points}`),
@@ -85,7 +87,7 @@ export function mount(root, props, ctx) {
   const diffSeg = segmented(DIFFICULTIES.map((d) => ({ value: d, label: difficultyName(d), test: `difficulty-${d}` })), { value: setup.difficulty, onChange: (v) => { setup.difficulty = v; renderLevels(); renderInfo(); } });
   const sizeSeg = segmented(TEAM_SIZES.map((n) => ({ value: n, label: `${n}v${n}`, test: `teamsize-${n}` })), { value: setup.teamSize, onChange: (v) => { setup.teamSize = v; renderAllies(); } });
 
-  const lastOk = state.lastFleet && validateFleet(state.lastFleet, DEFAULT_BUDGET).ok;
+  const lastOk = state.lastFleet && validateFleet(state.lastFleet, DEFAULT_BUDGET - (state.lastFleet.pilot ? PILOT_COST : 0)).ok;
   const el = h('div.screen',
     h('div.screen-head',
       h('div.titles', h('h1', { text: T.sp.title }), h('div.subtitle', { text: T.sp.subtitle })),
@@ -94,7 +96,10 @@ export function mount(root, props, ctx) {
     h('div.sp-grid',
       h('div.stack',
         h('div.panel', h('h3', { text: T.sp.level }), levelGrid, endlessWrap),
-        h('div.panel', h('h3', { text: T.sp.difficulty }), diffSeg),
+        h('div.panel.stack', h('h3', { text: 'Inteligência inimiga' }), diffSeg,
+          h('p.tiny.muted', 'A dificuldade muda a qualidade das decisões. Os recursos são ajustados separadamente e aparecem no orçamento da missão.'),
+          h('label.field', h('span.lbl', 'Recursos inimigos'), select([0.5, 0.75, 1, 1.25, 1.5, 2].map(value => ({ value, label: `${Math.round(value * 100)}%` })), { value: setup.resourceMul, test: 'enemy-resources', onChange: e => { setup.resourceMul = Number(e.target.value); renderInfo(); } })),
+          h('label.field', h('span.lbl', 'Personalidade dos bots'), select([{ value: 'varied', label: 'Variadas' }, ...Object.values(BOT_PERSONALITIES).map(p => ({ value: p.id, label: p.name }))], { value: setup.botPersonality, test: 'bot-personality', onChange: e => { setup.botPersonality = e.target.value; } }))),
         h('div.panel', h('h3', { text: T.sp.teamSize }), sizeSeg, h('div.tiny.muted', { style: { marginTop: '6px' }, text: T.sp.teamSizeHint }), h('div', { style: { marginTop: '10px' } }, allyWrap)),
       ),
       h('div.stack',

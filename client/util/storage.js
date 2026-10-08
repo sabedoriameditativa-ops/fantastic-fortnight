@@ -3,6 +3,9 @@
 // Every read/write is guarded (private mode, quota, disabled storage).
 // Pure functions take an explicit `store` so they can be unit-tested in Node.
 
+import { DEFAULT_CHATTER_SETTINGS, normalizeChatterSettings } from '../battle/chatter.js';
+import { DEFAULT_PILOT_BINDINGS, normalizePilotBindings } from '../battle/pilotControls.js';
+
 export const KEYS = Object.freeze({
   name: 'fe.name',
   settings: 'fe.settings',
@@ -68,9 +71,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   master: 0.8, music: 0.6, sfx: 0.8, ui: 0.7, muted: false,
   reducedMotion: 'auto',   // 'auto' | 'on' | 'off'
   quality: 'auto',         // 'auto' | 'low' | 'medium' | 'high'
+  reducedEffects: false,
+  highContrast: false,
   showNames: false,
   grid: false,
   speed: 1,                // last used single-player speed
+  chatter: DEFAULT_CHATTER_SETTINGS,
+  pilotBindings: DEFAULT_PILOT_BINDINGS,
 });
 
 /** Merge stored settings over defaults, clamping numbers. */
@@ -84,9 +91,13 @@ export function normalizeSettings(raw) {
   s.muted = !!raw.muted;
   if (['auto', 'on', 'off'].includes(raw.reducedMotion)) s.reducedMotion = raw.reducedMotion;
   if (['auto', 'low', 'medium', 'high'].includes(raw.quality)) s.quality = raw.quality;
+  if (typeof raw.reducedEffects === 'boolean') s.reducedEffects = raw.reducedEffects;
+  if (typeof raw.highContrast === 'boolean') s.highContrast = raw.highContrast;
   s.showNames = !!raw.showNames;
   s.grid = !!raw.grid;
   if ([1, 2, 4].includes(raw.speed)) s.speed = raw.speed;
+  s.chatter = normalizeChatterSettings(raw.chatter);
+  s.pilotBindings = normalizePilotBindings(raw.pilotBindings);
   return s;
 }
 

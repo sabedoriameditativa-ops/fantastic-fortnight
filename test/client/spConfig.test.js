@@ -13,7 +13,7 @@ const fleet = presetFleet('ter_linha', 1500);
 describe('normalizeSpSetup', () => {
   test('clamps everything to valid values', () => {
     assert.deepEqual(normalizeSpSetup(null), { ...DEFAULT_SP_SETUP });
-    assert.deepEqual(normalizeSpSetup({ level: 0, difficulty: 'x', teamSize: 9, allyDifficulty: 'facil' }), { level: 1, difficulty: 'normal', teamSize: 1, allyDifficulty: 'facil' });
+    assert.deepEqual(normalizeSpSetup({ level: 0, difficulty: 'x', teamSize: 9, allyDifficulty: 'facil' }), { ...DEFAULT_SP_SETUP, allyDifficulty: 'facil' });
     assert.equal(normalizeSpSetup({ level: 42.7 }).level, 42);
   });
 });
@@ -80,14 +80,14 @@ describe('autotestSetup', () => {
   test('defaults to level 1 normal, first preset of the faction', () => {
     const r = autotestSetup({});
     assert.equal(r.presetId, 'ter_linha');
-    assert.deepEqual(r.setup, { level: 1, difficulty: 'normal', teamSize: 1, allyDifficulty: 'normal' });
+    assert.deepEqual(r.setup, { ...DEFAULT_SP_SETUP });
     assert.ok(validateFleet(r.fleet, 1500).ok);
   });
   test('honors faction/preset/level/difficulty/team and ignores a preset of another faction', () => {
     const r = autotestSetup({ faction: 'vorrax', preset: 'vor_garras', level: 6, difficulty: 'facil', team: 2, ally: 'dificil' });
     assert.equal(r.presetId, 'vor_garras');
     assert.equal(r.fleet.faction, 'vorrax');
-    assert.deepEqual(r.setup, { level: 6, difficulty: 'facil', teamSize: 2, allyDifficulty: 'dificil' });
+    assert.deepEqual(r.setup, { ...DEFAULT_SP_SETUP, level: 6, difficulty: 'facil', teamSize: 2, allyDifficulty: 'dificil' });
     assert.equal(autotestSetup({ faction: 'lumen', preset: 'ter_linha' }).presetId, Object.values(PRESETS).find((p) => p.faction === 'lumen').id);
   });
 });

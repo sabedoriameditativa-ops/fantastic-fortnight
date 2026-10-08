@@ -5,7 +5,6 @@ import { T, fmt, difficultyName, errorMessage } from '../i18n.js';
 import { h, clear, button, add } from '../util/dom.js';
 import { num, ticksToClock } from '../util/format.js';
 import { animateShip } from '../util/shipCanvas.js';
-import { randomSeed } from '../util/url.js';
 import { FACTIONS, SHIPS } from '/shared/catalog.js';
 import { TICK_RATE } from '/shared/constants.js';
 
@@ -14,7 +13,7 @@ import { TICK_RATE } from '/shared/constants.js';
  */
 export function mount(root, props, ctx) {
   const { state } = ctx;
-  const r = props.result;
+  const r = props.reward?.value?.result || props.result;
   const start = props.start || { players: [] };
   const mode = props.mode || 'sp';
   const stops = [];
@@ -34,6 +33,34 @@ export function mount(root, props, ctx) {
     const hi = Math.max(rv[0], rv[1]);
     reason = hi > 0 && Math.abs(rv[0] - rv[1]) / hi <= 0.02 ? T.results.reasonTimeoutDmg : T.results.reasonTimeout;
   }
+  reason = ({ objective_destroyed: 'O objetivo foi destruído.', escort_complete: 'O transporte chegou ao destino.', defense_complete: 'O objetivo resistiu até o fim da defesa.', survival_complete: 'Sua frota sobreviveu ao tempo da missão.', waves_complete: 'Todas as ondas foram derrotadas.', objective_timeout: 'O prazo do objetivo terminou.' })[r.reason] || reason;
+  const mine = r.players?.[props.myPlayerId];
+  const report = h('div.panel.stack', { test: 'battle-report' }, h('h2', 'Relatório tático'),
+    h('p.small', { text: reason }),
+    mine ? h('p.small', `Sua frota preservou ${mine.shipsAlive}/${mine.shipsTotal} naves, causou ${num(mine.damageDealt)} de dano efetivo e reparou ${num(mine.healing || 0)} de casco.`) : null,
+    r.remainingValue ? h('p.small', `Valor de combate restante — Equipe A: ${num(r.remainingValue[0])}; Equipe B: ${num(r.remainingValue[1])}.`) : null,
+    h('p.small.muted', mine?.shipsAlive === 0 ? 'Na próxima tentativa, experimente tela de proteção, posição recuada ou mais suporte. Compare a composição na biblioteca antes de trocar.' : 'Compare dano, sobrevivência e valor preservado. Alcance, proteção e habilidades influenciam o resultado além do dano/s teórico.'),
+    h('p.tiny.muted', 'Durante a batalha, selecione uma nave para ver sua doutrina e estados ativos. O relatório resume dados observados; não atribui toda a vitória ou derrota a uma única decisão.'));
+  const rewardEl = h('div.validation', { test: 'result-reward', 'aria-live': 'polite' });
+  function showReward() {
+    const reward = props.reward;
+    if (mode === 'mp') rewardEl.textContent = 'O servidor registra as recompensas elegíveis. Consulte o histórico do Perfil.';
+    else if (!reward || reward.status === 'practice') rewardEl.textContent = 'Treino local · progresso neste navegador, sem pontos verificados.';
+    else if (reward.status === 'verified') {
+      const entry = reward.value?.profile?.history?.find(item => item.matchId === `sp:${reward.runId}`);
+      const tooShort = reward.value?.result?.ticks < (reward.value?.profile?.policy?.minBattleTicks || 0);
+      rewardEl.textContent = `Partida verificada pelo servidor.${entry ? ` Pontos: ${entry.delta > 0 ? '+' : ''}${entry.delta || 0}.` : tooShort ? ' Duração abaixo do mínimo de pontuação; sem pontos.' : ' Sem recompensa registrada.'}`;
+    } else if (reward.status === 'error') rewardEl.textContent = 'Não foi possível verificar esta partida. O resultado local permanece disponível; nenhum ganho de pontos é confirmado.';
+    else rewardEl.textContent = 'Verificando a partida no servidor…';
+  }
+  showReward();
+  props.reward?.promise?.then(value => {
+    if (disposed) return;
+    // If verification arrived after opening this screen, present the server's
+    // result. The next mount already reads that object and does not remount.
+    if (value?.result && r !== value.result) ctx.go('results', { ...props, result: value.result });
+    else showReward();
+  });
 
   const players = (start.players || []).slice().sort((a, b) => a.team - b.team || a.name.localeCompare(b.name));
   const rows = players.map((p) => {
@@ -68,8 +95,8 @@ export function mount(root, props, ctx) {
   if (mode === 'sp' && meta) {
     const setup = meta.setup;
     add(actions, 
-      button(T.results.playAgain, { test: 'play-again', primary: true, title: T.results.playAgainHint, onClick: () => ctx.startSinglePlayer(setup, meta.playerFleet, { seed: randomSeed(), speed: props.speed }) }),
-      won ? button(T.results.nextLevel, { test: 'next-level', primary: true, onClick: () => { const next = { ...setup, level: setup.level + 1 }; ctx.saveSpSetup(next); ctx.startSinglePlayer(next, meta.playerFleet, { seed: randomSeed(), speed: props.speed }); } }) : null,
+      button(T.results.playAgain, { test: 'play-again', primary: true, title: T.results.playAgainHint, onClick: () => ctx.startSinglePlayer(setup, meta.playerFleet, { speed: props.speed }) }),
+      won ? button(T.results.nextLevel, { test: 'next-level', primary: true, onClick: () => { const next = { ...setup, level: setup.level + 1 }; ctx.saveSpSetup(next); ctx.startSinglePlayer(next, meta.playerFleet, { speed: props.speed }); } }) : null,
       button(T.results.editFleet, { test: 'edit-fleet', onClick: () => ctx.go('fleetBuilder', { mode: 'sp', setup: won ? { ...setup, level: setup.level + 1 } : setup, fleet: meta.playerFleet }) }),
       button(T.results.menu, { test: 'result-menu', onClick: () => ctx.go('menu') }),
     );
@@ -122,7 +149,8 @@ export function mount(root, props, ctx) {
       ),
       mvpPanel,
     ),
-    actions,
+    report, rewardEl,
+    h('div.row.gap.wrap', actions, button('Perfil e pontos', { test: 'result-profile', onClick: () => ctx.go('profile') })),
   );
   root.appendChild(el);
   try { ctx.audio.setScene(r.winner === -1 ? 'menu' : won ? 'victory' : 'defeat'); } catch { /* ignore */ }

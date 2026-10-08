@@ -6,9 +6,10 @@ gameplay rules and `docs/design/*.md` hold the long-form design proposals.
 
 Fixed decisions:
 
-- Vanilla JavaScript ES modules, no build step, no TypeScript, no frameworks, no
-  external asset files. Shared code must run unchanged in Node 22 and modern browsers.
-- Server: Node 22 + `ws`. Client: HTML5 Canvas 2D + Web Audio API.
+- Vanilla JavaScript ES modules, no build step to run the web game, no TypeScript
+  or frameworks. Art and sound are procedural; local OFL fonts retain their licenses.
+  Shared code must run unchanged in Node 24 and modern browsers.
+- Server: Node 24 + `ws`. Client: HTML5 Canvas 2D + Web Audio API.
 - UI text in Brazilian Portuguese (pt-BR). Identifiers and comments in English.
 - Simulation is a pure, deterministic, fixed-timestep engine (20 ticks/s). It never
   touches the DOM, timers, `Date`, or `Math.random`.
@@ -253,7 +254,7 @@ Serves `client/` at `/` and `shared/` at `/shared/` with correct MIME types (`.j
 |---|---|---|---|
 | C→S | `hello` | `{ name, token?, version }` | token resumes a session dropped < 60 s ago |
 | S→C | `welcome` | `{ playerId, token, version, serverTime }` | |
-| S→C | `ack` | `{ rid }` | success for a request without other response |
+| S→C | `ack` | `{ rid }` | confirms a successful request carrying `rid`, including requests that also produce a room update |
 | S→C | `error` | `{ rid?, code, detail? }` | codes in `ERR`; client translates |
 | C→S | `create_room` | `{ teamSize, budget }` | teamSize 1..6, budget ∈ BUDGETS points; creator = host, team 0 slot 0 |
 | C→S | `join_room` | `{ code }` | joins first free slot (team with fewer humans); full → spectator |
@@ -418,3 +419,51 @@ export const audio = {
 - Errors from the server are codes; the client maps them to pt-BR in `i18n.js`.
 - Never use `innerHTML` with user-provided strings; use `textContent`.
 - Keep modules small and pure where possible; prefer functions over classes in `shared/`.
+
+## 8. Planning, pilots, campaigns and profiles
+
+These extensions add optional fields to the original contracts above. Existing
+automatic fleets and saved local progress remain valid.
+
+- `Fleet.planning` is normalized by `shared/planning.js`: formation
+  `balanced|wedge|line|screen`, position `front|center|rear`, priority
+  `balanced|weakest|support|capital`. It affects deployment and target scoring.
+- `Fleet.pilot: true` requests the special ship for single-player;
+  `BattlePlayer.pilot: true` enables it in the simulation. The 200-point cost is
+  reserved from the fleet budget, and special classes cannot be purchased through
+  ordinary fleet entries. Multiplayer uses a symmetric room `pilotsEnabled` flag.
+- Pilot intent is `{seq, manual, moveX, moveY, aimX, aimY, fire, ability}`. Sequence
+  numbers are strictly increasing per commander; the server supplies the owner
+  and checks the current `matchId`. `{seq, manual:false}` releases control safely.
+  No client damage, position or winner is accepted. Input expires after one
+  second of simulation time; disconnect releases it immediately.
+- A pilot's shots are directional and use swept collision. Other fleet weapons
+  preserve their existing guided/hit-probability behavior. Teleports are not
+  interpreted as movement through every point between endpoints.
+- Snapshots add `p: [{owner,shipId,manual,abilityReadyAt,lastSeq}]` and optional
+  `campaign` progress. Local feeds omit empty pilot metadata. Client controls add
+  `pilot(input)` and `getPilotReplay()`. The feed assigns sequences, and the Worker
+  acknowledges accepted inputs with the tick **before** their next simulated step.
+  Fallback to the main thread replays that journal before accepting new input.
+- `shared/spConfig.js` is the single source for browser and server campaign
+  configuration. The old client module re-exports it. Bot personality and enemy
+  resource multiplier are independent of AI difficulty. Campaign wave budgets
+  include reinforcements; objective ships are not purchased combat units.
+- `server/profiles.js` owns SQLite, cookie authentication, unlock checks and
+  idempotent rewards. `server/profileVerifier.js` re-simulates server-built
+  single-player runs in bounded Workers, including accepted pilot commands.
+  Multiplayer supplies the real server result internally. See
+  [PROFILES.md](PROFILES.md) for identity limitations, policy and backup details.
+- Browser WebSocket upgrades must come from the same complete origin before
+  cookies or tokens are authenticated. Reconnection tokens are scoped to the
+  canonical endpoint, rotated on resume, and bound to the profile when present.
+  Only matching `ack/error` request IDs resolve pending room operations.
+- Radio subtitles and optional local Portuguese speech are presentation only.
+  They never consume simulation RNG; voices with `localService !== true` are not
+  used. The absence of a local voice does not prevent subtitles or gameplay.
+
+`npm test` includes profile/replay regressions and a real twelve-client WebSocket
+6v6. Browser checks are `npm run e2e`, `npm run e2e:ui` and
+`npm run e2e:features`; set `CHROMIUM_PATH` when using a system Chromium.
+`node tools/balance.js --seeds=8 --budget=1500` reproduces the initial Astral
+matchup sample. Run performance and browser measurements separately.

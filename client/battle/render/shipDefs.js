@@ -1,4 +1,4 @@
-// Procedural ship sprite definitions for all 32 catalog classes.
+// Procedural ship sprite definitions for all catalog classes.
 // Pure data (no DOM, no imports) so it can be validated in Node tests and
 // drawn in the browser by client/battle/sprites.js.
 //
@@ -717,14 +717,99 @@ const FERRIX = {
   },
 };
 
+// Piloted command craft: compact silhouettes with a visible central cockpit/core.
+// Each uses the same licensed procedural materials as its automatic fleet.
+const ACES = {
+  ter_ace: {
+    id: 'ter_ace', faction: T, size: 36, style: { edge: 'sharp' },
+    layers: [
+      poly([[-42, -8], [-46, -29], [-26, -33], [18, -16], [6, -8]], { panels: 3, rivets: true, z: -1 }),
+      poly([[-42, 0], [-34, -11], [20, -9], [52, 0]], { panels: 4, rivets: true }),
+      poly([[-4, 0], [2, -6], [24, -4], [34, 0]], { fill: 'grad:canopy' }),
+      stripe([[-30, -28], [-23, -29], [8, -16], [2, -15]]),
+      light(-36, -28, 2),
+    ],
+    engines: [{ x: -42, y: -8, w: 6 }, { x: -42, y: 8, w: 6 }],
+    turrets: [{ x: 36, y: -7, kind: 'light' }, { x: 36, y: 7, kind: 'light' }],
+    anim: [], damage: { sparkPoints: [[-22, -8], [14, 5], [-30, 20]] },
+  },
+  vor_ace: {
+    id: 'vor_ace', faction: V, size: 36, style: { edge: 'smooth' },
+    layers: [
+      vpoly([[-34, -8], [-40, -24], [-18, -33], [20, -23], [38, -10], [8, -13]], { plates: 4, z: -1 }),
+      vpoly([[-48, 0], [-34, -13], [-4, -17], [34, -8], [50, 0]], { plates: 5 }),
+      ellipse(8, 0, 12, 5, { fill: 'accent', alpha: 0.6, mirror: false }),
+      spot(18, -6, 2, { pulse: 1 }), spot(-20, -21, 2),
+    ],
+    engines: [{ x: -46, y: -5, w: 6 }, { x: -46, y: 5, w: 6 }],
+    turrets: [{ x: 46, y: 0, kind: 'acid' }],
+    anim: [{ type: 'breathe', amp: 0.03, hz: 1.5 }], damage: { sparkPoints: [[-28, -8], [20, 5], [-18, 24]] },
+  },
+  lum_ace: {
+    id: 'lum_ace', faction: L, size: 36, style: { edge: 'sharp' }, shieldR: 0.65,
+    layers: [
+      shard([[-34, -14], [-20, -36], [28, -21], [5, -14]], { z: -1 }),
+      crystal([[-48, 0], [-14, -14], [18, -9], [52, 0]], { facets: 5 }),
+      core(-2, 0, 6, { glow: 2.2, pulse: { amp: 0.08, hz: 1 } }),
+      ring(-2, 0, 16, { color: 'hullLight', to: 280, spin: 16 }),
+    ],
+    engines: [{ x: -44, y: -3, w: 4 }, { x: -44, y: 3, w: 4 }],
+    turrets: [{ x: 48, y: 0, kind: 'ion' }],
+    anim: [{ type: 'twinkle', every: [0.8, 1.4] }], damage: { sparkPoints: [[-20, -6], [20, 4], [-4, 23]] },
+  },
+  fer_ace: {
+    id: 'fer_ace', faction: F, size: 36, style: { edge: 'sharp' },
+    layers: [
+      block([[-36, -9], [-36, -28], [-14, -28], [-14, -17], [16, -17], [16, -9]], { cells: 4, traces: 2, z: -1 }),
+      block([[-42, 0], [-42, -11], [20, -11], [20, -5], [54, -5], [54, 0]], { cells: 4, traces: 2 }),
+      sring(-10, 0, 17, { lw: 2, segments: 8, spin: -15 }),
+      core(-10, 0, 5, { glow: 2, shape: 'hex', pulse: { amp: 0.08, hz: 1 } }),
+      line([[18, -3], [50, -3]], { stroke: 'accent', lw: 1.5 }),
+    ],
+    engines: [{ x: -42, y: -7, w: 5 }, { x: -42, y: 7, w: 5 }],
+    turrets: [{ x: 52, y: 0, kind: 'rail' }],
+    anim: [{ type: 'automaton', n: 10, hz: 2 }], damage: { sparkPoints: [[-26, -8], [20, 4], [-22, 22]] },
+  },
+};
+
+const astral = (id, size, hull, orbitRadius, more = []) => ({
+  id, faction: 'astral', size, style: { edge: 'sharp' }, shieldR: 0.66,
+  layers: [
+    ring(-8, 0, orbitRadius, { color: 'accent', lw: 2, segments: 6, gap: 8, z: -1 }),
+    poly(hull, { fill: 'grad:hull', lw: 1.2 }),
+    line([[-28, -4], [-10, -8], [22, -4]], { stroke: 'accent', lw: 1.3 }),
+    core(-8, 0, 6, { pulse: { amp: 0.06, hz: 1 }, glow: 2.1 }),
+    ...more,
+  ],
+  engines: [{ x: -42, y: -5, w: 5 }, { x: -42, y: 5, w: 5 }],
+  turrets: [{ x: 48, y: 0, kind: 'rail' }, { x: 22, y: -10, kind: 'lance' }, { x: 22, y: 10, kind: 'lance' }],
+  anim: [], damage: { sparkPoints: [[-24, -6], [20, 4], [-12, 18]] },
+});
+const ASTRAL = {
+  ast_lanceta: astral('ast_lanceta', 34, [[-44, 0], [-30, -9], [10, -7], [52, 0]], 18),
+  ast_guardiao: astral('ast_guardiao', 80, [[-44, 0], [-36, -20], [-10, -28], [30, -18], [50, 0]], 35, [
+    ring(-8, 0, 26, { color: 'accent', lw: 1, to: 280, spin: 8 }),
+    poly([[-26, -25], [-16, -38], [16, -32], [26, -20]], { fill: 'hullMid' }),
+  ]),
+  ast_arconte: astral('ast_arconte', 170, [[-46, 0], [-36, -18], [-18, -24], [12, -20], [52, 0]], 43, [
+    ring(-8, 0, 34, { color: 'accent', lw: 2, segments: 8, gap: 10, spin: 6 }),
+    poly([[-24, -29], [-10, -44], [18, -36], [38, -16], [10, -24]], { fill: 'hullMid' }),
+    line([[-24, -31], [-12, -39], [16, -32]], { stroke: 'accent', lw: 2 }),
+  ]),
+  ast_ace: astral('ast_ace', 36, [[-44, 0], [-30, -12], [2, -18], [26, -9], [52, 0]], 24, [
+    poly([[-32, -15], [-24, -29], [20, -22], [10, -14]], { fill: 'hullMid' }),
+    line([[-20, -24], [14, -20]], { stroke: 'accent', lw: 2 }),
+  ]),
+};
+
 /** All ship sprite definitions keyed by catalog ship id. */
-export const SHIP_DEFS = Object.freeze({ ...TERRAN, ...VORRAX, ...LUMEN, ...FERRIX });
+export const SHIP_DEFS = Object.freeze({ ...TERRAN, ...VORRAX, ...LUMEN, ...FERRIX, ...ACES, ...ASTRAL });
 
 /** Known animated detail types (validated by tests). */
 export const ANIM_TYPES = ['breathe', 'flex', 'wiggle', 'twinkle', 'automaton', 'strobe'];
 export const LAYER_KINDS = ['poly', 'ellipse', 'ring', 'rects', 'line', 'light', 'spot', 'core', 'orbit', 'trace'];
 export const ENGINE_KINDS = ['flame', 'spore', 'light', 'pixel'];
-export const DEFAULT_ENGINE_KIND = { terran: 'flame', vorrax: 'spore', lumen: 'light', ferrix: 'pixel' };
+export const DEFAULT_ENGINE_KIND = { terran: 'flame', vorrax: 'spore', lumen: 'light', ferrix: 'pixel', astral: 'light' };
 export const MAX_DESIGN_EXTENT = 70;
 
 /**

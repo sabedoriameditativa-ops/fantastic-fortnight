@@ -6,7 +6,8 @@ import { resolve, dirname } from 'node:path';
 import { register } from 'node:module';
 register('./_sharedHook.mjs', import.meta.url);
 const { createLocalRunner, buildStartInfo } = await import('../../client/battle/localRunner.js');
-const { createBattle } = await import('../../shared/sim/battle.js');
+const { createBattle, stepBattle, makeSnapshot, hashState } = await import('../../shared/sim/battle.js');
+const { applyPilotInput } = await import('../../shared/pilot.js');
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -115,4 +116,49 @@ describe('simWorker.js', () => {
     const r = spawnSync(process.execPath, ['--check', resolve(ROOT, 'client/battle/simWorker.js')], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
   });
+});
+
+test('worker failure reconstructs accepted pilot inputs instead of replacing manual play with AI', () => {
+  const previous = globalThis.Worker;
+  let worker;
+  class FakeWorker {
+    constructor() { worker = this; }
+    postMessage(m) {
+      if (m.t === 'init') {
+        this.state = createBattle(m.config);
+        this.onmessage?.({ data: { t: 'start' } });
+      } else if (m.t === 'pilot') {
+        const applied = applyPilotInput(this.state, m.ownerId, m.input);
+        if (applied.ok) this.onmessage?.({ data: { t: 'pilot_applied', tick: this.state.tick, ownerId: m.ownerId, input: m.input } });
+      }
+    }
+    advance(n) {
+      for (let i = 0; i < n; i++) {
+        const e = stepBattle(this.state);
+        if (this.state.tick % 2 === 0) this.onmessage?.({ data: { t: 'frame', ...makeSnapshot(this.state), e } });
+      }
+    }
+    terminate() {}
+  }
+  globalThis.Worker = FakeWorker;
+  const c = config(2000); c.players[0].pilot = true;
+  let feed;
+  try {
+    feed = createLocalRunner(c, { useWorker: true, speed: 1, doc: null });
+    const a = { manual: true, moveX: 1, moveY: 0, aimX: 1800, aimY: 800, fire: true, ability: false };
+    const b = { ...a, moveX: 0, moveY: -1, fire: false };
+    feed.controls.pilot(a); worker.advance(10); feed.controls.pilot(b);
+    const expected = hashState(worker.state);
+    worker.onerror({ message: 'intentional regression-test crash' });
+    assert.equal(feed.controls.mode, 'main');
+    assert.equal(feed.state.tick, 10);
+    assert.equal(hashState(feed.state), expected);
+    assert.equal(feed.state.pilots.p1.manual, true);
+    const journal = feed.controls.getPilotReplay();
+    assert.deepEqual(journal.map((x) => [x.tick, x.ownerId, x.input.seq]), [[0, 'p1', 0], [10, 'p1', 1]]);
+    journal[0].input.moveX = -1;
+    assert.equal(feed.controls.getPilotReplay()[0].input.moveX, 1, 'callers cannot mutate replay history');
+    feed.controls.setSpeed(0);
+    assert.equal(feed.state.pilots.p1.manual, false, 'pausing releases manual input before resuming');
+  } finally { feed?.dispose(); globalThis.Worker = previous; }
 });

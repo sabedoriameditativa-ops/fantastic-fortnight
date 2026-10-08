@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { WebSocketServer } from 'ws';
 register('./_sharedHook.mjs', import.meta.url);
-const { createNetClient } = await import('../../client/battle/netClient.js');
+const { createNetClient, sessionKeysForUrl } = await import('../../client/battle/netClient.js');
 const { memoryStore, KEYS } = await import('../../client/util/storage.js');
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -46,7 +46,7 @@ function fakeServer() {
             slots: [[{ kind: 'human', playerId: sess.playerId, name: sess.name, ready: false, hasFleet: false, connected: true, isHost: true }], [{ kind: 'empty', ready: false, hasFleet: false, connected: false, isHost: false }]] };
           for (let i = 1; i < m.teamSize; i++) { room.slots[0].push({ kind: 'empty' }); room.slots[1].push({ kind: 'empty' }); }
           rooms.set(room.code, room); sess.room = room;
-          pushRoom(room); // no ack: the room push is the response
+          pushRoom(room); ack(); // broadcast state precedes the correlated reply
           break;
         }
         case 'join_room': {
@@ -54,10 +54,10 @@ function fakeServer() {
           if (!room) { err('ROOM_NOT_FOUND'); break; }
           room.members.push(sess); sess.room = room;
           room.slots[1][0] = { kind: 'human', playerId: sess.playerId, name: sess.name, ready: false, hasFleet: false, connected: true, isHost: false };
-          pushRoom(room);
+          pushRoom(room); ack();
           break;
         }
-        case 'leave_room': { if (sess.room) { sess.room.members = sess.room.members.filter((x) => x !== sess); sess.room = null; } send(ws, { t: 'left', reason: 'left' }); break; }
+        case 'leave_room': { if (sess.room) { sess.room.members = sess.room.members.filter((x) => x !== sess); sess.room = null; } send(ws, { t: 'left', reason: 'left' }); ack(); break; }
         case 'set_fleet': {
           if (!m.fleet || !m.fleet.ships || !m.fleet.ships.length) { err('FLEET_INVALID', { code: 'FLEET_SHIP_COUNT', detail: { count: 0, min: 1, max: 40 } }); break; }
           const slot = sess.room.slots.flat().find((s) => s.playerId === sess.playerId); slot.hasFleet = true; slot.faction = m.fleet.faction;
@@ -107,7 +107,7 @@ describe('NetClient', () => {
     const { playerId } = await c.connect('Ana');
     assert.match(playerId, /^p\d+$/);
     assert.equal(c.playerId, playerId);
-    assert.equal(store.getItem(KEYS.token), c.name && srv.sessions.get(store.getItem(KEYS.token)).token);
+    assert.equal(store.getItem(sessionKeysForUrl(srv.url).token), c.name && srv.sessions.get(store.getItem(sessionKeysForUrl(srv.url).token)).token);
     assert.deepEqual(statuses, ['idle', 'connecting', 'ok']);
     assert.equal(c.feed.isLocal, false);
 
@@ -200,7 +200,7 @@ describe('NetClient', () => {
     c.feed.onStatus((s) => feedStatuses.push(s));
     const { playerId } = await c.connect('Ana');
     const created = await c.createRoom({ teamSize: 1, budget: 1500 });
-    const token = store.getItem(KEYS.token);
+    const token = store.getItem(sessionKeysForUrl(srv.url).token);
     const hellosBefore = srv.received.filter((m) => m.t === 'hello').length;
 
     const pendingDuringDrop = c.chat('x');

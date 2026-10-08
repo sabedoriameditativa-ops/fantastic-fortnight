@@ -33,9 +33,12 @@ export function createCamera(o) {
   };
   let initialized = false;
   let lastNow = 0;
+  // On narrow viewports the fixed desktop minimum crops both initial fleets.
+  // Allow fitting the world while retaining a caller's explicit zoom limit.
+  const minimumZoom = () => o.zoomMin !== undefined ? zoomMin : Math.min(zoomMin, cam.vw / (world.w + 240), cam.vh / (world.h + 240));
 
   function applyLimits() {
-    cam.zoom = clamp(cam.zoom, zoomMin * 0.9, zoomMax * 1.1);
+    cam.zoom = clamp(cam.zoom, minimumZoom() * 0.9, zoomMax * 1.1);
     const halfW = cam.vw / 2 / cam.zoom, halfH = cam.vh / 2 / cam.zoom;
     const m = 100;
     if (halfW * 2 >= world.w + 2 * m) cam.x = world.w / 2;
@@ -71,7 +74,7 @@ export function createCamera(o) {
     x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
     cam.bbox.x0 = x0; cam.bbox.y0 = y0; cam.bbox.x1 = x1; cam.bbox.y1 = y1;
     const bw = Math.max(200, x1 - x0), bh = Math.max(120, y1 - y0);
-    cam.tzoom = clamp(Math.min(cam.vw / bw, cam.vh / bh), zoomMin, zoomMax);
+    cam.tzoom = clamp(Math.min(cam.vw / bw, cam.vh / bh), minimumZoom(), zoomMax);
     const bcx = (x0 + x1) / 2, bcy = (y0 + y1) / 2;
     const acx = wsum > 0 ? cxw / wsum : bcx, acy = wsum > 0 ? cyw / wsum : bcy;
     // mostly bbox-centered, biased toward the action; keep the bbox inside the view when possible
@@ -119,7 +122,7 @@ export function createCamera(o) {
       }
       if (cam.mode === 'auto') autoTarget(ships, now);
       if (!initialized) {
-        cam.x = cam.tx; cam.y = cam.ty; cam.zoom = cam.tzoom; initialized = true;
+        if (ships.size || cam.mode !== 'auto') { cam.x = cam.tx; cam.y = cam.ty; cam.zoom = cam.tzoom; initialized = true; }
       } else {
         const kp = 1 - Math.exp(-dt / 0.45), kz = 1 - Math.exp(-dt / 0.9);
         cam.x += (cam.tx - cam.x) * kp; cam.y += (cam.ty - cam.y) * kp;
@@ -128,7 +131,7 @@ export function createCamera(o) {
       applyLimits();
       // trauma shake (screen px)
       cam.trauma = Math.max(0, cam.trauma - dt * 1.2);
-      const s = cam.trauma * cam.trauma * (reducedMotion ? 0.5 : 1);
+      const s = reducedMotion ? 0 : cam.trauma * cam.trauma;
       if (s > 0.0001) {
         const t = now / 1000;
         cam.shakeX = s * 14 * noise1(t * 25, seed);
@@ -147,7 +150,7 @@ export function createCamera(o) {
     },
     /** Multiply the zoom (free mode), keeping the point under (px,py) fixed. */
     zoomBy(f, px, py) {
-      const nz = clamp(cam.tzoom * f, zoomMin, zoomMax);
+      const nz = clamp(cam.tzoom * f, minimumZoom(), zoomMax);
       if (px !== undefined && py !== undefined) {
         const wx = (px - cam.vx - cam.vw / 2) / cam.zoom + cam.x, wy = (py - cam.vy - cam.vh / 2) / cam.zoom + cam.y;
         cam.tx = wx - (px - cam.vx - cam.vw / 2) / nz; cam.ty = wy - (py - cam.vy - cam.vh / 2) / nz;
@@ -188,7 +191,7 @@ export function createCamera(o) {
     halfWidth() { return cam.vw / 2 / cam.zoom; },
     /** Jump instantly to a pose (demo / tests). */
     jumpTo(x, y, zoom) {
-      cam.x = cam.tx = x; cam.y = cam.ty = y; cam.zoom = cam.tzoom = clamp(zoom, zoomMin, zoomMax); initialized = true; applyLimits();
+      cam.x = cam.tx = x; cam.y = cam.ty = y; cam.zoom = cam.tzoom = clamp(zoom, minimumZoom(), zoomMax); initialized = true; applyLimits();
     },
     seedNoise: hash01(seed),
   };

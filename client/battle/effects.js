@@ -38,7 +38,7 @@ export function createEffects(o) {
   const explosions = createExplosions({ particles });
   const shields = createShields({ particles });
 
-  const quality = { density: 1, trails: true, chroma: true, anims: true, glow: true };
+  const quality = { density: 1, trails: true, chroma: true, anims: true, glow: true, reducedEffects: false, reducedMotion: false };
   let shipCount = 0;
 
   /** @type {object[]} */ const muzzles = [];
@@ -52,6 +52,7 @@ export function createEffects(o) {
   /** @type {Map<number, {x:number,y:number,a:number}>} */ const lastPos = new Map();
   /** @type {Map<number, object>} */ const trails = new Map();
   /** @type {Map<number, number>} */ const emitAt = new Map();
+  /** @type {Map<number, number>} */ const damageAt = new Map();
   /** @type {Map<number, number>} */ const healAt = new Map();
   /** @type {Map<number, number>} */ const salvoCount = new Map();
   let suddenDeath = false;
@@ -82,6 +83,7 @@ export function createEffects(o) {
   }
 
   function addMuzzle(x, y, a, w, col, now) {
+    if (quality.reducedEffects) return;
     if (muzzles.length > 200) muzzles.shift();
     const size = clamp(5 + w.damage * 0.25, 5, 22);
     muzzles.push({ x, y, a, kind: FLASH_KIND_BY_TYPE[w.type] || 'kinetic', col, t0: now, size, light: w.damage < 10 });
@@ -211,6 +213,13 @@ export function createEffects(o) {
     const S = clamp(inf.def.size / 18, 1, 8);
     const d = quality.density;
     switch (abilityId) {
+      case 'gravity_snare':
+        if (target) addBuff(target, (ab.duration || 2.5) * 1000, pal.accent, 'anchor', now);
+        explosions.ring({ x, y, r0: 3, r1: 28, lw: 1.5, col: pal.accent, t0: now, dur: 350, a0: 0.5 });
+        break;
+      case 'gravity_well':
+        explosions.ring({ x, y, r0: prm.radius || 220, r1: 20, lw: 1.5, col: pal.accent, t0: now, dur: 450, a0: 0.5 });
+        break;
       case 'afterburner': addBuff(src, 3000, team, 'boost', now); explosions.flash({ x: v.x, y: v.y, r: 8 * S, col: team, t0: now, dur: 150, a: 0.7 }); break;
       case 'countermeasures': {
         addBuff(src, 6000, '#ffe9a8', 'chaff', now);
@@ -323,14 +332,15 @@ export function createEffects(o) {
         const w = inf.cat.weapons[wIdx] || inf.cat.weapons[0];
         if (!w) break;
         const dv = posOf(dst);
-        const tx = dv ? dv.x : x + Math.cos(0) * 100, ty = dv ? dv.y : y;
+        const directional = !dst && Number.isFinite(e[7]) && Number.isFinite(e[8]);
+        const tx = directional ? e[7] : dv ? dv.x : x + 100, ty = directional ? e[8] : dv ? dv.y : y;
         const col = weaponColor(w.type, inf.pal.team);
         const kind = PROJ_KIND_BY_ID[w.id] || (w.aoe && w.type === 'bio' ? 'spore' : KIND_BY_TYPE[w.type] || 'tracer');
         let size = 1;
         if (kind === 'plasma') size = clamp(0.7 + w.damage / 40, 0.7, 2.2);
         else if (kind === 'acid') size = clamp(0.8 + w.damage / 40, 0.8, 2);
         else if (kind === 'rail' || kind === 'tracer') size = w.damage >= 70 ? 1.6 : w.damage >= 14 ? 1.25 : 1;
-        projectiles.launch({ id: pid, kind, x, y, dstId: dst, tx, ty, speed: w.speed, team: inf.team, col, colB: mix(col, '#ffffff', 0.5), size, now, seed: pid * 131, aoe: w.aoe });
+        projectiles.launch({ id: pid, kind, x, y, dstId: dst, tx, ty, directional, speed: w.speed, team: inf.team, col, colB: mix(col, '#ffffff', 0.5), size, now, seed: pid * 131, aoe: w.aoe });
         const ang = Math.atan2(ty - y, tx - x);
         if (!(cam.zoom < 0.5 && w.damage < 10) && !(w.pd && cam.zoom < 0.8)) addMuzzle(x, y, ang, w, col, now);
         if (dv) lastHit.set(dst, { ang, t: now + (Math.hypot(tx - x, ty - y) / Math.max(50, w.speed)) * 1000 });
@@ -383,7 +393,7 @@ export function createEffects(o) {
           explosions.spawn({ x, y, size: 30, faction: 'terran', team: 0, pal: { team: '#ffffff', teamGlow: '#ffffff', debris: '#888888', hullMid: '#888', hullLight: '#aaa' }, now }, quality.density);
         }
         cam.noteDeath(x, y, now);
-        trails.delete(id); buffs.delete(id); charges.delete(id); spawnAt.delete(id); emitAt.delete(id);
+        trails.delete(id); buffs.delete(id); charges.delete(id); spawnAt.delete(id); emitAt.delete(id); damageAt.delete(id);
         break;
       }
       case 'cast': handleCast(e, now); break;
@@ -497,7 +507,7 @@ export function createEffects(o) {
     shipCount = ships.size;
     cam.now = now;
     particles.update(dt);
-    projectiles.update(dt, now, view, lowDensity());
+    projectiles.update(dt, now, view, quality.trails ? lowDensity() : 0);
     beams.update(now, view);
     explosions.update(now);
     const tr = explosions.consumeTrauma(); if (tr) cam.addTrauma(tr);
@@ -512,7 +522,7 @@ export function createEffects(o) {
     for (const [id, c] of charges) {
       if (now > c.until + 300) { charges.delete(id); continue; }
       const v = view(id); const inf = info(id);
-      if (v && inf && now < c.until && now - c.lastEmit > 40 / quality.density) {
+      if (v && inf && quality.glow && now < c.until && now - c.lastEmit > 40 / quality.density) {
         c.lastEmit = now;
         const m = muzzleWorld(inf, v, inf.cat.weapons[0], 0);
         const a = rand.range(0, TAU), d = inf.def.size * 0.6;
@@ -524,7 +534,7 @@ export function createEffects(o) {
     for (const [id, a] of areas) {
       if (a.t1 && now - a.t1 > 400) { areas.delete(id); continue; }
       if (a.t1) continue;
-      if (!cam.isVisible(a.x, a.y, a.r)) continue;
+      if (!cam.isVisible(a.x, a.y, a.r) || quality.reducedEffects) continue;
       if (a.kind === 'acid_cloud') {
         if (now - a.lastEmit > 90 / quality.density) {
           a.lastEmit = now;
@@ -532,12 +542,12 @@ export function createEffects(o) {
           particles.spawn(KIND.SMOKE, a.x + Math.cos(an) * d, a.y + Math.sin(an) * d, rand.range(-8, 8), rand.range(-8, 8), rand.range(1500, 2200), a.r * 0.12, a.r * 0.3, C.smokeGreen, 0, 0, 0.99);
           if (rand() < 0.5) particles.spawn(KIND.DOT, a.x + Math.cos(an) * d, a.y + Math.sin(an) * d, 0, -10, 900, 1.5, 1, C.dropLight);
         }
-      } else if (a.kind === 'singularity') {
+      } else if (a.kind === 'singularity' || a.kind === 'gravity_well') {
         if (now - a.lastEmit > 35 / quality.density) {
           a.lastEmit = now;
           const an = rand.range(0, TAU), d = a.r * rand.range(0.8, 1.1);
           const speed = a.r * 0.9;
-          particles.spawn(KIND.GLOW, a.x + Math.cos(an) * d, a.y + Math.sin(an) * d, -Math.cos(an) * speed - Math.sin(an) * speed * 0.6, -Math.sin(an) * speed + Math.cos(an) * speed * 0.6, (d / speed) * 1000, 3.5, 0.5, rand() < 0.5 ? C.violet : C.white, 0, 0, 1.02);
+          particles.spawn(KIND.GLOW, a.x + Math.cos(an) * d, a.y + Math.sin(an) * d, -Math.cos(an) * speed - Math.sin(an) * speed * 0.6, -Math.sin(an) * speed + Math.cos(an) * speed * 0.6, (d / speed) * 1000, 3.5, 0.5, a.kind === 'gravity_well' ? C.gold : rand() < 0.5 ? C.violet : C.white, 0, 0, 1.02);
         }
       } else if (now - a.lastEmit > 120 / quality.density) {
         a.lastEmit = now;
@@ -550,12 +560,13 @@ export function createEffects(o) {
     const trailSmall = shipCount < 120;
     const ld = lowDensity();
     const emitMinSize = shipCount < 100 ? 0 : shipCount < 250 ? 30 : 48;
+    let damageBudget = quality.glow && !quality.reducedMotion ? 8 : 0;
     for (const v of ships.values()) {
       const inf = info(v.id);
       if (!inf) continue;
       const vis = cam.isVisible(v.x, v.y, inf.def.size);
       if (trailsOn && vis && (inf.def.size >= 40 || trailSmall) && (inf.faction === 'terran' || inf.faction === 'lumen')) recordTrail(v, inf, now);
-      if (vis && ld > 0.3 && (inf.faction === 'vorrax' || inf.faction === 'ferrix') && inf.def.size >= emitMinSize && inf.def.size * cam.zoom >= 10) {
+      if (vis && quality.anims && ld > 0.3 && (inf.faction === 'vorrax' || inf.faction === 'ferrix') && inf.def.size >= emitMinSize && inf.def.size * cam.zoom >= 10) {
         const last = emitAt.get(v.id) || 0;
         const period = (inf.faction === 'vorrax' ? 70 : 60) / ld;
         if (now - last > period) {
@@ -577,11 +588,26 @@ export function createEffects(o) {
           for (let i = 0; i < 2; i++) { const a = rand.range(0, TAU); particles.spawn(KIND.SPARK, v.x + Math.cos(a) * r * rand(), v.y + Math.sin(a) * r * rand(), rand.range(-60, 60), rand.range(-60, 60), 120, 1, 1, C.cyan); }
         }
       }
+      // Damage is readable on the hull and in its wake. Emit at most eight
+      // damaged-ship puffs per frame, only for visible, sufficiently large hulls.
+      if (damageBudget && vis && v.hp < 600 && !(v.flags & 1) && inf.def.size * cam.zoom >= 18 && now - (damageAt.get(v.id) ?? -1000) > (v.hp < 300 ? 160 : 360) / ld) {
+        damageAt.set(v.id, now); damageBudget--;
+        const pts = inf.def.damage.sparkPoints;
+        const p = pts[Math.floor(now / 300 + v.id) % pts.length];
+        const c = Math.cos(v.a), s = Math.sin(v.a), unit = inf.def.size / 100;
+        const x = v.x + (p[0] * c - p[1] * s) * unit, y = v.y + (p[0] * s + p[1] * c) * unit;
+        const vx = -(v.vx || 0) * 0.12, vy = -(v.vy || 0) * 0.12;
+        if (inf.faction === 'lumen') particles.spawn(KIND.SHARD, x, y, vx, vy, 600, 2, 0.4, C.violet, v.a, 1, 0.96);
+        else if (inf.faction === 'ferrix') particles.spawn(KIND.CUBE, x, y, vx, vy, 650, 2, 0.5, C.mint);
+        else particles.spawn(KIND.SMOKE, x, y, vx, vy, 900, 2, 8, inf.faction === 'vorrax' ? C.smokeGreen : C.smoke, 0, 0, 0.98);
+        if (v.hp < 300) particles.spawn(KIND.SPARK, x, y, -c * 20, -s * 20, 250, 1.2, 0.4, inf.faction === 'terran' ? C.spark : particles.color(inf.pal.accent));
+      }
       let lp = lastPos.get(v.id);
       if (!lp) { lp = { x: v.x, y: v.y, a: v.a }; lastPos.set(v.id, lp); }
       else { lp.x = v.x; lp.y = v.y; lp.a = v.a; }
     }
     if (lastPos.size > ships.size + 64) for (const id of lastPos.keys()) if (!ships.has(id)) lastPos.delete(id);
+    if (damageAt.size > ships.size + 16) for (const id of damageAt.keys()) if (!ships.has(id)) damageAt.delete(id);
   }
 
   // ---------------------------------------------------------------------------
@@ -591,6 +617,7 @@ export function createEffects(o) {
   function drawArea(ctx, c, dpr, now) {
     if (!areas.size && !domes.length) return;
     const z = c.zoom;
+    const motionTime = quality.reducedMotion ? 0 : now;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     for (const a of areas.values()) {
       if (!c.isVisible(a.x, a.y, a.r)) continue;
@@ -598,26 +625,33 @@ export function createEffects(o) {
       const grow = clamp((now - a.t0) / 300, 0, 1);
       const fade = a.t1 ? clamp(1 - (now - a.t1) / 400, 0, 1) : 1;
       const R = a.r * z * (0.2 + 0.8 * grow);
-      if (a.kind === 'singularity') {
+      if (quality.reducedEffects) {
+        ctx.strokeStyle = a.kind === 'acid_cloud' ? '#b8ff80' : a.kind === 'singularity' ? '#b4a5ff' : a.kind === 'gravity_well' ? '#d9b565' : '#ffffff';
+        ctx.globalAlpha = 0.4 * fade; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(sx, sy, a.r * z, 0, TAU); ctx.stroke();
+        continue;
+      }
+      if (a.kind === 'singularity' || a.kind === 'gravity_well') {
+        const orbital = a.kind === 'gravity_well';
         ctx.globalCompositeOperation = 'source-over';
         ctx.globalAlpha = 0.85 * fade;
         const core = R * 0.3;
         ctx.drawImage(getSoft('#000000', 0.5), sx - core, sy - core, core * 2, core * 2);
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = 0.5 * fade;
-        ctx.drawImage(getGlow('#7c5cff'), sx - R * 0.5, sy - R * 0.5, R, R);
-        ctx.strokeStyle = '#b8f0ff'; ctx.lineWidth = Math.max(1, 1.5 * z);
+        ctx.drawImage(getGlow(orbital ? '#8de4ec' : '#7c5cff'), sx - R * 0.5, sy - R * 0.5, R, R);
+        ctx.strokeStyle = orbital ? '#d9b565' : '#b8f0ff'; ctx.lineWidth = Math.max(1, 1.5 * z);
         for (let k = 0; k < 3; k++) {
-          const rr = R * (0.45 + k * 0.25), a0 = now * 0.002 * (k % 2 ? -1 : 1) + k;
+          const rr = R * (0.45 + k * 0.25), a0 = motionTime * 0.002 * (k % 2 ? -1 : 1) + k;
           ctx.globalAlpha = (0.5 - k * 0.12) * fade;
           ctx.beginPath(); ctx.arc(sx, sy, rr, a0, a0 + Math.PI * 1.3); ctx.stroke();
         }
       } else if (a.kind === 'acid_cloud') {
         ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = (0.16 + 0.04 * Math.sin(now * 0.004 + a.seed)) * fade;
+        ctx.globalAlpha = (0.16 + 0.04 * Math.sin(motionTime * 0.004 + a.seed)) * fade;
         ctx.drawImage(getSoft('#7dd957', 0.1), sx - R, sy - R, R * 2, R * 2);
         ctx.strokeStyle = '#b8ff80'; ctx.lineWidth = Math.max(1, 1.2 * z); ctx.globalAlpha = 0.22 * fade;
-        ctx.beginPath(); ctx.arc(sx, sy, R * 0.96, now * 0.001, now * 0.001 + Math.PI * 1.5); ctx.stroke();
+        ctx.beginPath(); ctx.arc(sx, sy, R * 0.96, motionTime * 0.001, motionTime * 0.001 + Math.PI * 1.5); ctx.stroke();
       } else {
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = 0.14 * fade;
@@ -630,24 +664,29 @@ export function createEffects(o) {
       const fade = now > dm.t1 ? clamp(1 - (now - dm.t1) / 300, 0, 1) : 1;
       const R = dm.r * z * (1 - (1 - u0) * (1 - u0));
       const sx = c.worldToScreenX(dm.x), sy = c.worldToScreenY(dm.y);
+      if (quality.reducedEffects) {
+        ctx.strokeStyle = dm.col; ctx.globalAlpha = 0.4 * fade; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(sx, sy, dm.r * z, 0, TAU); ctx.stroke();
+        continue;
+      }
       ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = dm.col; ctx.globalAlpha = 0.045 * fade;
       ctx.beginPath(); ctx.arc(sx, sy, R, 0, TAU); ctx.fill();
       if (dm.hex && quality.glow && R <= 420) { ctx.globalAlpha = 0.05 * fade; ctx.drawImage(shields.hexMask(R), sx - R, sy - R, R * 2, R * 2); }
-      ctx.strokeStyle = dm.col; ctx.lineWidth = Math.max(1, 1.5 * z); ctx.globalAlpha = (0.32 + 0.18 * Math.sin(now * 0.008)) * fade;
+      ctx.strokeStyle = dm.col; ctx.lineWidth = Math.max(1, 1.5 * z); ctx.globalAlpha = (0.32 + 0.18 * Math.sin(motionTime * 0.008)) * fade;
       if (dm.dash) ctx.setLineDash([dm.dash * z, dm.dash * z]);
       ctx.beginPath(); ctx.arc(sx, sy, R, 0, TAU); ctx.stroke();
       if (dm.dash) ctx.setLineDash([]);
       if (dm.kind === 'aurora') {
         ctx.lineWidth = Math.max(1, 3 * z);
-        for (let k = 0; k < 3; k++) { const a0 = now * 0.0015 * (k % 2 ? -1 : 1) + k * 2; ctx.globalAlpha = 0.3 * fade; ctx.beginPath(); ctx.arc(sx, sy, R * (0.5 + k * 0.17), a0, a0 + 1.2); ctx.stroke(); }
+        for (let k = 0; k < 3; k++) { const a0 = motionTime * 0.0015 * (k % 2 ? -1 : 1) + k * 2; ctx.globalAlpha = 0.3 * fade; ctx.beginPath(); ctx.arc(sx, sy, R * (0.5 + k * 0.17), a0, a0 + 1.2); ctx.stroke(); }
       } else if (dm.kind === 'nanite') {
         ctx.fillStyle = '#9bffd6'; ctx.globalAlpha = 0.8 * fade;
-        const fr = (now / 100) | 0;
+        const fr = (motionTime / 100) | 0;
         for (let k = 0; k < 24; k++) { const a = hash01(fr, k, 1) * TAU, d = hash01(fr, k, 2) * R; const px = sx + Math.cos(a) * d, py = sy + Math.sin(a) * d; ctx.fillRect(px - 1, py - 1, 2, 2); }
       } else if (dm.kind === 'spores') {
         ctx.fillStyle = '#ff6aa0'; ctx.globalAlpha = 0.5 * fade;
-        const fr = (now / 400) | 0, sub = (now % 400) / 400;
+        const fr = (motionTime / 400) | 0, sub = (motionTime % 400) / 400;
         for (let k = 0; k < 16; k++) { const a = hash01(fr, k, 3) * TAU, d = hash01(fr, k, 4) * R; ctx.beginPath(); ctx.arc(sx + Math.cos(a) * d, sy + Math.sin(a) * d - sub * 10 * z, Math.max(1, 1.5 * z), 0, TAU); ctx.fill(); }
       }
     }
@@ -700,7 +739,7 @@ export function createEffects(o) {
   }
 
   function drawMuzzles(ctx, c, dpr, now) {
-    if (!muzzles.length) return;
+    if (!muzzles.length || quality.reducedEffects) return;
     const z = c.zoom;
     ctx.globalCompositeOperation = 'lighter';
     for (const m of muzzles) {
@@ -731,8 +770,9 @@ export function createEffects(o) {
       const sx = c.worldToScreenX(r.x), sy = c.worldToScreenY(r.y);
       ctx.strokeStyle = r.col; ctx.lineWidth = Math.max(1, 4 * z * (1 - u)); ctx.globalAlpha = 0.9 * (1 - u);
       ctx.beginPath(); ctx.arc(sx, sy, R, 0, TAU); ctx.stroke();
+      if (quality.reducedEffects) continue;
       ctx.lineWidth = Math.max(0.8, 1.2 * z);
-      const fr = (now / 50) | 0;
+      const fr = quality.reducedMotion ? 0 : (now / 50) | 0;
       ctx.beginPath();
       for (let k = 0; k < r.arcs; k++) {
         const a = (k / r.arcs) * TAU + hash01(r.seed, fr, k) * 0.3;
@@ -753,12 +793,12 @@ export function createEffects(o) {
   }
 
   function drawEffects(ctx, c, dpr, now) {
-    beams.draw(ctx, c, dpr, now, quality.density);
+    beams.draw(ctx, c, dpr, now, quality.density, quality);
     drawMuzzles(ctx, c, dpr, now);
-    shields.drawRipples(ctx, c, dpr, now, shieldLook);
-    explosions.draw(ctx, c, dpr, now);
+    shields.drawRipples(ctx, c, dpr, now, shieldLook, quality.reducedEffects);
+    explosions.draw(ctx, c, dpr, now, quality.reducedEffects);
     drawEmp(ctx, c, dpr, now);
-    particles.render(ctx, c, dpr, now);
+    if (!quality.reducedEffects) particles.render(ctx, c, dpr, now);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
@@ -769,16 +809,23 @@ export function createEffects(o) {
   function drawShipOverlay(ctx, v, inf, sx, sy, zoom, dpr, now, lod) {
     const hasShield = inf.cat.shield && inf.cat.shield.cap > 0;
     if (hasShield && v.sh > 0 && lod >= 1) {
-      shields.drawBubble(ctx, sx, sy, shieldRadius(inf.def) * zoom, v.sh / 1000, inf.pal.team, now, v.id, dpr, lod);
+      shields.drawBubble(ctx, sx, sy, shieldRadius(inf.def) * zoom, v.sh / 1000, inf.pal.team, now, v.id, dpr, lod, quality.reducedEffects);
     }
     const b = buffs.get(v.id);
     const ch = charges.get(v.id);
-    if ((b || ch) && lod >= 1) {
+    if ((b || ch) && lod >= 1 && quality.reducedEffects) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.strokeStyle = (ch || b).col; ctx.globalAlpha = 0.6; ctx.lineWidth = 1;
+      ctx.setLineDash(ch ? [2, 3] : [5, 3]);
+      ctx.beginPath(); ctx.arc(sx, sy, inf.def.size * 0.65 * zoom, 0, TAU); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+    if ((b || ch) && lod >= 1 && !quality.reducedEffects) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalCompositeOperation = 'lighter';
       if (b) {
         const r = inf.def.size * 0.6 * zoom;
-        const pulse = 0.5 + 0.5 * Math.sin((now - b.t0) * 0.0377);
+        const pulse = quality.reducedMotion ? 0.5 : 0.5 + 0.5 * Math.sin((now - b.t0) * 0.0377);
         const fade = clamp((b.until - now) / 300, 0, 1) * clamp((now - b.t0) / 150, 0, 1);
         if (b.kind === 'mantle') {
           ctx.strokeStyle = b.col; ctx.lineWidth = Math.max(1, 2 * zoom); ctx.globalAlpha = (0.35 + 0.25 * pulse) * fade;
@@ -788,7 +835,7 @@ export function createEffects(o) {
         } else if (b.kind === 'anchor') {
           ctx.strokeStyle = b.col; ctx.lineWidth = Math.max(1, 1.5 * zoom); ctx.globalAlpha = 0.6 * fade;
           const R = inf.def.size * 0.7 * zoom;
-          ctx.setLineDash([6 * zoom, 6 * zoom]); ctx.lineDashOffset = now * 0.02 * zoom;
+          ctx.setLineDash([6 * zoom, 6 * zoom]); ctx.lineDashOffset = quality.reducedMotion ? 0 : now * 0.02 * zoom;
           ctx.beginPath(); ctx.arc(sx, sy, R, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
           ctx.globalAlpha = 0.25 * fade; ctx.drawImage(getGlow(b.col), sx - r, sy - r, r * 2, r * 2);
         } else {
@@ -813,7 +860,7 @@ export function createEffects(o) {
     }
     if ((v.flags & 1) && lod >= 1) { // UNTARGETABLE: cloak shimmer outline
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.globalAlpha = 0.15 + 0.1 * Math.sin(now * 0.012 + v.id);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.globalAlpha = quality.reducedMotion ? 0.2 : 0.15 + 0.1 * Math.sin(now * 0.012 + v.id);
       ctx.beginPath(); ctx.arc(sx, sy, inf.def.size * 0.5 * zoom, 0, TAU); ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -823,7 +870,7 @@ export function createEffects(o) {
   function shipState(v, inf, now, myTeam) {
     const b = buffs.get(v.id);
     const sp = spawnAt.get(v.id);
-    const spawnScale = sp === undefined ? 1 : clamp(0.2 + 0.8 * ((now - sp) / 200), 0.2, 1);
+    const spawnScale = sp === undefined || quality.reducedMotion ? 1 : clamp(0.2 + 0.8 * ((now - sp) / 200), 0.2, 1);
     const speed = Math.hypot(v.vx, v.vy);
     const thrust = clamp(speed / Math.max(20, inf.cat.speed), 0, 1);
     let alpha = 1;
@@ -845,7 +892,7 @@ export function createEffects(o) {
     clear() {
       particles.clear(); beams.clear(); projectiles.clear(); explosions.clear(); shields.clear();
       muzzles.length = 0; domes.length = 0; empRings.length = 0; areas.clear(); buffs.clear(); charges.clear(); spawnAt.clear();
-      lastHit.clear(); lastPos.clear(); trails.clear(); emitAt.clear(); healAt.clear(); suddenDeath = false;
+      lastHit.clear(); lastPos.clear(); trails.clear(); emitAt.clear(); damageAt.clear(); healAt.clear(); salvoCount.clear(); suddenDeath = false;
     },
     rgba,
   };

@@ -119,6 +119,7 @@ describe('ship sprite definitions', () => {
         case 'vorrax': assert.ok(polys.some((L) => L.plates), `${s.id}: vorrax plates`); assert.ok(d.layers.some((L) => L.kind === 'spot'), `${s.id}: bioluminescent spots`); break;
         case 'lumen': assert.ok(polys.some((L) => L.fill === 'crystal' && L.facets), `${s.id}: crystal facets`); assert.ok(d.layers.some((L) => L.kind === 'core'), `${s.id}: core`); break;
         case 'ferrix': assert.ok(polys.some((L) => L.fill === 'cells'), `${s.id}: nanite cells`); assert.ok(d.layers.some((L) => L.kind === 'ring' && L.segments), `${s.id}: segmented ring`); break;
+        case 'astral': assert.ok(polys.some((L) => L.fill === 'grad:hull'), `${s.id}: solid orbital hull`); assert.ok(d.layers.some((L) => L.kind === 'ring' && L.color === 'accent'), `${s.id}: gold orbit`); break;
         default: assert.fail('unknown faction');
       }
       // team color only on emissive parts: hull polys never use team fills

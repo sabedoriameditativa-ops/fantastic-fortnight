@@ -97,13 +97,17 @@ describe('enemyBudget', () => {
     assert.equal(enemyBudget(2, 'nope'), 900);
   });
 
-  test('is monotonic in difficulty and in level', () => {
+  test('difficulty changes intelligence, and only the explicit resource setting changes resources', () => {
     for (let n = 1; n <= 20; n++) {
       const b = DIFFICULTIES.map((d) => enemyBudget(n, d));
-      for (let i = 1; i < b.length; i++) assert.ok(b[i] > b[i - 1], `level ${n}: ${b}`);
+      for (let i = 1; i < b.length; i++) assert.equal(b[i], b[0], `level ${n}: ${b}`);
       assert.ok(b[0] >= 400, `level ${n} facil budget ${b[0]} buys a fleet`);
     }
     for (let n = 16; n <= 30; n++) assert.ok(enemyBudget(n, 'normal') > enemyBudget(n - 1, 'normal'));
+    assert.equal(enemyBudget(9, 'facil', 1500, 1.5), 2250);
+    assert.equal(enemyBudget(9, 'especialista', 1500, 0.5), 750);
+    assert.equal(enemyBudget(9, 'normal', 1500, NaN), 1500);
+    assert.equal(enemyBudget(9, 'normal', 1500, 100), 3000);
   });
 
   test('every boss is affordable at every difficulty of its level', () => {
@@ -129,7 +133,7 @@ describe('helpers', () => {
     assert.equal(levelEnemyFaction(4, createRng(1)), 'vorrax');
     const seen = new Set();
     for (let s = 0; s < 40; s++) seen.add(levelEnemyFaction(13, createRng(s)));
-    assert.equal(seen.size, 4);
+    assert.equal(seen.size, FACTION_IDS.length);
     assert.equal(levelEnemyFaction(13, createRng('a')), levelEnemyFaction(13, createRng('a')));
   });
 

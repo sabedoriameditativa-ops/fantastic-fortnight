@@ -104,6 +104,8 @@ describe('lobby', () => {
     assert.equal(a.last('chat').text, 'ok');
     lobby.handleMessage(a, { t: 'ping', c: 123 });
     assert.equal(a.last('pong').c, 123);
+    assert.equal(a.last('room').slots[0][0].ready, false, 'changed bot difficulty needs renewed readiness');
+    lobby.handleMessage(a, { t: 'ready', ready: true });
     lobby.handleMessage(a, { t: 'start', fillBots: true, rid: 13 });
     assert.equal(a.last('ack').rid, 13);
     assert.equal(a.last('room').phase, 'countdown');

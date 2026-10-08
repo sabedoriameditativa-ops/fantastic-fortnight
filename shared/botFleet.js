@@ -6,7 +6,7 @@ import { DEFAULT_BUDGET, FLEET_LIMITS } from './constants.js';
 import {
   FACTION_IDS, SHIPS, SIZE_CLASS, PRESET_LIST, presetsOfFaction, shipsOfFaction,
 } from './catalog.js';
-import { AI_PROFILES } from './aiProfiles.js';
+import { AI_PROFILES, BOT_PERSONALITIES } from './aiProfiles.js';
 import {
   presetFleet, autoComplete, validateFleet, normalizeFleet, sizeClassCap, weightedPick,
 } from './fleet.js';
@@ -15,9 +15,9 @@ import {
 
 export const BUILDERS = ['random', 'preset', 'counter'];
 
-/** Random builder spends this fraction range of the budget (SPEC: 60–85%). */
-export const RANDOM_SPEND_MIN = 0.6;
-export const RANDOM_SPEND_MAX = 0.85;
+/** Even an inexperienced commander receives and spends the same allowance. */
+export const RANDOM_SPEND_MIN = 0.9;
+export const RANDOM_SPEND_MAX = 1;
 
 /**
  * Enemy composition categories (cost shares) used by the counter builder.
@@ -61,6 +61,9 @@ export const COUNTER_MATRIX = {
   fer_ferro: { swarm: 0.1, line: 0.5, heavy: 0.9, mothership: 0.9, shield: 0.5, organic: 0.4, nanite: 0.5 },
   fer_fabrica: { swarm: 0.7, line: 0.6, heavy: 0.5, mothership: 0.4, shield: 0.4, organic: 0.5, nanite: 0.7 },
   fer_apagao: { swarm: 0.3, line: 0.5, heavy: 0.5, mothership: 0.6, shield: 0.9, organic: 0.6, nanite: 0.6 },
+  // Astral siege guns punish large targets; the screen doctrine handles swarms.
+  ast_orbita: { swarm: 0.15, line: 0.7, heavy: 0.95, mothership: 0.95, shield: 0.5, organic: 0.4, nanite: 0.6 },
+  ast_baluarte: { swarm: 0.8, line: 0.5, heavy: 0.45, mothership: 0.35, shield: 0.25, organic: 0.4, nanite: 0.3 },
 };
 
 /**
@@ -120,13 +123,14 @@ export function scorePreset(presetId, comp) {
  * @param {{ next(): number, pick<T>(a: T[]): T }} rng
  * @returns {string|null}
  */
-export function pickCounterPreset(faction, enemyFleets, rng) {
+export function pickCounterPreset(faction, enemyFleets, rng, personality) {
   const comp = enemyComposition(enemyFleets);
   if (comp.total <= 0) return null;
   let best = -Infinity;
   let tied = [];
   for (const p of presetsOfFaction(faction)) {
-    const s = scorePreset(p.id, comp);
+    const doctrine = BOT_PERSONALITIES[personality];
+    const s = scorePreset(p.id, comp) + (doctrine?.styles.includes(p.style) ? 0.15 : 0);
     if (s > best + 1e-9) { best = s; tied = [p.id]; } else if (Math.abs(s - best) <= 1e-9) tied.push(p.id);
   }
   if (tied.length === 0) return null;
@@ -140,6 +144,7 @@ export function pickCounterPreset(faction, enemyFleets, rng) {
  * @param {'facil'|'normal'|'dificil'|'especialista'} o.difficulty
  * @param {{ next(): number, range(a:number,b:number): number, pick<T>(a:T[]): T }} o.rng
  * @param {string} [o.faction]              force a faction; otherwise rng.pick(FACTION_IDS)
+ * @param {string} [o.personality]          doctrine, independently of intelligence and resources
  * @param {Fleet[]} [o.enemyFleets]         known enemy fleets (counter builder)
  * @param {'random'|'preset'|'counter'} [o.builder]  override the difficulty's builder
  * @param {string[]} [o.mustInclude]        class ids that must be in the fleet (bosses); they
@@ -163,11 +168,17 @@ export function buildBotFleet(o) {
 
   let fleet;
   if (builder === 'random') {
-    fleet = buildRandomFleet(faction, budget, rng, forced);
+    fleet = buildRandomFleet(faction, budget, rng, forced, o.personality);
   } else {
     let presetId = null;
-    if (builder === 'counter') presetId = pickCounterPreset(faction, o.enemyFleets, rng);
-    if (!presetId) presetId = rng.pick(presetsOfFaction(faction)).id;
+    if (builder === 'counter') presetId = pickCounterPreset(faction, o.enemyFleets, rng, o.personality);
+    if (!presetId) {
+      const presets = presetsOfFaction(faction);
+      const doctrine = BOT_PERSONALITIES[o.personality];
+      const preferred = doctrine ? presets.filter((p) => doctrine.styles.includes(p.style)) : [];
+      // Seeded variety within a doctrine; a minority of fleets surprise the player.
+      presetId = rng.pick(preferred.length && rng.next() < 0.85 ? preferred : presets).id;
+    }
     fleet = autoComplete(presetFleet(presetId, budget, { mustInclude: forced }), budget, rng);
   }
 
@@ -182,7 +193,7 @@ export function buildBotFleet(o) {
 }
 
 /**
- * Random legal fleet: spends 60–85% of the budget, never a mothership (unless
+ * Random legal fleet: spends 90–100% of the budget, never a mothership (unless
  * forced). Picks are weighted by cost so points, not ship counts, are spread
  * across classes; when the 40-ship cap blocks the spend target the cheapest
  * unit is traded up (cost floor ratchets so the loop cannot oscillate).
@@ -192,7 +203,7 @@ export function buildBotFleet(o) {
  * @param {string[]} forced
  * @returns {Fleet}
  */
-export function buildRandomFleet(faction, budget, rng, forced = []) {
+export function buildRandomFleet(faction, budget, rng, forced = [], personality) {
   const upper = Math.floor(budget * RANDOM_SPEND_MAX);
   const target = Math.floor(budget * rng.range(RANDOM_SPEND_MIN, RANDOM_SPEND_MAX - 0.05));
   const pool = shipsOfFaction(faction).filter((s) => s.sizeClass !== 'mothership');
@@ -221,7 +232,12 @@ export function buildRandomFleet(faction, budget, rng, forced = []) {
     let totalW = 0;
     for (const ship of pool) {
       if (ship.cost <= costFloor || !canBuy(ship, upper)) continue;
-      cands.push(ship); weights.push(ship.cost); totalW += ship.cost;
+      const preferred = personality === 'swarm' ? ship.sizeClass === 'tiny' || ship.role === 'carrier'
+        : personality === 'aggressive' ? ['diver', 'brawler', 'striker'].includes(ship.role)
+          : personality === 'defensive' ? ['escort', 'support', 'carrier'].includes(ship.role)
+            : personality === 'artillery' ? ['kiter', 'anchor'].includes(ship.role) : false;
+      const weight = ship.cost * (preferred ? 3 : 1);
+      cands.push(ship); weights.push(weight); totalW += weight;
     }
     if (cands.length === 0) {
       // Trade the cheapest owned unit up, if the fleet is full and something pricier would fit.

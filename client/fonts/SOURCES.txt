@@ -1,0 +1,32 @@
+Frota Estelar — local web fonts
+Retrieved over verified HTTPS on 2026-10-08 from Google Fonts.
+Files are redistributed byte-for-byte; no conversion or subsetting was done
+by this project. The supplied Google Fonts subsets include Portuguese glyphs.
+
+CSS source (variable weights):
+https://fonts.googleapis.com/css2?family=Exo+2:wght@300..700&family=Orbitron:wght@400..900&display=swap
+
+orbitron-latin.woff2 — Orbitron, normal, weights 400–900
+https://fonts.gstatic.com/s/orbitron/v35/yMJRMIlzdpvBhQQL_Qq7dy0.woff2
+11800 bytes
+SHA-256 c25a9f9da5d9f3db1bf2a01474722dc9b377675b7bbab6d0dfda6902794fd1ed
+
+exo2-latin.woff2 — Exo 2, normal, weights 300–700
+https://fonts.gstatic.com/s/exo2/v26/7cHmv4okm5zmbtYoK-4.woff2
+40896 bytes
+SHA-256 4a259dde317e08aa5d37e6eb684e222ae833516b2a0fccba36ee5e36224f16be
+
+exo2-latin-ext.woff2 — Exo 2, extended Latin, normal, weights 300–700
+https://fonts.gstatic.com/s/exo2/v26/7cHmv4okm5zmbtYmK-4E4Q.woff2
+30832 bytes
+SHA-256 a3b66800e9aa36bd8f3cc59f29024c9e063a2ac607d955dd27e149c29cac8410
+
+Upstream licenses (full notices reproduced in LICENSES.txt):
+https://raw.githubusercontent.com/google/fonts/main/ofl/orbitron/OFL.txt
+https://raw.githubusercontent.com/google/fonts/main/ofl/exo2/OFL.txt
+
+Keep LICENSES.txt with every redistributed copy, including executable bundles.
+These URLs document provenance only; the game makes no font network requests.
+
+CSS weight declarations preserve the previous hosted stylesheet:
+https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Exo+2:wght@400;600&display=swap

@@ -136,12 +136,14 @@ export function updateStatus(s, tick) {
   const ws = s.weapons;
   for (let i = 0; i < ws.length; i++) neutralWeaponMod(ws[i].mod);
   let boosted = false;
+  let slow = s.slowUntil > tick ? s.slowMul : 1;
   const fx = s.fx;
   let n = fx.length;
   for (let i = 0; i < n; i++) {
     const f = fx[i];
     if (f.until <= tick) { fx[i] = fx[n - 1]; fx.length = --n; i--; continue; }
     if (f.speedMul) m.speedMul *= f.speedMul;
+    if (f.slowMul) slow = Math.min(slow, f.slowMul);
     if (f.turnMul) m.turnMul *= f.turnMul;
     if (f.dmgMul) m.dmgMul *= f.dmgMul;
     if (f.fireRateMul) m.fireRateMul *= f.fireRateMul;
@@ -166,7 +168,7 @@ export function updateStatus(s, tick) {
       }
     }
   }
-  if (s.slowUntil > tick) m.speedMul *= s.slowMul;
+  m.speedMul *= slow;
   if (s.extraShield > 0 && s.extraShieldUntil <= tick) s.extraShield = 0;
   if (s.cmUntil <= tick) s.cmCharges = 0;
   if (s.stealth && s.untargetableUntil <= tick) s.stealth = false;

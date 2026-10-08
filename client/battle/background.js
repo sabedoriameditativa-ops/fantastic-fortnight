@@ -54,6 +54,15 @@ export function createBackground(o) {
       const col = pal[i % 2];
       drawBlob(r.range(0, NEB_T), r.range(0, NEB_T), r.range(60, 200), r.range(60, 200), 0, mix(col, '#ffffff', 0.2), 0.035);
     }
+    // Fine luminous dust lanes, baked once; wrapping uses the same seamless blobs.
+    for (let lane = 0; lane < 2; lane++) {
+      const y0 = r.range(0, NEB_T), phase = r.range(0, TAU);
+      const col = mix(pal[lane], lane ? '#9fc6de' : '#b29adb', 0.24);
+      for (let i = 0; i < 24; i++) {
+        const x = i * NEB_T / 24, a = x / NEB_T * TAU + phase;
+        drawBlob(x, (y0 + Math.sin(a) * 360 + NEB_T) % NEB_T, 250, 58, Math.cos(a) * 0.5, col, 0.16);
+      }
+    }
     g.globalCompositeOperation = 'source-over';
     return cv;
   }
@@ -212,7 +221,7 @@ export function createBackground(o) {
      * @param {CanvasRenderingContext2D} ctx
      * @param {object} cam camera
      * @param {number} now ms
-     * @param {{ grid?: boolean, quality?: number, reducedMotion?: boolean }} opts
+     * @param {{ grid?: boolean, quality?: number, reducedMotion?: boolean, highContrast?: boolean }} opts
      */
     draw(ctx, cam, now, opts = {}) {
       const z = cam.zoom;
@@ -221,11 +230,11 @@ export function createBackground(o) {
       ctx.fillRect(cam.vx, cam.vy, cam.vw, cam.vh);
       // nebula
       if (!nebula) nebula = buildNebula();
-      drawTiled(ctx, nebula, NEB_T, 0.15, cam, 1);
+      drawTiled(ctx, nebula, NEB_T, 0.15, cam, opts.highContrast ? 0.25 : 1);
       // planet (behind stars? no: stars are far; planet is between far and mid)
       // far stars (cached tile, band by zoom)
       const band = z < 0.9 ? 0 : 1;
-      drawTiled(ctx, farTile(band), STAR_T, 0.3, cam, z < 0.5 ? 0.8 : 1);
+      drawTiled(ctx, farTile(band), STAR_T, 0.3, cam, opts.highContrast ? 0.25 : z < 0.5 ? 0.8 : 1);
       if (planet) {
         if (!planet.canvas) planet.canvas = buildPlanet(planet);
         // parallax 0.2, anchored so that at the world center the offset is zero
@@ -236,15 +245,18 @@ export function createBackground(o) {
         const R = planet.radius * z * 1.25; // canvas radius includes atmosphere/rings (0.4*S body)
         const S = R / 0.4;
         if (sx + S / 2 > cam.vx - 50 && sx - S / 2 < cam.vx + cam.vw + 50 && sy + S / 2 > cam.vy - 50 && sy - S / 2 < cam.vy + cam.vh + 50) {
+          ctx.globalAlpha = opts.highContrast ? 0.25 : 1;
           ctx.drawImage(planet.canvas, sx - S / 2, sy - S / 2, S, S);
+          ctx.globalAlpha = 1;
         }
       }
       // mid stars (direct, twinkle)
-      if ((opts.quality ?? 1) > 0.3) drawStarsDirect(ctx, mid, 0.55, cam, now, z < 0.6 ? 0.9 : 1.1);
+      const starTime = opts.reducedMotion ? 0 : now;
+      if ((opts.quality ?? 1) > 0.3 && !opts.highContrast) drawStarsDirect(ctx, mid, 0.55, cam, starTime, z < 0.6 ? 0.9 : 1.1);
       // near stars
-      drawStarsDirect(ctx, near, 0.85, cam, now, 1.2);
+      if (!opts.highContrast) drawStarsDirect(ctx, near, 0.85, cam, starTime, 1.2);
       // comet
-      if (!opts.reducedMotion) {
+      if (!opts.reducedMotion && !opts.highContrast && (opts.quality ?? 1) > 0.5) {
         if (now >= nextComet && !comet) {
           const r = cometRnd;
           const vr = cam.visibleRect(200);
