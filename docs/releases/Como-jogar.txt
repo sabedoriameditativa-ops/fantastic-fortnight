@@ -20,7 +20,12 @@ SOBRE ESTA PRÉ-VERSÃO
 Windows-smoke.json registra a validação automática da inicialização no Windows.
 Não houve teste manual de gameplay em computadores Windows físicos.
 O arquivo não tem assinatura digital Authenticode; o Windows pode informar
-que o editor é desconhecido.
+que o editor é desconhecido. No Windows 11, o Controle Inteligente de Aplicativos
+pode impedir a execução por completo. Esse bloqueio foi relatado nesta versão.
+O recurso não oferece liberação individual por aplicativo. A correção depende
+de publicar uma versão com assinatura de código emitida por fornecedor confiável.
+Baixar novamente o mesmo executável não resolve a ausência de assinatura.
+Os testes do runner Windows não verificaram a aceitação pelo Smart App Control.
 
 Instruções completas:
 https://github.com/sabedoriameditativa-ops/fantastic-fortnight/blob/frota-estelar-v0.2.0-preview.1/docs/WINDOWS.md

@@ -7,6 +7,24 @@ O pacote Windows é um único **FrotaEstelar.exe**, com o Node e as dependência
 jogo incluídos. O jogador não precisa instalar Node, npm ou Go, executar um `.bat`
 ou usar as instruções do ambiente de nuvem.
 
+## Bloqueio pelo Controle Inteligente de Aplicativos
+
+**Esta pré-versão não tem assinatura digital e pode ser bloqueada por completo
+pelo Controle Inteligente de Aplicativos (Smart App Control) do Windows 11.**
+Foi relatado esse bloqueio na versão `0.2.0-preview.1`. Nesse caso, baixar o mesmo
+arquivo novamente não resolve a ausência de assinatura.
+
+A [Microsoft informa](https://support.microsoft.com/en-us/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions)
+que esse recurso não permite liberar um aplicativo individualmente. A correção
+de distribuição é assinar o executável com um certificado de assinatura de código
+emitido por um fornecedor confiável; isso exige uma identidade de editor validada.
+Publicar no GitHub e gerar um SHA-256 não fornecem essa assinatura. Não é necessário
+desativar a proteção do Windows para diagnosticar o problema.
+
+Os testes automáticos de execução no runner Windows passaram, mas não validaram
+a aceitação do download pelo Smart App Control. A versão assinada ainda não está
+disponível. Veja a [orientação de assinatura da Microsoft](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control).
+
 ## Para jogar
 
 1. Guarde `FrotaEstelar.exe` em uma pasta do computador ou na Área de Trabalho.
@@ -120,7 +138,8 @@ Os testes locais Linux, sozinhos, não demonstram essa execução no Windows.
 Não houve avaliação manual de gameplay em computadores Windows físicos. A associação
 automática do navegador e a experiência em diferentes dispositivos exigem verificação
 adicional. O executável não tem assinatura digital Authenticode; o Windows pode
-identificá-lo como aplicativo de editor desconhecido.
+identificá-lo como aplicativo de editor desconhecido ou impedir sua execução
+quando o Controle Inteligente de Aplicativos estiver ativo.
 
 `install_script` e `start_skill` são instruções do ambiente de desenvolvimento na
 nuvem. Elas não são usadas pelo executável nem são necessárias para jogar.

@@ -1,5 +1,7 @@
 O Frota Estelar tem um executável para Windows com Node e dependências incluídos: um duplo clique inicia o servidor local e abre o navegador.
 
+> **Limitação confirmada no Windows 11:** esta pré-versão não tem assinatura digital. O Controle Inteligente de Aplicativos (Smart App Control) pode bloquear sua execução por completo, como foi relatado com esta versão. Esse recurso não oferece liberação por aplicativo; a correção exige uma assinatura de código de um fornecedor confiável. Baixar novamente o mesmo `.exe` não resolve. Os testes do runner Windows não verificaram a aceitação pelo Smart App Control. Uma versão assinada ainda não está disponível. [Orientação oficial da Microsoft](https://support.microsoft.com/en-us/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions).
+
 ## Para jogar
 
 1. Em **Assets / Arquivos**, baixe **FrotaEstelar.exe** (aproximadamente 39 MB). Os arquivos “Source code” contêm o código-fonte.
@@ -23,7 +25,7 @@ O build desta publicação é gerado em um runner Windows do GitHub Actions. A p
 
 Durante o desenvolvimento em Linux, passaram 403 testes Node e 15 cenários de navegador. O conteúdo extraído do pacote também iniciou uma batalha no Chromium com rede externa bloqueada.
 
-**Não houve teste manual de gameplay em computadores Windows físicos.** O teste automático de inicialização não confirma o comportamento de todos os navegadores ou dispositivos. O arquivo não tem assinatura digital Authenticode; o Windows pode informar que o editor é desconhecido.
+**Não houve teste manual de gameplay em computadores Windows físicos.** O teste automático de inicialização não confirma o comportamento de todos os navegadores ou dispositivos. O arquivo não tem assinatura digital Authenticode; o Windows pode informar que o editor é desconhecido ou impedir sua execução com o Smart App Control ativo.
 
 Este executável escuta somente no próprio computador. Para hospedar partidas para outros computadores, use o servidor descrito no README. Se a porta 3000 estiver ocupada, feche a instância anterior antes de iniciar.
 
