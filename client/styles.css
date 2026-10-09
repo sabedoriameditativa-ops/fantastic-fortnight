@@ -50,7 +50,8 @@ canvas { display: block; }
 #arena.visible { display: block; }
 #arena.dimmed { filter: blur(4px) brightness(0.45); }
 #app { position: fixed; inset: 0; z-index: 2; overflow: auto; overscroll-behavior: contain; }
-#app.battle { overflow: hidden; }
+#app.battle { overflow: hidden; pointer-events: none; } /* let drags / pinches / wheel reach the arena canvas */
+#app.battle > *:not(#hud) { pointer-events: auto; }
 #toasts { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; max-width: min(92vw, 560px); }
 #scanlines { position: fixed; inset: 0; z-index: 3; pointer-events: none; background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255, 255, 255, 0.015) 3px 4px); mix-blend-mode: screen; }
 html[data-rm="on"] #scanlines { display: none; }

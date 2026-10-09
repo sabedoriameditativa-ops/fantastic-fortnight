@@ -1,0 +1,19 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# One click: https://render.com/deploy?repo=https://github.com/sabedoriameditativa-ops/fantastic-fortnight
+services:
+  - type: web
+    name: frota-estelar
+    runtime: node
+    plan: free
+    region: ohio            # closest Render region to Brazil (lowest latency among US regions)
+    buildCommand: npm install --omit=dev --no-audit --no-fund
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: NODE_VERSION
+        value: "22"

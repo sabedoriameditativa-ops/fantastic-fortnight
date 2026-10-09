@@ -1,0 +1,8 @@
+node_modules
+.git
+test
+test-e2e
+tools
+docs
+*.md
+iniciar.*
