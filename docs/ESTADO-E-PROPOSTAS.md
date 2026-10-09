@@ -32,7 +32,9 @@ ponta a ponta no computador, no celular e na internet.
    (251 trocas em 375 amostras), tremendo entre a linha e o ponto seguro.
 5. O Cuspidor, com arco de tiro de 90°, faz o "kite" exatamente perpendicular ao alvo e fica 40 % do tempo
    sem conseguir atirar; naves de arco fixo também não atiram enquanto recuam.
-6. A entrada do multijogador trava em "Conectando ao servidor…" depois de qualquer código de sala inválido.
+6. No multijogador, a entrada trava em "Conectando ao servidor…" depois de um código inválido, perder a
+   conexão na batalha é definitivo (sem botão de reconectar, embora o servidor guarde o assento por 60 s)
+   e um jogador sumido bloqueia o início e a revanche da sala inteira.
 7. O construtor de frota não diz contra quem você vai lutar nem o que funciona contra aquele casco, mesmo
    no modo um jogador, em que o inimigo é conhecido.
 8. No celular em pé a arena vira uma faixa de 390×219 px (26 % da tela); a cor do time é quase invisível
@@ -46,7 +48,9 @@ ponta a ponta no computador, no celular e na internet.
 o custo do Falcão e os piores pares de presets, os defeitos de comportamento da IA (recuo, kite, Véu,
 larvas, flak, portadoras, naves-mãe), a entrada do multijogador, os textos de resultado, o reveal da
 batalha, a ergonomia no celular (toque, barra fixa, alvos de toque, retrato), a cor do time e as auras,
-a câmera livre e automática, o desempenho do fundo, e a mixagem e os defeitos do áudio.
+a câmera livre e automática, o desempenho do fundo, a mixagem e os defeitos do áudio, a reconexão e o
+batimento cardíaco do multijogador, e a dívida de documentação e testes (fixture dourada, CI, teste de
+completude de conteúdo).
 
 ---
 
@@ -294,13 +298,102 @@ falha é o resultado que chega ao jogador.
 
 ## 6. Multiplayer, servidor e escalabilidade
 
-_(em análise — esta seção é preenchida quando a frente terminar)_
+### Estado
+
+Método: clientes WebSocket crus contra o servidor em processo, um harness de carga (CPU, memória, atraso
+do event loop, banda por cliente) e Playwright passando por um proxy TCP controlável para cortar a
+conexão no meio da batalha. Validação de protocolo, inundação de mensagens, migração de anfitrião,
+aborto da contagem, espectadores, chat, revanche e reconexão por token funcionam como documentado
+(39 de 39 verificações). Os defeitos reais estão na recuperação de conexão do cliente e na ausência
+de batimento cardíaco no servidor.
+
+| Métrica | Valor medido |
+|---|---|
+| Quadro 6v6 (JSON, 10 Hz) | ~8,4 KB; 83 KB/s brutos; ~20 KB/s comprimidos por cliente; ~4,8 MB por batalha de 4 min |
+| Custo da compressão por socket | ~0,45 % de um núcleo por cliente em 6v6 (32 sockets: 18 % vs 4–5 % sem compressão) |
+| Saturação de um núcleo | ~120 sockets em 6v6 (CPU 110–207 %, atraso do loop até 99 ms) |
+| 50 salas 6v6 com 2 humanos cada | ~115 % de CPU, 230 MB, picos de atraso de 137–536 ms |
+
+### Problemas encontrados
+
+| Grav. | Problema | Evidência | Status |
+|---|---|---|---|
+| Alta | Conexão perdida na batalha é terminal: sem botão de reconectar nem nova tentativa, enquanto o servidor guarda o assento por 60 s | Após 5 tentativas (~11,5 s) o status fica "lost" para sempre; "SAIR" reconecta por acidente | Corrigido nesta rodada (tentativas durante toda a janela, evento `online`, botão "Reconectar") |
+| Alta | Voltar depois de atualizar a página só funciona com `?sala=` na URL; o anfitrião cai na tela vazia do multijogador | O token continua válido, mas nada o usa | Corrigido nesta rodada (código da sala guardado junto do token; retomada no boot) |
+| Alta | Duas abas com o mesmo token se derrubam a cada 500 ms para sempre | 16 conexões em 8 s; nenhuma aba mostra erro | Corrigido nesta rodada (código de fechamento 4001 tratado como terminal) |
+| Média | Sem batimento cardíaco nem expulsão: jogador sumido ou ausente bloqueia início e revanche | Socket pausado continua "conectado" após 45 s; não há `kick` | Corrigido nesta rodada (ping/pong, expulsar, iniciar com bots no lugar) |
+| Média | Compressão por socket domina a CPU do servidor | Mesmo quadro de 8,4 KB comprimido separadamente para cada socket | Proposto (P5: quadros binários com delta) |
+| Média | Banda de 20 KB/s por cliente em 6v6: snapshot completo de todas as naves a 10 Hz | 26,5 KB de `battle_start`; ~5 MB por batalha no celular | Proposto (P5) |
+| Média | Resultados pulam para o lobby quando o socket do adversário pisca depois do voto de revanche | Fase vai de resultados a lobby em 200 ms sem o voto do outro | Corrigido nesta rodada |
+| Baixa | Latência no lobby nunca atualiza ("0 ms" preso) | Só renderiza em pushes da sala; primeiro ping aos 5 s | Corrigido nesta rodada |
+| Baixa | Promessas de pedido resolvem em qualquer push da sala ("Frota enviada" antes da rejeição) | Corrida realista em lobbies de 12 | Corrigido nesta rodada (ack por `rid`) |
+| Baixa | Limite de 4 salas por endereço vira "A sala está cheia." ao criar | Detalhe `address` não mapeado | Corrigido nesta rodada (mensagem própria; limites 64/8) |
+| Baixa | Nomes aceitam caracteres bidi/zero-width e duplicados | '‮evil' aceito; "Alice / Alice" | Corrigido nesta rodada |
+| Baixa | Deploy ou reinício mata todas as batalhas na hora | `closeAll` no SIGTERM com `autoDeploy: true` | Corrigido nesta rodada (drenagem com espera limitada) |
+
+### Propostas
+
+| Impacto | Esf. | Proposta |
+|---|---|---|
+| Alto | M | **Lista de salas públicas e partida rápida** (`list_rooms`, flag `public`, botão "Partida rápida"). Hoje só se joga com estranhos trocando o código fora do jogo. |
+| Alto | P | **Replay no cliente a partir do `battle_start`** (a simulação é determinística): "Assistir replay" nos resultados, link `?replay=`, verificação do hash final contra o servidor. |
+| Alto | P | **Sessões sempre retomáveis** com banner "Você estava na sala BCHN — Voltar" (base feita nesta rodada). |
+| Médio | P | **Moderação do anfitrião**: expulsar (feito), trancar a sala, transferir anfitrião. |
+| Médio | G | **Quadros binários com delta e compressão única por sala**: < 3 KB/s por cliente e ~10× menos CPU por socket (capacidade de ~120 para ~1.000 sockets por núcleo). |
+| Médio | P | **UX de espectador**: selo "ESPECTADOR", câmera livre/seguir, chat durante a batalha, contador "3 assistindo", botão "Sentar" na revanche. |
+| Médio | P | **Identidade persistente e estatísticas** por `playerKey` (vitórias/derrotas, facção favorita, apelido reservado). |
+| Médio | P | **Ping preciso e indicador de qualidade** (mediana dos últimos 5, ícone de 3 barras, "servidor sobrecarregado" quando o atraso é do servidor). |
+| Médio | M | **Qualidade de vida no lobby**: ready-check de 30 s com preenchimento por bots, facções no reveal, recuperação de abates para quem entra no meio. |
+| Baixo | P | **`/health` com métricas** de batalhas, sockets, atraso do runner e bytes/s (parte feita nesta rodada). |
+| Baixo | M | **Deploys sem derrubar batalhas** com modo de drenagem e deploy sem downtime no Render (base feita nesta rodada). |
+| Baixo | P | **Pings no mapa e mensagens rápidas** durante a batalha ("Foco na nave-mãe", "GG"). |
 
 ---
 
 ## 7. Qualidade de código, testes, ferramentas e documentação
 
-_(em análise — esta seção é preenchida quando a frente terminar)_
+### Estado
+
+As duas suítes estão verdes e estáveis: `npm test` com 308 testes em 60 suítes (21 s; o servidor foi
+reexecutado duas vezes com resultado idêntico; nenhum `.only`/`.skip`), `npm run e2e` 4 de 4 em 49 s.
+O código é limpo: simulação pura e determinística (nenhum `Math.random`, `Date` ou timer em `shared/`),
+relógios injetáveis no servidor, timers e ouvintes balanceados nas telas, DOM só por `textContent`.
+Adicionar uma nave é barato (entrada no catálogo + uma definição de sprite, com teste que cobra as
+duas); uma habilidade toca 4 arquivos; uma facção toca ~14 arquivos sem teste de completude.
+
+### Problemas encontrados
+
+| Grav. | Problema | Evidência | Status |
+|---|---|---|---|
+| Média | SPEC e ARCHITECTURE descrevem coisas que o código já não faz | Stagger por id vs por slot; `teamThink` no mesmo tick; limite de 10 ms vs teste de 25 ms; árvore de arquivos incompleta; contrato do renderer sem `onEnd`/`viewport` | Corrigido nesta rodada (+ teste de sincronia de docs) |
+| Média | `BattleStartInfo` montado em três cópias independentes (servidor, runner local, worker) | Já divergem no `ai` padrão | Corrigido nesta rodada (`makeStartInfo` compartilhado) |
+| Média | Sem fixture dourada da simulação: uma mudança de resultado passa em silêncio | `hashState` só é usado em testes de reprodutibilidade | Corrigido nesta rodada (`test/sim/golden.test.js` com `--update`) |
+| Média | Telas, HUD, câmera e pipeline de render sem testes; e2e cobre só 4 fluxos | ~2.500 linhas sem importação em teste | Parcial (casos e2e de multiplayer; HUD/câmera propostos) |
+| Baixa | Requisito de Node inconsistente (≥ 22 no package, ≥ 18 nos lançadores); tabela de variáveis do README incompleta | — | Corrigido nesta rodada |
+| Baixa | Helpers copiados (4 `loadPlaywright`, 2 servidores estáticos com tabelas MIME próprias, 3 relógios padrão, 4 `clamp`) | — | Corrigido nesta rodada (`tools/_lib.js`); resto proposto |
+| Baixa | Validadores S2C mortos: o cliente nunca valida quadros recebidos | `parseMessage` só em testes | Corrigido nesta rodada |
+| Baixa | Reconectar durante a contagem regressiva deixa o cliente sem o overlay | `COUNTDOWN` só é enviado uma vez | Corrigido nesta rodada |
+| Baixa | Perfil de IA desconhecido vira silenciosamente a IA mais forte | `getAiProfile` cai em "especialista" | Corrigido nesta rodada (`validateConfig` rejeita) |
+| Baixa | Exports mortos e superfície pública desnecessária | ~10 exports nunca usados | Proposto |
+| Baixa | Sem lint, sem CI; `client/dev` vai para a imagem de produção; fontes do Google não documentadas | Nenhum `.github/`; `render.yaml` com `autoDeploy` | Corrigido nesta rodada (CI com testes e e2e; `/dev/` fora da produção); lint proposto |
+| Baixa | Quatro testes de balanceamento dominam o tempo da suíte | 23 s de CPU em 21 s de parede | Corrigido nesta rodada (`FE_SEEDS`, `npm run test:full`) |
+
+### Propostas
+
+| Impacto | Esf. | Proposta |
+|---|---|---|
+| Alto | P | **Teste de completude de conteúdo** (naves, habilidades, facções: sprite, efeito de cast, receita de áudio, paleta, motivo musical, presets e níveis referenciando ids existentes). Feito nesta rodada. |
+| Alto | M | **Replays compartilháveis** sobre a simulação determinística (`?replay=`, botão "Compartilhar batalha"; mesmo formato da fixture dourada). |
+| Médio | M | **Critérios de balanceamento da SPEC §8 como gate executável** (`npm run balance`, feito nesta rodada) no CI noturno. |
+| Médio | P | **`docs/ADDING_CONTENT.md`** com receitas passo a passo (feito nesta rodada). |
+| Médio | M | **e2e dos fluxos de multiplayer** (queda e retomada, revanche, espectador, migração de anfitrião, "Próximo nível", viewport de celular). Parte feita nesta rodada. |
+| Médio | P | **Lint + CI** com regra mecânica de determinismo (`no-restricted-globals` em `shared/sim`) e build Docker de fumaça. CI feito nesta rodada; lint pendente. |
+| Médio | P | **Unificar os bootstraps de Playwright/servidor estático** em `tools/_lib.js` (feito nesta rodada). |
+| Médio | P | **Galeria mostra quando cada habilidade dispara** a partir de um campo `when` único no catálogo, gerando também a tabela da SPEC. |
+| Baixo | M | **Dividir os três módulos maiores** (`room.js` 882 linhas, `sprites.js` 914, `effects.js` 852) pelas costuras naturais. |
+| Baixo | P | **Testes de sincronia de docs** (feito nesta rodada). |
+| Baixo | P | **`FE_SUDDEN_DEATH_TICK`** exposto e todos os knobs `FE_*` documentados num só lugar. |
+| Baixo | P | **`npm run dev:mp`**: servidor + dois clientes já na mesma sala para desenvolver lobby/batalha/resultados. |
 
 ---
 
