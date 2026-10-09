@@ -139,9 +139,27 @@ export function createRenderer(canvas, o) {
     }
     return best;
   }
+  // touch: active pointers for pinch-zoom / two-finger pan, and double-tap detection
+  const touches = new Map();
+  let pinch = null, lastTapAt = 0, lastTapX = 0, lastTapY = 0;
+  function pinchState() {
+    const [a, b] = [...touches.values()];
+    return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
+  }
   if (typeof canvas.addEventListener === 'function') {
     on(canvas, 'pointermove', (ev) => {
       const p = pointerPos(ev); hoverPx = p.x; hoverPy = p.y;
+      if (ev.pointerType === 'touch' && touches.has(ev.pointerId)) {
+        touches.set(ev.pointerId, p);
+        if (touches.size >= 2 && pinch) {
+          const now = pinchState();
+          if (now.d > 0 && pinch.d > 0) camera.zoomBy(clamp(now.d / pinch.d, 0.5, 2), now.cx, now.cy);
+          camera.pan(now.cx - pinch.cx, now.cy - pinch.cy);
+          pinch = now;
+          dragging = false;
+          return;
+        }
+      }
       if (dragging) {
         const dx = p.x - dragX, dy = p.y - dragY;
         if (!dragMoved && Math.hypot(dx, dy) > 4) dragMoved = true;
@@ -150,22 +168,41 @@ export function createRenderer(canvas, o) {
     });
     on(canvas, 'pointerdown', (ev) => {
       if (ev.button !== 0) return;
-      const p = pointerPos(ev); dragging = true; dragMoved = false; dragX = p.x; dragY = p.y; pointerDownAt = performance.now();
+      const p = pointerPos(ev);
+      if (ev.pointerType === 'touch') {
+        touches.set(ev.pointerId, p);
+        if (touches.size === 2) { pinch = pinchState(); dragging = false; }
+      }
+      if (touches.size >= 2) return;
+      dragging = true; dragMoved = false; dragX = p.x; dragY = p.y; pointerDownAt = performance.now();
       try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
     });
+    const endTouch = (ev) => {
+      if (ev.pointerType !== 'touch') return;
+      touches.delete(ev.pointerId);
+      if (touches.size < 2) pinch = null;
+    };
     on(canvas, 'pointerup', (ev) => {
-      if (!dragging) return;
+      const wasPinching = ev.pointerType === 'touch' && touches.size >= 2;
+      endTouch(ev);
+      if (wasPinching || !dragging) return;
       dragging = false;
       try { canvas.releasePointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
       if (!dragMoved && performance.now() - pointerDownAt < 400) {
         const p = pointerPos(ev);
+        const t = performance.now();
+        if (ev.pointerType === 'touch' && t - lastTapAt < 320 && Math.hypot(p.x - lastTapX, p.y - lastTapY) < 30) {
+          lastTapAt = 0; camera.follow(0); camera.setMode('auto'); return; // double tap: back to auto camera
+        }
+        lastTapAt = t; lastTapX = p.x; lastTapY = p.y;
         const id = pickShip(p.x, p.y);
         if (id && id !== camera.followId) camera.follow(id);
         else if (id && id === camera.followId) camera.follow(0);
         else if (!id && camera.mode === 'follow') camera.follow(0);
       }
     });
-    on(canvas, 'pointerleave', () => { hoverId = 0; dragging = false; });
+    on(canvas, 'pointercancel', (ev) => { endTouch(ev); dragging = false; });
+    on(canvas, 'pointerleave', (ev) => { hoverId = 0; if (ev && ev.pointerType === 'touch') return; dragging = false; });
     on(canvas, 'wheel', (ev) => {
       ev.preventDefault();
       const p = pointerPos(ev);

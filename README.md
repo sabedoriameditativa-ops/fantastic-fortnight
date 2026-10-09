@@ -13,6 +13,8 @@ própria. Você assiste, acelera o tempo e aprende o que funciona.
 - **Sem dependências de build**: JavaScript moderno (ES modules), Canvas 2D e Web Audio.
   Toda a arte e todo o som são gerados por código; não há arquivos de mídia.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/sabedoriameditativa-ops/fantastic-fortnight)
+
 ## Testar agora (3 passos)
 
 1. **Instale o Node.js** (versão LTS) em <https://nodejs.org> — só uma vez.
@@ -41,6 +43,38 @@ usar um túnel (por exemplo `ngrok http 3000`).
 
 Dica: `npm install --omit=dev` instala só o necessário para jogar; o `npm install` completo
 também traz o Playwright (usado pelos testes ponta a ponta), que é bem maior.
+
+## Publicar na internet (para outros jogarem pelo link)
+
+Quem joga precisa só do link: funciona no navegador do celular, tablet ou computador,
+sem instalar nada. Quem publica é você, uma vez. O caminho mais simples é o plano
+gratuito do [Render](https://render.com):
+
+1. Crie uma conta no Render (pode entrar com a conta do GitHub).
+2. Clique no botão **Deploy to Render** no topo deste README (ou em
+   <https://render.com/deploy?repo=https://github.com/sabedoriameditativa-ops/fantastic-fortnight>).
+   O arquivo `render.yaml` já diz ao Render como montar e iniciar o jogo.
+3. Confirme o nome do serviço (por exemplo `frota-estelar`) e clique em **Deploy**.
+   Em 2 ou 3 minutos aparece o endereço público, algo como
+   `https://frota-estelar.onrender.com`. Esse é o link para compartilhar.
+4. Cada vez que o repositório no GitHub mudar (branch `main`), o Render publica a
+   nova versão sozinho.
+
+Observações sobre o plano gratuito: o servidor "dorme" após 15 minutos sem ninguém
+jogando e leva cerca de 1 minuto para acordar na primeira visita; o plano pago
+(a partir de US$ 7/mês) elimina isso. Uma instância aguenta várias salas ao mesmo
+tempo; as salas vivem só na memória, então uma reinicialização derruba partidas
+em andamento (as pessoas criam outra sala).
+
+Alternativas: qualquer serviço que rode Node.js ou Docker serve — Fly.io, Railway,
+Koyeb ou um servidor próprio (`docker build -t frota-estelar . && docker run -p 3000:3000 frota-estelar`).
+Atrás de um proxy reverso, mantenha `TRUST_PROXY=1` para que os limites por endereço
+usem o IP real de cada jogador (cabeçalho `X-Forwarded-For`).
+
+No celular, o jogo pode ser adicionado à tela inicial (menu do navegador →
+"Adicionar à tela de início"); ele abre em tela cheia como um aplicativo. Na batalha,
+um dedo arrasta a câmera, dois dedos aproximam/afastam e um toque duplo volta à
+câmera automática.
 
 ## Facções
 

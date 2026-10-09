@@ -35,7 +35,7 @@ function envCount(name) {
  * Read the server configuration from the environment. An unusable `PORT`
  * value is reported through `log.warn` and replaced by the default.
  * @param {{warn:Function}} [log]
- * @returns {{ port:number, host:string|undefined, maxTicks?:number, tickMs?:number, countdownMs?:number, maxRooms?:number, maxSocketsPerAddress?:number, maxRoomsPerAddress?:number }}
+ * @returns {{ port:number, host:string|undefined, maxTicks?:number, tickMs?:number, countdownMs?:number, maxRooms?:number, maxSocketsPerAddress?:number, maxRoomsPerAddress?:number, trustProxy?:boolean }}
  */
 export function envConfig(log = console) {
   const raw = process.env.PORT;
@@ -54,6 +54,7 @@ export function envConfig(log = console) {
     maxRooms: envInt('MAX_ROOMS'),
     maxSocketsPerAddress: envCount('MAX_SOCKETS_PER_IP'),
     maxRoomsPerAddress: envCount('MAX_ROOMS_PER_IP'),
+    trustProxy: process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true',
   };
 }
 
@@ -107,7 +108,7 @@ export async function startServer(o = {}) {
   });
   wss.on('connection', (ws, req) => attachConnection(ws, {
     sessions, lobby, log, limiter, handshakeMs: o.handshakeMs,
-    remoteAddress: req && req.socket ? req.socket.remoteAddress : undefined,
+    remoteAddress: clientAddress(req, o.trustProxy),
   }));
   // ws re-emits the http server's errors; the listen failure is already reported by startServer's rejection.
   wss.on('error', (err) => {
@@ -153,6 +154,22 @@ export async function startServer(o = {}) {
   }
 
   return { port, httpServer, wss, lobby, sessions, close };
+}
+
+/**
+ * Client address for the per-address limits. Behind a reverse proxy (Render, Fly,
+ * nginx...) every socket arrives from the proxy's address, so with `trustProxy`
+ * the first entry of X-Forwarded-For (the original client) is used instead.
+ * @param {import('node:http').IncomingMessage|undefined} req
+ * @param {boolean} trustProxy
+ * @returns {string|undefined}
+ */
+export function clientAddress(req, trustProxy) {
+  const direct = req && req.socket ? req.socket.remoteAddress : undefined;
+  if (!trustProxy || !req || !req.headers) return direct;
+  const xff = req.headers['x-forwarded-for'];
+  const first = (Array.isArray(xff) ? xff[0] : xff || '').split(',')[0].trim();
+  return first || direct;
 }
 
 /** Best-effort: open the default browser on the given URL (used by the one-click launchers). */
