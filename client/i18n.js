@@ -82,6 +82,12 @@ export const T = {
 
   builder: {
     title: 'Montar frota',
+    enemy: 'Inimigo',
+    strongVs: 'Forte contra este casco:',
+    weakVs: 'Fraco:',
+    vsEnemyHull: 'contra o casco inimigo',
+    enemyHint: 'Os chips de arma de cada nave ficam verdes ou vermelhos conforme o casco inimigo.',
+    abilityOf: 'Habilidade: {name}',
     subtitleSp: 'Nível {level} · {levelName} · {difficulty}',
     subtitleMp: 'Sala {code} · orçamento {budget} pts',
     faction: 'Facção',
@@ -232,6 +238,7 @@ export const T = {
     live: 'AO VIVO',
     reconnecting: 'Reconectando…',
     lost: 'Conexão perdida',
+    reconnect: 'Reconectar',
     suddenDeath: 'MORTE SÚBITA',
     suddenDeathHint: 'Sem regeneração · dano crescente',
     engage: 'CONTATO',
@@ -386,6 +393,7 @@ export const T = {
     RATE_LIMITED: 'Calma! Muitas mensagens em pouco tempo.',
     ROOM_NOT_FOUND: 'Sala não encontrada. Confira o código.',
     ROOM_FULL: 'A sala está cheia.',
+    ROOM_MAINTENANCE: 'O servidor vai reiniciar em instantes. Tente criar a sala novamente daqui a pouco.',
     ROOM_ADDRESS_LIMIT: 'Já existem salas demais abertas a partir do seu endereço. Feche uma sala antes de criar outra.',
     ROOM_LIMIT: 'O servidor atingiu o limite de salas. Tente novamente mais tarde.',
     NOT_HOST: 'Somente o anfitrião pode fazer isso.',
@@ -432,6 +440,7 @@ export function errorMessage(code, detail) {
   // the server also answers ROOM_FULL when it cannot create another room (detail 'server' | 'codes')
   if (code === 'ROOM_FULL' && (detail === 'server' || detail === 'codes')) return T.err.ROOM_LIMIT;
   if (code === 'ROOM_FULL' && detail === 'address') return T.err.ROOM_ADDRESS_LIMIT;
+  if (code === 'ROOM_FULL' && detail === 'maintenance') return T.err.ROOM_MAINTENANCE;
   const s = T.err[code];
   if (!s) return fmt(T.err.UNKNOWN, { code: code || '?' });
   let d = '';

@@ -111,7 +111,8 @@ ships: spawns beyond it are skipped.
 ## 3. Ship AI
 
 All of this runs inside the simulation (identical on server and client). Each ship
-`decide()`s every `thinkInterval` ticks (staggered by `id % interval`); the actuator runs
+`decide()`s every `thinkInterval` ticks (staggered by its team-local slot, `slot % interval`, so
+mirrored fleets think in the same order on both sides); the actuator runs
 every tick. Terminology from `docs/design/battle-ai.md` §2–3.
 
 ### 3.1 Roles → default movement when engaged
@@ -150,7 +151,7 @@ Weights per role as in `docs/design/battle-ai.md` §2.3. Weapons with `minTarget
 `pd` select their own sub-targets each tick (PD: nearest interceptable projectile, then
 nearest enemy).
 
-### 3.3 Team coordination (`teamThink`, every 10 ticks, teams staggered)
+### 3.3 Team coordination (`teamThink`, every 10 ticks, both teams on the same tick)
 - Team centroid (cost-weighted), anchor (mothership → highest-cost capital → virtual), phase.
 - Greedy focus allocation: iterate own ships by (long-range first, then id), assign each the
   best enemy by `(cost/ehp) × dmgMult × proximity × (allocDps·3 < ehp ? 1 : 0.3) × (enemy is
@@ -274,4 +275,5 @@ Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
 6. Difficulty monotonic: vs a `normal` preset fleet, enemy win rate: facil < normal < dificil < especialista, with especialista ≥ 70%, facil ≤ 35%.
 7. Never idle: every alive, non-disrupted ship has a target or a movement intent while enemies live.
 8. Abilities fire: in a 1v1 with one of every ship class per side, every ability id appears in ≥ 1 `cast` event in ≥ 80% of seeds (passives excluded).
-9. Performance: 6v6 full fleets (≈ 500 ships) ≤ 10 ms per tick average in Node.
+9. Performance: 6v6 full fleets (≈ 500 ships) ≤ 10 ms per tick average in Node (measured ≈ 5 ms;
+   the unit test asserts < 20 ms to absorb slow CI runners).

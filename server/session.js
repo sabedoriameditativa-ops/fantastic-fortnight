@@ -30,7 +30,7 @@ export const MAX_BUFFERED = 8 * 1024 * 1024;
 /** A socket that has not sent `hello` after this long is closed. */
 export const HANDSHAKE_TIMEOUT_MS = 10_000;
 /** Concurrent sockets accepted per remote address (0 = unlimited). */
-export const DEFAULT_MAX_SOCKETS_PER_ADDRESS = 16;
+export const DEFAULT_MAX_SOCKETS_PER_ADDRESS = 64;
 
 const defaultClock = {
   now: () => Date.now(),

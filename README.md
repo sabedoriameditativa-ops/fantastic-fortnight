@@ -114,6 +114,12 @@ Variáveis de ambiente úteis:
 | `HOST` | interface de rede (padrão: todas) |
 | `MAX_ROOMS` | limite de salas simultâneas |
 | `FE_MAX_TICKS`, `FE_TICK_MS`, `FE_COUNTDOWN_MS` | encurtam batalhas/contagem (usado pelos testes) |
+| `MAX_SOCKETS_PER_IP` | conexões simultâneas por endereço (padrão `64`; `0` desliga) |
+| `MAX_ROOMS_PER_IP` | salas abertas por endereço (padrão `8`; `0` desliga) |
+| `TRUST_PROXY` | `1` atrás de um proxy reverso (Render, Fly…): usa `X-Forwarded-For` para os limites por endereço |
+| `FE_DRAIN_MS` | ao receber SIGTERM, espera até este tempo (padrão `25000`) para as batalhas terminarem antes de encerrar |
+| `FE_OPEN_BROWSER` | `1` abre o navegador quando o servidor sobe (o mesmo que `--open`); `NO_BROWSER=1` no `iniciar.sh` desliga |
+| `NODE_ENV` | `production` esconde as páginas de desenvolvimento em `/dev/` |
 
 `GET /health` responde `{ ok, rooms, uptime, sessions }`.
 

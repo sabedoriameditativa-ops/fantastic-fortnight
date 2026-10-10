@@ -49,6 +49,7 @@ export function mount(root, props, ctx) {
   }
 
   let subscribedTo = null;
+  let latTimer = null;
   function subscribe() {
     if (!net || subscribedTo === net) return;
     subscribedTo = net;
@@ -160,6 +161,9 @@ export function mount(root, props, ctx) {
       try { await navigator.clipboard.writeText(text); ctx.toast(msg, 'ok', 1800); }
       catch { ctx.toast(T.app.copyFailed, 'warn'); }
     };
+    const latencyEl = h('span.mono.small', { test: 'latency', text: fmt(T.lobby.latency, { ms: num(net.latencyMs) }) });
+    if (latTimer) clearInterval(latTimer);
+    latTimer = setInterval(() => { if (disposed || !net) { clearInterval(latTimer); latTimer = null; return; } latencyEl.textContent = fmt(T.lobby.latency, { ms: num(net.latencyMs) }); }, 1000);
     const headEl = h('div.screen-head',
       h('div.titles',
         h('div.row.gap.wrap', h('span.room-code', { test: 'room-code', text: room.code }),
@@ -168,7 +172,7 @@ export function mount(root, props, ctx) {
         h('div.subtitle.row.gap.wrap',
           h('span', { text: `${room.teamSize}v${room.teamSize} · ${num(room.budget)} ${T.app.points} · ${T.lobby.botDifficulty}: ${difficultyName(room.botDifficulty)}` }),
           h('span.badge', { text: T.lobby.phase[room.phase] || room.phase }),
-          h('span.mono.small', { test: 'latency', text: fmt(T.lobby.latency, { ms: num(net.latencyMs) }) }),
+          latencyEl,
         ),
       ),
       h('div.actions', button(T.lobby.leave, { test: 'leave-room', class: 'btn-danger', onClick: leave })),
@@ -338,6 +342,7 @@ export function mount(root, props, ctx) {
   return {
     unmount() {
       disposed = true;
+      if (latTimer) { clearInterval(latTimer); latTimer = null; }
       hideCountdown();
       for (const off of offs) { try { off(); } catch { /* ignore */ } }
       for (const s of stops) s();

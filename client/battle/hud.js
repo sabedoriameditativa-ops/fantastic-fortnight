@@ -22,6 +22,7 @@ import { createEventLog } from '../util/eventLog.js';
  * @param {(x:number)=>void} o.onSpeed
  * @param {(name:'names'|'grid'|'camera'|'sound')=>void} o.onToggle
  * @param {()=>void} o.onQuit
+ * @param {()=>void} [o.onReconnect]  shown as a button while the connection is lost
  * @param {()=>number} o.latency       ms (network)
  */
 export function createHud(root, o) {
@@ -84,7 +85,8 @@ export function createHud(root, o) {
       speedWrap.appendChild(b);
     }
   }
-  const liveEl = h('div.hud-live', { test: 'hud-live' }, h('span.dot'), h('span.lbl', { text: T.battle.live }), h('span.lat.muted.mono'));
+  const btnReconnect = h('button.btn.btn-sm.btn-primary.hidden', { type: 'button', test: 'hud-reconnect', onClick: () => { if (o.onReconnect) o.onReconnect(); } }, T.battle.reconnect);
+  const liveEl = h('div.hud-live', { test: 'hud-live' }, h('span.dot'), h('span.lbl', { text: T.battle.live }), h('span.lat.muted.mono'), btnReconnect);
   const clockEl = h('div.hud-clock', timeEl, o.isLocal ? speedWrap : liveEl);
   const top = h('div.hud-top', teamEls[0].el, clockEl, teamEls[1].el);
   const banner = h('div.hud-banner.hidden');
@@ -245,6 +247,7 @@ export function createHud(root, o) {
       status = s;
       liveEl.classList.toggle('warn', s === 'reconnecting');
       liveEl.classList.toggle('bad', s === 'lost');
+      btnReconnect.classList.toggle('hidden', s !== 'lost' || !o.onReconnect);
       liveEl.querySelector('.lbl').textContent = s === 'ok' ? T.battle.live : s === 'reconnecting' ? T.battle.reconnecting : T.battle.lost;
     },
     /** @param {'auto'|'free'|'follow'} m */

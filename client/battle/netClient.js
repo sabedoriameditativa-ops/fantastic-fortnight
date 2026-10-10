@@ -157,12 +157,14 @@ export function createNetClient(url, opts = {}) {
       case S2C.ROOM: {
         const { t, ...state } = msg;
         room = state;
+        if (room && room.code) writeString(store, KEYS.room, room.code);   // lets a refreshed tab come back
         resolveRoomRequests(room);
         ev.room.emit(room);
         break;
       }
       case S2C.LEFT: {
         room = null;
+        writeString(store, KEYS.room, '');
         base.resetBattle();
         for (const [id, p] of [...pending]) if (p.t === C2S.LEAVE_ROOM) { pending.delete(id); p.resolve(); }
         ev.left.emit(msg.reason || 'left');
@@ -331,6 +333,8 @@ export function createNetClient(url, opts = {}) {
 
     feed,
     get latencyMs() { return latencyMs; },
+    /** Room code of the session this tab may resume (sessionStorage), or ''. */
+    get storedRoomCode() { return readString(store, KEYS.room, '') || ''; },
     get status() { return status; },
     get room() { return room; },
     get playerId() { return playerId; },

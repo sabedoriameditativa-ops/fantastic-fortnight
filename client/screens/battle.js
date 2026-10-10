@@ -96,6 +96,7 @@ export function mount(root, props, ctx) {
       onSpeed: setSpeed,
       onToggle: toggle,
       onQuit: quit,
+      onReconnect: isLocal ? null : () => { if (state.net) state.net.reconnect(); },
       latency: () => (state.net ? state.net.latencyMs : 0),
     });
     hud.setStatus(feed.isLocal ? 'ok' : (state.net ? (state.net.status === 'ok' ? 'ok' : state.net.status === 'reconnecting' ? 'reconnecting' : 'lost') : 'ok'));

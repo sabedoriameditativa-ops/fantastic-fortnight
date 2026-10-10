@@ -4,7 +4,7 @@ import { createBattle, stepBattle } from '../../shared/sim/battle.js';
 import { PRESET_LIST } from '../../shared/catalog.js';
 import { scalePreset } from './helpers.js';
 
-test('perf: 6v6 full preset fleets (budget 2500), 400 ticks, < 25 ms/tick (reports ms/tick)', () => {
+test('perf: 6v6 full preset fleets (budget 2500), 400 ticks, < 20 ms/tick (SPEC §8.9 target 10 ms; reports ms/tick)', () => {
   const ids = PRESET_LIST.map((p) => p.id);
   const players = [];
   for (let i = 0; i < 12; i++) {
@@ -29,5 +29,5 @@ test('perf: 6v6 full preset fleets (budget 2500), 400 ticks, < 25 ms/tick (repor
   console.log(`perf: ${n} purchased ships (max alive ${maxAlive}), ${ticks} combat ticks after ${skipped} advance ticks, ${ms.toFixed(2)} ms/tick, max ${maxProj} projectiles in flight`);
   assert.ok(n >= 300, `expected a big battle, got ${n} ships`);
   assert.ok(maxProj > 0, 'combat should have happened');
-  assert.ok(ms < 25, `${ms.toFixed(2)} ms/tick`);
+  assert.ok(ms < 20, `${ms.toFixed(2)} ms/tick`);
 });

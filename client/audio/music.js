@@ -378,19 +378,19 @@ export function createMusicEngine(o) {
       th.onStep = (t, step, time) => {
         if (step === 0) stingerVictory(time, t.bus);
         const bar = Math.floor(step / STEPS_PER_BAR);
-        if (bar >= 2) {
-          const prog = PROGRESSIONS.victory;
-          if (step % 32 === 0) pad(time, prog[((bar - 2) / 2) % prog.length], 32 * t.stepDur, t.bus, { cutoff: 1200, gain: 0.12, send: 0.3 });
-          if (rng.next() < 0.18) arp(time, [62, 66, 69, 74, 78, 81][Math.floor(rng.next() * 6)] + 12, d.input, { gain: 0.07 });
-        }
+        const prog = PROGRESSIONS.victory;
+        // the pad enters under the stinger (quietly) so the theme never falls silent between the two
+        if (step % 32 === 0) pad(time, prog[Math.floor(bar / 2) % prog.length], 32 * t.stepDur, t.bus, { cutoff: bar < 2 ? 700 : 1200, gain: bar < 2 ? 0.06 : 0.12, send: 0.3 });
+        if (bar >= 1 && rng.next() < 0.18) arp(time, [62, 66, 69, 74, 78, 81][Math.floor(rng.next() * 6)] + 12, d.input, { gain: bar < 2 ? 0.045 : 0.07 });
       };
     },
     defeat(th) {
-      th.drones.push(drone(th.startAt + 1.5, mtof(38), th.bus, { gain: 0.12 }));
+      th.drones.push(drone(th.startAt, mtof(38), th.bus, { gain: 0.12 }));
       th.onStep = (t, step, time) => {
         if (step === 0) stingerDefeat(time, t.bus);
         const bar = Math.floor(step / STEPS_PER_BAR);
-        if (bar >= 1 && step % 32 === 16) {
+        // first pad at step 16 of bar 0 (under the stinger's tail), then every two bars
+        if (step % 32 === 16) {
           const prog = PROGRESSIONS.defeat;
           pad(time, prog[Math.floor(bar / 2) % prog.length], 32 * t.stepDur, t.bus, { cutoff: 500, gain: 0.12, type: 'triangle', send: 0.35 });
         }

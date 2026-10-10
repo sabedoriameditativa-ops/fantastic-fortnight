@@ -245,7 +245,7 @@ A **frame** is what both the local runner and the server emit every `SNAPSHOT_EV
 ## 4. Server
 
 ### 4.1 Static (`server/static.js`)
-Serves `client/` at `/` and `shared/` at `/shared/` with correct MIME types (`.js` → `text/javascript`, `.html`, `.css`, `.svg`, `.json`, `.ico`), `Cache-Control: no-cache`, path traversal blocked, `/` → `client/index.html`. `/health` returns JSON `{ ok, rooms, uptime }`.
+Serves `client/` at `/` and `shared/` at `/shared/` with correct MIME types (`.js` → `text/javascript`, `.html`, `.css`, `.svg`, `.json`, `.ico`), `Cache-Control: no-cache`, path traversal blocked, `/` → `client/index.html`. `/health` returns JSON `{ ok, rooms, battles, draining, uptime, sessions }`. With `NODE_ENV=production` the developer pages under `/dev/` are not served.
 
 ### 4.2 Protocol (JSON text frames, `t` = type; C2S may carry `rid` echoed in `ack`/`error`)
 
@@ -296,7 +296,7 @@ Serves `client/` at `/` and `shared/` at `/shared/` with correct MIME types (`.j
  * @property {Difficulty} botDifficulty
  * @property {'lobby'|'countdown'|'battle'|'results'} phase
  * @property {Slot[][]} slots            [team0[], team1[]]
- * @property {{ id, name }[]} spectators
+ * @property {{ id, name, connected }[]} spectators
  * @property {string[]} rematchVotes
  * @property {string} you                the receiving player's id
  *
@@ -374,7 +374,9 @@ Renderer.setOptions({ showNames, grid, reducedMotion, quality })
 Renderer.registerShips(ships)   // idempotent: register ShipInit entries unknown so far (spawned units after a reconnect)
 Renderer.resync(start)          // reconnect: registerShips(start.ships) + mark start.dead + interpolator reset
 Renderer.getView()          // { ships: Map<id, {x,y,a,hp,sh,flags,cls,team,owner}>, tick } — used by HUD
-Renderer.camera             // { follow(id), setMode('auto'|'free'), zoomBy(f), pan(dx,dy) }
+Renderer.camera             // { follow(id), setMode('auto'|'free'), zoomBy(f), pan(dx,dy), mode, zoom, followId, jumpTo(x,y,z) }
+Renderer.onEnd(cb)          // called once the end-of-battle presentation has played (screens/battle.js shows results after it)
+Renderer.viewport           // { x, y, w, h } CSS px of the arena inside the canvas (full canvas between 3:4 and 21:9, letterboxed beyond)
 Renderer.dispose()
 ```
 Interpolation delay: 120 ms local, 160 ms network. Events are applied when presentation time crosses their frame.

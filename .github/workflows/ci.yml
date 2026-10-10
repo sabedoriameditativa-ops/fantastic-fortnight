@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium for the end-to-end run
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end (Playwright)
+        run: npm run e2e
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the production image and check /health
+        run: |
+          docker build -t frota-estelar .
+          docker run -d --rm -p 3000:3000 --name fe frota-estelar
+          for i in $(seq 1 20); do curl -fsS http://localhost:3000/health && break; sleep 1; done
+          curl -fsS http://localhost:3000/health | grep -q '"ok":true'
+          docker stop fe

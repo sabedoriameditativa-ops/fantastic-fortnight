@@ -11,6 +11,7 @@ export const KEYS = Object.freeze({
   spSetup: 'fe.spSetup',
   token: 'fe.token',
   playerId: 'fe.playerId',
+  room: 'fe.room',
 });
 
 /** @returns {Storage|null} */

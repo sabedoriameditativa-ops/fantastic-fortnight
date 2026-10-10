@@ -602,7 +602,10 @@ export function createAudioEngine(deps = {}) {
           }
           case 'hit': {
             const dst = safeLookup(e[1]); if (!dst) break;
-            play(e[4] ? 'hit.shield' : 'hit.hull', { x: dst.x, y: dst.y, size: sizeOf(dst), faction: dst.faction, seed: eventSeed(e[1], e[2], e[4]), delay });
+            // a point-defence tick and a railgun strike must not sound the same: gain from the damage amount
+            const amount = Math.max(1, Number(e[2]) || 1);
+            const gain = 0.5 + 0.5 * clamp(Math.log2(amount / 8) / 4, 0, 1);
+            play(e[4] ? 'hit.shield' : 'hit.hull', { x: dst.x, y: dst.y, size: sizeOf(dst), faction: dst.faction, seed: eventSeed(e[1], e[2], e[4]), delay, gain });
             break;
           }
           case 'sbreak': {

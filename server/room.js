@@ -14,7 +14,7 @@ import { FACTION_IDS } from '../shared/catalog.js';
 import { validateFleet } from '../shared/fleet.js';
 import { buildBotFleet } from '../shared/botFleet.js';
 import { createRng } from '../shared/rng.js';
-import { createBattle, getInitialShips, battleWorld } from '../shared/sim/battle.js';
+import { createBattle, getInitialShips, battleWorld, makeStartInfo } from '../shared/sim/battle.js';
 import { S2C, ERR, MAX_CHAT_LENGTH } from '../shared/protocol.js';
 import { startMatch as defaultStartMatch } from './match.js';
 
@@ -718,15 +718,7 @@ export function createRoom(o) {
       broadcastState();
       return;
     }
-    match.startInfo = {
-      seed: match.seed,
-      players: players.map((p) => ({ id: p.id, name: p.name, team: p.team, isBot: p.isBot, faction: p.fleet.faction, fleet: p.fleet, ai: p.ai })),
-      ships: getInitialShips(state),
-      world: battleWorld(state),
-      tickRate: TICK_RATE,
-      snapshotEvery: SNAPSHOT_EVERY,
-      maxTicks: config.maxTicks || MAX_TICKS,
-    };
+    match.startInfo = makeStartInfo(config, state);
     phase = 'battle';
     broadcastRaw(battleStartMessage(false));
     broadcastState();

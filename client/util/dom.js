@@ -164,12 +164,15 @@ export function tooltip(el, text) {
     tip.style.left = `${Math.round(x)}px`; tip.style.top = `${Math.round(y)}px`;
   };
   const hide = () => { if (tip) { tip.remove(); tip = null; } };
-  el.addEventListener('pointerenter', show);
-  el.addEventListener('pointerleave', hide);
+  const onDocDown = (e) => { if (tip && !el.contains(e.target) && !tip.contains(e.target)) hide(); };
+  el.addEventListener('pointerenter', (e) => { if (!e.pointerType || e.pointerType === 'mouse') show(); });
+  el.addEventListener('pointerleave', (e) => { if (!e.pointerType || e.pointerType === 'mouse') hide(); });
   el.addEventListener('focus', show);
   el.addEventListener('blur', hide);
-  el.addEventListener('pointerdown', hide);
-  return { hide };
+  el.addEventListener('pointerdown', (e) => { if (!e.pointerType || e.pointerType === 'mouse') hide(); });
+  document.addEventListener('pointerdown', onDocDown, true);
+  // touch: the caller toggles on tap (there is no hover); closes on a tap anywhere else
+  return { hide, show, toggle() { if (tip) hide(); else show(); } };
 }
 
 /** Select element from options [{value,label}] with data-test. */

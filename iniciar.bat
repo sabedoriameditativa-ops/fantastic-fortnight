@@ -11,7 +11,7 @@ if errorlevel 1 goto nonode
 
 echo  Node.js encontrado:
 node --version
-node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 18 ? 0 : 1)"
+node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 22 ? 0 : 1)"
 if errorlevel 1 goto oldnode
 
 if exist "node_modules\ws\package.json" goto run

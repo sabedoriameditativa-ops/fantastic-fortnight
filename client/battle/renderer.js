@@ -224,7 +224,11 @@ export function createRenderer(canvas, o) {
     if (options.quality !== 'auto') return;
     if (perf.total < 90) { perf.drawMs = Math.min(perf.drawMs, 12); return; } // ignore warm-up (sprite builds)
     const q = effects.quality;
-    if (perf.drawMs > 18) {
+    // drawMs is the JS issue time only; on integrated GPUs / dpr-2 phones the real cost shows up
+    // in the rAF interval, so a slow frame interval counts as well (when the tab is visible)
+    const visible = typeof document === 'undefined' || document.visibilityState !== 'hidden';
+    const slowFrame = visible && perf.frameMs > 28 && perf.frameMs < 190;
+    if (perf.drawMs > 18 || slowFrame) {
       // require sustained slowness (not a GC / sprite-build spike) before degrading
       perf.badFrames = (perf.badFrames || 0) + 1;
       if (perf.badFrames >= 12) {
@@ -233,7 +237,7 @@ export function createRenderer(canvas, o) {
         if (q.density < 0.6) { q.trails = false; q.chroma = false; spriteQuality.anims = q.density > 0.35; }
       }
       perf.goodFrames = 0;
-    } else if (perf.drawMs < 11) {
+    } else if (perf.drawMs < 11 && perf.frameMs < 17.5) {
       perf.badFrames = 0;
       perf.goodFrames++;
       if (perf.goodFrames > 120) {

@@ -89,7 +89,7 @@ function sendText(res, status, text, extraHeaders = {}) {
  * @param {() => object} [o.health]  returns the `/health` JSON body
  * @returns {(req: import('http').IncomingMessage, res: import('http').ServerResponse) => void}
  */
-export function createStaticHandler({ clientDir, sharedDir, health = () => ({ ok: true }) }) {
+export function createStaticHandler({ clientDir, sharedDir, health = () => ({ ok: true }), serveDev = process.env.NODE_ENV !== 'production' }) {
   const clientRoot = path.resolve(clientDir);
   const sharedRoot = path.resolve(sharedDir);
 
@@ -115,6 +115,8 @@ export function createStaticHandler({ clientDir, sharedDir, health = () => ({ ok
       return sendJson(res, 200, body);
     }
 
+    // client/dev/* (render demo, fake feed) is a developer tool, not part of the game
+    if (!serveDev && (pathname === '/dev' || pathname.startsWith('/dev/'))) return sendText(res, 404, 'Não encontrado');
     let file;
     if (pathname === '/' || pathname === '/index.html') {
       file = path.join(clientRoot, 'index.html');

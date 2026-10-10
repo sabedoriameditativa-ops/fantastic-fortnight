@@ -5,7 +5,7 @@
 // Messages in:  { t:'init', config, speed }  { t:'speed', x }  { t:'pause', on }  { t:'stop' }
 // Messages out: { t:'start', info }  { t:'frame', k, s, e }  { t:'end', result }  { t:'error', message }
 
-import { createBattle, stepBattle, makeSnapshot, getResult, getInitialShips, battleWorld } from '/shared/sim/battle.js';
+import { createBattle, stepBattle, makeSnapshot, getResult, makeStartInfo } from '/shared/sim/battle.js';
 import { TICK_MS, TICK_RATE, SNAPSHOT_EVERY, MAX_TICKS } from '/shared/constants.js';
 import { createSimLoop } from '../util/simLoop.js';
 
@@ -13,19 +13,7 @@ let loop = null;
 
 /** BattleStartInfo for a config + fresh state (mirrors localRunner.buildStartInfo). */
 function startInfo(config, state) {
-  return {
-    seed: config.seed,
-    players: config.players.map((p) => ({
-      id: p.id, name: p.name, team: p.team, isBot: !!p.isBot, faction: p.fleet.faction, fleet: p.fleet,
-      ai: p.ai || (p.isBot ? 'normal' : 'especialista'),
-    })),
-    ships: getInitialShips(state),
-    world: battleWorld(state),
-    tickRate: TICK_RATE,
-    snapshotEvery: SNAPSHOT_EVERY,
-    maxTicks: config.maxTicks || MAX_TICKS,
-    isLocal: true,
-  };
+  return { ...makeStartInfo(config, state), isLocal: true };
 }
 
 self.onmessage = (ev) => {

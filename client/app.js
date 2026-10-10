@@ -8,6 +8,7 @@ import {
   loadLastFleet, saveLastFleet, loadSpSetup, saveSpSetup,
 } from './util/storage.js';
 import { parseParams, defaultWsUrl, randomSeed } from './util/url.js';
+import { sessionStore, readString, KEYS as STORAGE_KEYS } from './util/storage.js';
 import { createAmbient } from './util/ambient.js';
 import { setShipAnimations } from './util/shipCanvas.js';
 import { buildSpConfig, autotestSetup, normalizeSpSetup } from './util/spConfig.js';
@@ -293,6 +294,13 @@ function boot() {
     go('lobby', { joinCode: params.sala });
     return;
   }
+  // a refreshed tab with a live session (token + room code in sessionStorage) goes straight back
+  // to its room; the server replays the lobby / countdown / battle state on resume
+  try {
+    const st = sessionStore();
+    const code = readString(st, STORAGE_KEYS.room, ''), token = readString(st, STORAGE_KEYS.token, '');
+    if (code && token) { go('lobby', { joinCode: code, resume: true }); return; }
+  } catch { /* storage unavailable */ }
   go('menu');
 }
 

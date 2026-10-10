@@ -122,7 +122,7 @@ const qbuf = [];
 const cand8 = [];
 const candD = [];
 
-/** Team-level coordination (SPEC §3.3), every 10 ticks, teams staggered. */
+/** Team-level coordination (SPEC §3.3), every 10 ticks, both teams on the same tick. */
 export function teamThink(state, team) {
   const T = state.teams[team], ships = state.ships, tick = state.tick, TB = getTables();
   const ours = state.alive[team], theirs = state.alive[1 - team];
