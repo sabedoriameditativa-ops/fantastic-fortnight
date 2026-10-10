@@ -169,6 +169,11 @@ export const T = {
     reconnecting: 'Reconectando…',
     connectionLost: 'Conexão perdida.',
     needName: 'Digite um nome antes de jogar online.',
+    nameTitle: 'Como quer ser chamado?',
+    namePlaceholder: 'Seu nome de comandante',
+    nameOk: 'Continuar',
+    nameRandom: 'Sortear nome',
+    nameHint: 'O nome aparece na sala, na batalha e nos resultados. Até 20 caracteres.',
   },
 
   lobby: {

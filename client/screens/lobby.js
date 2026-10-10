@@ -31,6 +31,11 @@ export function mount(root, props, ctx) {
 
   // ---- helpers ----
   const myName = () => state.playerName || 'Comandante';
+  const CALLSIGNS = ['Falcão', 'Nebulosa', 'Quasar', 'Órbita', 'Cometa', 'Vórtice', 'Zênite', 'Aurora', 'Pulsar', 'Andrômeda', 'Sirius', 'Vega'];
+  function randomCallsign() {
+    const a = CALLSIGNS[Math.floor(Math.random() * CALLSIGNS.length)];
+    return `${a}-${Math.floor(10 + Math.random() * 90)}`;
+  }
   function fail(e) { if (!disposed) ctx.toast(errorMessage(e && e.code || 'UNKNOWN', e && e.detail), 'error'); }
 
   async function ensureNet() {
@@ -50,6 +55,7 @@ export function mount(root, props, ctx) {
 
   let subscribedTo = null;
   let latTimer = null;
+  let pendingCode = null;   // room code typed / linked before the player had a name
   function subscribe() {
     if (!net || subscribedTo === net) return;
     subscribedTo = net;
@@ -117,14 +123,37 @@ export function mount(root, props, ctx) {
     async function join() {
       const code = normalizeRoomCode(codeInput.value);
       if (!isRoomCode(code)) { ctx.toast(T.mp.codeHint, 'warn'); codeInput.focus(); return; }
+      if (!state.playerName) { pendingCode = code; renderEntry(T.mp.needName); return; }
       if (!net || !net.connected) { if (!(await ensureNet())) return; }
       joinBtn.disabled = true;
       try { const room = await net.joinRoom(code); chatMessages.length = 0; renderRoom(room); }
       catch (e) { fail(e); joinBtn.disabled = false; if (view !== 'entry') renderEntry(); }
     }
+    // no name yet (first visit, or a friend's ?sala= link): ask for it right here instead of
+    // bouncing the player back to the menu; a valid code already typed is joined right after
+    let namePanel = null;
+    if (!state.playerName) {
+      const nameInput = h('input.input', { type: 'text', test: 'mp-name', maxlength: 20, placeholder: T.mp.namePlaceholder, autocomplete: 'nickname', value: '' });
+      const useName = () => {
+        const v = ctx.setPlayerName(nameInput.value);
+        if (!v) { ctx.toast(T.mp.needName, 'warn'); nameInput.focus(); return; }
+        const code = normalizeRoomCode(codeInput.value);
+        if (isRoomCode(code)) { pendingCode = null; props.joinCode = code; renderEntry(); }
+        else renderEntry();
+      };
+      nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') useName(); });
+      namePanel = h('div.panel.stack', { test: 'mp-name-panel', style: { marginBottom: '12px' } },
+        h('h2', { text: T.mp.nameTitle }),
+        h('div.row.gap.wrap', nameInput,
+          button(T.mp.nameOk, { test: 'mp-name-ok', primary: true, onClick: useName }),
+          button(T.mp.nameRandom, { test: 'mp-name-random', class: 'btn-sm', onClick: () => { nameInput.value = randomCallsign(); nameInput.focus(); } })),
+        h('div.tiny.muted', { text: T.mp.nameHint }));
+      setTimeout(() => { try { nameInput.focus(); } catch { /* ignore */ } }, 50);
+    }
     add(container, 
       head(T.mp.title, T.mp.subtitle),
-      errorText ? h('div.validation.error', { style: { marginBottom: '12px' } }, errorText, ' ', button('↻', { test: 'retry-connect', class: 'btn-sm', onClick: () => ensureNet().then((n) => { if (n) renderEntry(); }) })) : null,
+      errorText && errorText !== T.mp.needName ? h('div.validation.error', { style: { marginBottom: '12px' } }, errorText, ' ', button('↻', { test: 'retry-connect', class: 'btn-sm', onClick: () => ensureNet().then((n) => { if (n) renderEntry(); }) })) : null,
+      namePanel,
       h('div.small.muted', { test: 'conn-status', style: { marginBottom: '10px' }, text: net && net.connected ? fmt(T.mp.connected, { name: net.name }) : '' }),
       h('div.sp-grid',
         h('div.panel.stack', h('h2', { text: T.mp.createTitle }),
@@ -137,8 +166,8 @@ export function mount(root, props, ctx) {
     if (props.joinCode && isRoomCode(normalizeRoomCode(props.joinCode))) {
       codeInput.value = normalizeRoomCode(props.joinCode);
       props.joinCode = null;
-      join();
-    }
+      if (state.playerName) join(); else pendingCode = codeInput.value;
+    } else if (pendingCode) codeInput.value = pendingCode;
   }
 
   // ---- room ----
