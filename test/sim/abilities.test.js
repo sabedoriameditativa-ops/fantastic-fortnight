@@ -5,6 +5,7 @@ import { ABILITIES, FACTION_IDS, SHIPS } from '../../shared/catalog.js';
 import { ABILITY_REGISTRY, PASSIVE_ABILITIES, missingAbilities } from '../../shared/sim/abilities.js';
 import { config1v1, oneOfEachFleet } from './helpers.js';
 import { addEffect, updateStatus } from '../../shared/sim/ship.js';
+import { clearGrid, insertGrid } from '../../shared/sim/spatial.js';
 
 test('every catalog ability has a registry entry with trigger and cast', () => {
   assert.deepEqual(missingAbilities(), []);
@@ -165,4 +166,53 @@ test('keyed effects refresh instead of stacking: overlapping auras never multipl
   }
   assert.ok(casts >= 2, `pheromone casts ${casts}`);
   assert.ok(maxDmg <= p.damageMul + 1e-9, `dmgMul reached ${maxDmg}`);
+});
+
+/** Trigger context for `me` in `state` (as decide() builds it). */
+function triggerCtx(state, me) {
+  const t = me.ai.targetId > 0 ? state.ships[me.ai.targetId - 1] : null;
+  return { state, me, target: t, team: state.teams[me.team], P: state.profiles[me.owner], incoming: me.incoming, tick: state.tick, rng: state.rng };
+}
+function place(s, x, y) { s.x = x; s.y = y; }
+function regrid(state) { clearGrid(state.grid); for (const s of state.ships) if (s.alive) insertGrid(state.grid, s.id, s.x, s.y); }
+
+test('flak_curtain triggers on the swarms it is designed for: 3 tiny in flak range, 4 closing within 450, or an ally being orbited by 2', () => {
+  const a = { faction: 'terran', ships: [{ cls: 'ter_artemis', count: 1 }, { cls: 'ter_orion', count: 1 }] };
+  const b = { faction: 'vorrax', ships: [{ cls: 'vor_larva', count: 4 }] };
+  const state = createBattle(config1v1(a, b, 'flak-trigger'));
+  const art = state.ships[0], orion = state.ships[1], larvae = state.ships.slice(2);
+  const trig = ABILITY_REGISTRY.flak_curtain.trigger;
+  place(art, 1000, 800); place(orion, 1000, 1500); // ally far away
+  for (const l of larvae) place(l, 3000, 3000);
+  regrid(state);
+  assert.equal(trig(triggerCtx(state, art)), 0, 'nothing around');
+  place(larvae[0], 1200, 800); place(larvae[1], 1250, 820); regrid(state);
+  assert.equal(trig(triggerCtx(state, art)), 0, 'two tiny within 320 is not a swarm');
+  place(larvae[2], 1100, 900); regrid(state);
+  assert.equal(trig(triggerCtx(state, art)), 1, 'three tiny within 320');
+  // four closing within 450 but outside 320
+  for (const l of larvae) place(l, 3000, 3000);
+  place(larvae[0], 1400, 800); place(larvae[1], 1000, 1200); place(larvae[2], 600, 800); regrid(state);
+  assert.equal(trig(triggerCtx(state, art)), 0, 'three at 400 u');
+  place(larvae[3], 1000, 400); regrid(state);
+  assert.equal(trig(triggerCtx(state, art)), 1, 'four closing within 450');
+  // an ally within 300 orbited by two tiny
+  for (const l of larvae) place(l, 3000, 3000);
+  place(orion, 1200, 800); place(larvae[0], 1250, 850); place(larvae[1], 1150, 760); regrid(state);
+  assert.equal(trig(triggerCtx(state, art)), 1, 'ally being orbited');
+});
+
+test('overclock triggers with two OTHER Vetores on the same target (three in all, as the catalog says)', () => {
+  const a = { faction: 'ferrix', ships: [{ cls: 'fer_vetor', count: 3 }] };
+  const b = { faction: 'terran', ships: [{ cls: 'ter_orion', count: 1 }] };
+  const state = createBattle(config1v1(a, b, 'overclock-trigger'));
+  const [v1, v2, v3, orion] = state.ships;
+  place(v1, 1000, 800); place(v2, 1100, 800); place(v3, 1000, 900); place(orion, 1500, 800); regrid(state);
+  v1.ai.targetId = orion.id; v2.ai.targetId = orion.id; v3.ai.targetId = 0;
+  const trig = ABILITY_REGISTRY.overclock.trigger;
+  assert.equal(trig(triggerCtx(state, v1)), 0, 'one other Vetor on my target');
+  v3.ai.targetId = orion.id;
+  assert.equal(trig(triggerCtx(state, v1)), 1, 'two other Vetores on my target');
+  place(v3, 1000, 1300); regrid(state); // beyond 400 u
+  assert.equal(trig(triggerCtx(state, v1)), 0, 'a pack member too far away does not count');
 });

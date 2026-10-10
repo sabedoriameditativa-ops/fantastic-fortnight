@@ -134,3 +134,30 @@ test('point defense never engages a projectile in the tick it was launched (spaw
   assert.ok(!p.alive, 'intercepted the tick after launch');
   assert.ok(state.events.some((e) => e[0] === 'pend' && e[1] === p.id && e[2] === 2));
 });
+
+test('heavy-alpha weapons skip a gnat target when a more valuable enemy is shootable; the ship target is unchanged', () => {
+  const a = { faction: 'terran', ships: [{ cls: 'ter_prometeu', count: 1 }] };
+  const b = { faction: 'vorrax', ships: [{ cls: 'vor_larva', count: 1 }, { cls: 'vor_mandibula', count: 1 }] };
+  const state = createBattle(config1v1(a, b, 'alpha-waste'));
+  const prom = state.ships[0], larva = state.ships.find((s) => s.cls === 'vor_larva'), mand = state.ships.find((s) => s.cls === 'vor_mandibula');
+  const rail = prom.weapons[0];
+  assert.equal(rail.def.type, 'railgun');
+  const freeze = () => { for (const s of state.ships) { for (const w of s.weapons) w.readyAt = 1e9; s.ability.readyAt = 1e9; s.ai.nextThink = 1e9; s.vx = 0; s.vy = 0; } };
+  const regrid = () => { clearGrid(state.grid); for (const s of state.ships) insertGrid(state.grid, s.id, s.x, s.y); };
+  const railShot = (ev) => ev.find((e) => (e[0] === 'shot' && e[1] === prom.id && e[3] === 0) || (e[0] === 'proj' && e[2] === prom.id && e[4] === 0));
+  const dstOf = (e) => (e[0] === 'shot' ? e[2] : e[3]);
+  // both enemies dead ahead inside the railgun arc and range; the larva is the ship's target
+  freeze(); prom.heading = 0;
+  larva.x = prom.x + 300; larva.y = prom.y + 20; mand.x = prom.x + 450; mand.y = prom.y - 30; regrid();
+  prom.ai.targetId = larva.id;
+  rail.readyAt = state.tick;
+  const shot = railShot(stepBattle(state));
+  assert.ok(shot, 'railgun fired');
+  assert.equal(dstOf(shot), mand.id, 'the 150-dmg shot goes to the Mandíbula, not the 36-hp larva');
+  assert.equal(prom.ai.targetId, larva.id, 'movement target untouched');
+  // with no better target in reach the gnat is still shot
+  freeze(); prom.heading = 0; mand.x = prom.x + 2000; regrid();
+  rail.readyAt = state.tick;
+  const shot2 = railShot(stepBattle(state));
+  assert.ok(shot2 && dstOf(shot2) === larva.id, 'gnat shot when nothing better is shootable');
+});

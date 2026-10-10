@@ -141,10 +141,25 @@ export const ABILITY_REGISTRY = {
     trigger(ctx) {
       const { me, state } = ctx;
       if (incomingInterceptablesNear(state, me, 300) >= th(ctx, 3)) return 1;
-      enemiesWithin(state, me, 320, buf);
-      let tiny = 0;
-      for (let i = 0; i < buf.length; i++) if (buf[i].sizeIdx === 0) tiny++;
-      return tiny >= th(ctx, 6) ? 1 : 0;
+      // a swarm: ≥ 3 tiny inside flak range, ≥ 4 closing within 450, or an ally within 300 being orbited by ≥ 2 tiny
+      enemiesWithin(state, me, 450, buf);
+      let near = 0, far = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const e = buf[i];
+        if (e.sizeIdx !== 0) continue;
+        far++;
+        if (dist(me, e) <= 320) near++;
+      }
+      if (near >= th(ctx, 3) || far >= th(ctx, 4)) return 1;
+      if (far < 2) return 0;
+      alliesWithin(state, me, 300, buf2);
+      for (let i = 0; i < buf2.length; i++) {
+        const a = buf2[i];
+        let on = 0;
+        for (let k = 0; k < buf.length; k++) if (buf[k].sizeIdx === 0 && dist(a, buf[k]) <= 120) on++;
+        if (on >= 2) return 1;
+      }
+      return 0;
     },
     cast(ctx) {
       const me = ctx.me, p = P('flak_curtain');
@@ -485,7 +500,7 @@ export const ABILITY_REGISTRY = {
       alliesWithin(state, me, 400, buf);
       let n = 0;
       for (let i = 0; i < buf.length; i++) if (buf[i].cls === 'fer_vetor' && buf[i].ai.targetId === t) n++;
-      return n >= th(ctx, 3) ? 1 : 0;
+      return n >= th(ctx, 2) ? 1 : 0; // two OTHER Vetores on my target = the three of the catalog text
     },
     cast(ctx) {
       addEffect(ctx.me, ctx.tick + dur('overclock'), { fireRateMul: P('overclock').fireRateMul, boosted: true }, 'overclock');

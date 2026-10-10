@@ -120,17 +120,22 @@ every tick. Terminology from `docs/design/battle-ai.md` §2–3.
 |---|---|---|---|
 | diver | tiny ships, Zangão, Carrapato | `orbit` target at 0.6·range (tangent by id parity) | ignore formation once engaged; prefer support/carrier/kiter targets behind the line |
 | brawler | Falcão, Órion, Hércules, Mandíbula, Rainha, Ressonante, Serafim, Disruptor, Bastião | `hold` at 0.7·range | |
-| kiter | Cuspidor, Prisma, Harmônico, Sentinela, Aríete, Catedral | `kite` band 0.75–0.95·range | backs away from faster threats while firing |
+| kiter | Cuspidor, Prisma, Harmônico, Sentinela, Aríete, Catedral | `kite` band 0.75–0.95·range | backs off below 0.75·range until past 0.85·range (dead band; heading is the memory); a fixed gun (arc < 180°) backs off only from a threat it outruns by enough to pay for turning around to shoot (`(speed − t.speed)·cooldown > t.speed·2·(180° − arc)/turnRate`) and, whenever the gun is ready with an enemy in reach but outside the arc, turns to face it for the shot if that turn costs ≤ 0.5·cooldown; in the band turrets strafe along the tangent, fixed guns with arc ≥ 80° strafe 10° inside the arc (target stays in arc), narrower guns stand and face the target |
 | striker | Lança | `approach` to 0.8·range, fire, then `kite` | uses stealth to close |
 | escort | Ártemis | `escortSlot` 60 u in front of the most valuable ally | engages anything within 1.2·range |
-| support | Véu | `escortSlot` behind the most valuable ally | targets by ability |
-| carrier | Atlas, Matriz, Fabricador, Núcleo | `backline`: 250 u behind the team centroid toward own side; flee threats within 200 u | |
-| anchor | motherships | `hold`, speed ≤ 0.6·max, advances slowly with the team | |
+| support | Véu | `escortSlot` behind the medium+ ship of the fighting line nearest the line centroid (whole team) | never another support or a tiny; without such a ship the most valuable non-support within 500 u, then the anchor; targets by ability |
+| carrier | Atlas, Matriz, Fabricador, Núcleo | `backline`: 250 u behind the front third of the line (on the enemy-centroid → line-centroid axis); when the nearest enemy is beyond 0.9·own gun range and the carrier outranges it (`e.maxRange < 0.9·gun range`), pulled toward it by ≤ 125 u; 40 u dead band; flee threats within 200 u | a carrier a line ship outguns (Matriz spores 300 u vs 450 u autocannons) or with point defense only never steps up: its worth is what it launches |
+| anchor | motherships | `hold` at max(0.7·engageRange, 0.85·main-gun range), speed ≤ 0.6·max, advances toward the enemy mass only while behind the front third of the line (minus 60 u), or when no line ship is left | never leads the fleet |
+
+Brawlers with turret guns (arc ≥ 180°) keep a stand-off in `hold`: back off at 0.6·max below 0.45·range until past 0.6·range (fixed-gun brawlers only stop).
+Ships in `escortSlot` (near the slot), `kite` or `retreat` whose fixed-arc main gun is ready while an enemy is within its reach but outside the arc turn to face that enemy for the shot (if the turn costs ≤ 0.5·cooldown), then move on.
 
 Other modes: `formation` (advance phase: keep slot relative to the team anchor, move at
 the group speed = slowest non-diver alive ship), `retreat` (to nearest support/carrier or
 rear point; hull < threshold by role: diver 0.35, kiter 0.4, brawler 0.25, escort/support 0.45;
-exit at +0.2 or when alone; a retreat ended by the 10 s cap starts a 15 s cooldown before another; hulls that cannot regenerate exit when shield ≥ 60% of cap), `idleAdvance` (no target: move toward enemy centroid at 0.5·max).
+hulls that cannot regenerate enter only with shield < 30% of cap and exit when shield ≥ 60%; others exit at +0.2;
+also exits when alone or by the 10 s cap; EVERY exit starts a 15 s cooldown before another retreat (no flip-flop);
+spawned units (cost 0) and tiny ships cheaper than 20 never retreat; a larva below 50% hull with an enemy within 250 u dives at the nearest enemy instead), `idleAdvance` (no target: move toward enemy centroid at 0.5·max).
 
 Phases: `advance` until first contact (any ship within 1.1·range of an enemy) or 45 s,
 then `engage` (`['phase','engage']`).
@@ -149,15 +154,26 @@ switch target only if best > current·1.25 + 0.05, or current invalid, or commit
 ```
 Weights per role as in `docs/design/battle-ai.md` §2.3. Weapons with `minTargetClass` or
 `pd` select their own sub-targets each tick (PD: nearest interceptable projectile, then
-nearest enemy).
+nearest enemy). A heavy-alpha weapon (damage × salvo ≥ 60) whose effective damage exceeds
+2× the ship target's hp+shield picks the shootable enemy with the best min(ehp, damage)×accuracy
+instead (the ship target, i.e. movement, is unchanged). The per-tick fallback that gives a
+target-less ship the nearest enemy prefers, for a main gun hitting for ≥ 100 per trigger pull,
+the nearest enemy with ehp ≥ half that hit.
 
 ### 3.3 Team coordination (`teamThink`, every 10 ticks, both teams on the same tick)
 - Team centroid (cost-weighted), anchor (mothership → highest-cost capital → virtual), phase.
+- Front of the line (`frontDist`): distance from the enemy centroid of the ship at the first
+  third of the purchased non-diver/carrier/anchor ships sorted nearest-first (carriers hold
+  behind it, the anchor never advances past it).
 - Greedy focus allocation: iterate own ships by (long-range first, then id), assign each the
-  best enemy by `(cost/ehp) × dmgMult × proximity × (allocDps·3 < ehp ? 1 : 0.3) × (enemy is
-  targeting a low-hp ally ? 1.5 : 1)`; `allocDps` accumulates. Assignment is a suggestion
-  (`W.team`), not an order.
-- Protectees for escorts/supports: highest-cost ally within 500 u.
+  best enemy by `(cost/ehp) × dmgMult × proximity × (enemy is targeting a low-hp ally ? 1.5 : 1)`;
+  `allocDps` accumulates. A target whose ehp the allocated dps kills within 2 s is saturated
+  (score × 0.3) and takes no further ships while an unsaturated candidate exists (focus spills
+  to the next target). Assignment is a suggestion (`W.team`), not an order.
+- Protectees: escorts take the highest-cost ally within 500 u; supports take the medium+ ship of
+  the fighting line (brawler/kiter/escort/striker) nearest the line centroid, searched over the
+  whole team, never another support nor a tiny; without one, the most valuable non-support
+  non-tiny ally within 500 u; else the anchor.
 - Leash: non-divers stay within 350 u (advance) / 900 u (engage) of the anchor.
 
 ### 3.4 Expected incoming damage
@@ -170,12 +186,12 @@ damage of projectiles in flight toward me. Used by retreat, shields, teleports, 
 | afterburner | target farther than range+100 and < 3·range, or retreating with incoming > 30% hp, or targeted by ≥ 3 |
 | countermeasures | ≥ 1 interceptable projectile homing on self |
 | stealth_strike | enemy large+ within 700 and torpedo ready within 2 s; stays untargetable until it fires |
-| flak_curtain | ≥ 3 enemy interceptables in flight toward allies within 300, or ≥ 6 enemy tiny within 320 |
+| flak_curtain | ≥ 3 enemy interceptables in flight toward allies within 300, or a swarm: ≥ 3 enemy tiny within 320, ≥ 4 within 450, or an ally within 300 with ≥ 2 tiny within 120 u of it |
 | barrage_fire | ≥ 2 enemy medium+ within 520 or enemy capital+ in range |
 | reactive_armor | hull < 60% or targeted by ≥ 3 |
 | launch_squadron | ready and (tick < 60 or enemy within 1000) |
 | siege_protocol | ≥ 50% of allied surviving cost within 600 and ≥ 3 enemies within 700 |
-| bile_burst | passive: on death (and when hull < 20% the larva dives into the nearest enemy and detonates) |
+| bile_burst | passive: on death (and when hull < 50% with an enemy within 250 u the larva dives into the nearest enemy and detonates; larvae never retreat) |
 | frenzy | an allied Vorrax died within 150 u in the last 10 ticks |
 | acid_cloud | ≥ 2 enemies within a 100 u circle inside range (densest point) |
 | leech | enemy medium+ within 150 u; detaches if host dies/teleports (0.5 s stun) |
@@ -190,7 +206,7 @@ damage of projectiles in flight toward me. Used by retreat, shields, teleports, 
 | phase_jump | defensive: shield < 25% and ≥ 2 enemies within 300 → away from enemy centroid; offensive: shield > 80%, no enemy within 480, enemy capital+ within 900 → toward it |
 | aurora | ≥ 3 allies within 400 with shield < 50% |
 | singularity | ≥ 4 enemies or ≥ 2 medium+ within a 250 u circle inside 800 u |
-| overclock | ≥ 3 other Vetores targeting my target |
+| overclock | ≥ 2 other Vetores within 400 u targeting my target (3 Vetores on one target, as the catalog says) |
 | turret_mode | no enemy within 250 and an enemy within 1.5·range |
 | emp_pulse | enemy with shield > 50% within 150 or enemy organic medium+ within 150 |
 | reactive_nanites | hull < 35% |
