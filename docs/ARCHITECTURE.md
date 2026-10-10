@@ -171,6 +171,9 @@ export function stepBattle(state) → SimEvent[]      // advances exactly one ti
 export function makeSnapshot(state) → Snapshot
 export function getResult(state) → BattleResult | null
 export function hashState(state) → string            // hex; identical for identical (config, tick)
+// test/sim/golden.test.js pins hashState at ticks 100/1000/end + the outcome of three fixed battles
+// (test/sim/golden.json). An intentional balance/AI/engine change regenerates it:
+//   node test/sim/golden.test.js --update
 export function runToEnd(config, { onTick } = {}) → BattleResult
 export function battleWorld(state) → { w, h }
 export const AI_PROFILES  // re-export from levels.js for convenience
@@ -411,7 +414,7 @@ export const audio = {
 - `node tools/simulate.js --matrix --seeds 20` (all presets × all presets, prints win-rate table)
 - `node tools/simulate.js --factions --seeds 20` (faction × faction pooled over presets)
 - `node tools/simulate.js --difficulty --seeds 30` (each difficulty vs a normal preset fleet)
-- Unit tests run with `npm test` (node:test, `test/**/*.test.js`). E2E with `npm run e2e` (Playwright, Chromium at `/opt/pw-browsers`, module at `/opt/node-tools/node_modules/playwright/index.mjs` with fallback to `import('playwright')`).
+- Unit tests run with `npm test` (node:test, `test/**/*.test.js`; the slow ability sweep uses 4 seeds by default) and `npm run test:full` (`FE_SEEDS=10`, the SPEC sample sizes; what CI runs). The golden fixture (`test/sim/golden.json`) must be regenerated with `node test/sim/golden.test.js --update` whenever a simulation outcome changes on purpose. E2E with `npm run e2e` (Playwright, Chromium at `/opt/pw-browsers`, module at `/opt/node-tools/node_modules/playwright/index.mjs` with fallback to `import('playwright')`).
 
 ## 7. Conventions
 

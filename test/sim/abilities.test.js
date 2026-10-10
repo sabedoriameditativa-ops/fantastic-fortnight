@@ -41,7 +41,8 @@ const OPPORTUNITY = {
 const OPP_IDS = Object.keys(OPPORTUNITY);
 
 test('1v1 one-of-each-class: every non-passive ability casts in ≥ 80% of 10 seeds (conditional ones: whenever their trigger is met)', () => {
-  const SEEDS = 10;
+  // FE_SEEDS=10 (npm run test:full / CI) is the SPEC sample; the default keeps the inner loop fast
+  const SEEDS = Math.max(4, Math.min(10, Number(process.env.FE_SEEDS) || 4));
   const cache = new Map(); // "fa|fb" → per seed { casts: Set<abilityId>, opportunity: Set<abilityId> }
   const castsFor = (fa, fb) => {
     const key = `${fa}|${fb}`;

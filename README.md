@@ -219,6 +219,7 @@ reduzido, qualidade dos efeitos, nomes e grade padrão, seu nome, e pode zerar o
 
 ```bash
 npm test                     # testes unitários (node:test, test/**/*.test.js)
+npm run test:full            # o mesmo com as amostras completas da SPEC (FE_SEEDS=10; é o que o CI roda)
 npm run e2e                  # ponta a ponta no Chromium (Playwright): sobe o servidor
                              # numa porta livre e joga partidas reais pelo navegador
 npm run simulate -- --help   # simulador headless (frota × frota, matrizes, dificuldade)

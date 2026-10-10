@@ -1,0 +1,26 @@
+{
+  "1v1-ter_linha-vs-vor_mare": {
+    "t100": "4bf09b5f",
+    "t1000": "65c7a6c8",
+    "end": "caf3aff2",
+    "winner": 1,
+    "reason": "elimination",
+    "ticks": 1345
+  },
+  "2v2-mixed-factions": {
+    "t100": "c1717c3d",
+    "t1000": "b2e0e5d3",
+    "end": "b173e0a2",
+    "winner": 0,
+    "reason": "elimination",
+    "ticks": 1539
+  },
+  "6v6-all-presets-2500": {
+    "t100": "ac74d652",
+    "t1000": "83223cfe",
+    "end": "d296210f",
+    "winner": 1,
+    "reason": "elimination",
+    "ticks": 1627
+  }
+}

@@ -13,7 +13,8 @@
     "setup": "npm install --omit=dev --no-audit --no-fund",
     "test": "node --test \"test/**/*.test.js\"",
     "simulate": "node tools/simulate.js",
-    "e2e": "node test-e2e/run.js"
+    "e2e": "node test-e2e/run.js",
+    "test:full": "FE_SEEDS=10 node --test \"test/**/*.test.js\""
   },
   "license": "MIT",
   "dependencies": {
