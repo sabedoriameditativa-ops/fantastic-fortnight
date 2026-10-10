@@ -8,7 +8,8 @@ import { isLevelCleared } from '../util/storage.js';
 import { normalizeSpSetup } from '../util/spConfig.js';
 import { DIFFICULTIES, TEAM_SIZES, DEFAULT_BUDGET } from '/shared/constants.js';
 import { FACTIONS, SHIPS } from '/shared/catalog.js';
-import { LEVELS, levelInfo, enemyBudget, levelBuilder } from '/shared/levels.js';
+import { LEVELS, levelInfo } from '/shared/levels.js';
+import { spLevelInfo } from '../util/spConfig.js';
 import { AI_PROFILES } from '/shared/aiProfiles.js';
 import { validateFleet } from '/shared/fleet.js';
 
@@ -52,17 +53,21 @@ export function mount(root, props, ctx) {
 
   function renderInfo() {
     const lv = levelInfo(setup.level);
-    const budget = enemyBudget(lv, setup.difficulty, DEFAULT_BUDGET);
-    const builder = levelBuilder(lv, setup.difficulty);
+    const li = spLevelInfo(setup, DEFAULT_BUDGET);
+    const builder = li.builder;
     const faction = FACTIONS[lv.enemyFaction];
-    const boss = lv.boss && SHIPS[lv.boss] ? SHIPS[lv.boss].name : lv.bossSizeClass ? T.builder.sizeClass[lv.bossSizeClass] : null;
+    const bossNames = (li.bosses || []).map((id) => (SHIPS[id] ? SHIPS[id].name : null)).filter(Boolean);
+    const boss = bossNames.length ? [...new Set(bossNames)].join(', ') : lv.bossSizeClass ? T.builder.sizeClass[lv.bossSizeClass] : null;
+    const builderLabel = `${T.sp.builder[builder] || builder}${li.preset ? `: ${li.preset.name}` : ''}`;
     clear(info);
     add(info, 
       h('div.lv-name', { test: 'level-name', text: `${T.sp.level} ${lv.n} · ${lv.name}` }),
       h('p.small', { text: lv.desc }),
       h('dl.kv',
         h('dt', T.sp.enemyFaction), h('dd', faction ? h('span', { class: `f-${faction.id}` }, faction.name) : T.sp.randomFaction),
-        h('dt', T.sp.enemyBudget), h('dd', { test: 'enemy-budget' }, `${num(budget)} ${T.app.points}`, h('span.muted.small', ` (${T.sp.builder[builder]})`)),
+        h('dt', T.sp.enemyBudget), h('dd', { test: 'enemy-budget' }, `${num(li.enemySpendable)} ${T.app.points}`, li.budgetCapped ? h('span.muted.small', ` ${fmt(T.sp.budgetOf, { n: num(li.enemyBudget) })}`) : null, h('span.muted.small', ` (${builderLabel})`)),
+        li.enemyAi && li.enemyAi !== setup.difficulty ? h('dt', T.sp.enemyAi) : null,
+        li.enemyAi && li.enemyAi !== setup.difficulty ? h('dd.warn', { test: 'enemy-ai', text: difficultyName(li.enemyAi) }) : null,
         h('dt', T.sp.yourBudget), h('dd', `${num(DEFAULT_BUDGET)} ${T.app.points}`),
         boss ? h('dt', '★') : null, boss ? h('dd.warn', { text: fmt(T.sp.boss, { name: boss }) }) : null,
       ),

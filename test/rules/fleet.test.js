@@ -1,11 +1,11 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  fleetCost, fleetShipCount, normalizeFleet, validateFleet, presetFleet, autoComplete,
+  fleetCost, fleetShipCount, normalizeFleet, validateFleet, presetFleet, autoComplete, maxFleetValue,
   fleetSummary, fleetToArray, sizeClassCap, isFleetShape, FLEET_ERR, MAX_SINGLE_SHIP_FRACTION,
 } from '../../shared/fleet.js';
 import { FLEET_LIMITS, BUDGETS } from '../../shared/constants.js';
-import { SHIPS, SIZE_CLASSES, SIZE_CLASS, PRESET_LIST, FACTION_IDS, shipsOfFaction } from '../../shared/catalog.js';
+import { SHIPS, SIZE_CLASSES, SIZE_CLASS, PRESET_LIST, FACTION_IDS, shipsOfFaction, presetsOfFaction } from '../../shared/catalog.js';
 import { createRng } from '../../shared/rng.js';
 
 const BUDGET_POINTS = Object.values(BUDGETS).map((b) => b.points); // 800, 1500, 2500
@@ -95,7 +95,7 @@ describe('validateFleet error codes', () => {
   test('FLEET_OVER_BUDGET', () => {
     const r = validateFleet({ faction: 'terran', ships: [{ cls: 'ter_prometeu', count: 1 }, { cls: 'ter_atlas', count: 2 }] }, 800);
     assert.equal(r.code, FLEET_ERR.OVER_BUDGET);
-    assert.equal(r.detail.cost, 500 + 640);
+    assert.equal(r.detail.cost, SHIPS.ter_prometeu.cost + 2 * SHIPS.ter_atlas.cost);
     assert.equal(validateFleet({ faction: 'terran', ships: [{ cls: 'ter_prometeu', count: 1 }, { cls: 'ter_atlas', count: 2 }] }, 1500).ok, true);
   });
 
@@ -171,6 +171,48 @@ describe('presetFleet', () => {
     assert.ok(mare.cost >= 2300, `vor_mare@2500 should trade larvae up, got ${mare.cost}`);
   });
 
+  test('endless budgets: past the 40-ship cap the upgrade pass keeps trading up through the whole roster', () => {
+    // a swarm preset at a deep endless budget climbs out of its own entries into larger hulls
+    const costAt = (id, budget) => fleetSummary(presetFleet(id, budget)).cost;
+    for (const id of ['vor_mare', 'fer_ferro', 'ter_misseis', 'lum_dissonancia']) {
+      const c2500 = costAt(id, 2500), c3500 = costAt(id, 3500), c5000 = costAt(id, 5000);
+      assert.ok(c3500 > c2500, `${id}: 3500 buys more than 2500 (${c2500} → ${c3500})`);
+      assert.ok(c5000 >= c3500, `${id}: never regresses (${c3500} → ${c5000})`);
+      const f = presetFleet(id, 5000);
+      assert.equal(fleetShipCount(f), 40, `${id}@5000 is at the ship cap`);
+      assert.equal(validateFleet(f, 5000).ok, true);
+      assert.ok(f.ships.filter((e) => SHIPS[e.cls].sizeClass === 'mothership').reduce((s, e) => s + e.count, 0) <= 1);
+      const sizes = new Set(f.ships.map((e) => SHIPS[e.cls].sizeClass));
+      assert.ok(sizes.has('large') || sizes.has('capital'), `${id}@5000 upgraded into heavy hulls (${[...sizes]})`);
+    }
+    // the climb is gradual: between 2500 and 3500 the fleet keeps most of its mid-size hulls
+    const mare3500 = fleetSummary(presetFleet('vor_mare', 3500));
+    assert.ok(mare3500.bySize.tiny + mare3500.bySize.small >= 10, `vor_mare@3500 still a swarm (${JSON.stringify(mare3500.bySize)})`);
+    // the ceiling: the most valuable 40-ship fleet of the faction; the bot flow
+    // (presetFleet → autoComplete) approaches it for every preset
+    for (const f of FACTION_IDS) {
+      const max = maxFleetValue(f);
+      assert.ok(max > 3000 && max <= 40 * 520, `${f}: ${max}`);
+      for (const p of presetsOfFaction(f)) {
+        const alone = fleetSummary(presetFleet(p.id, 20000));
+        assert.ok(alone.cost <= max, `${p.id}@20000: ${alone.cost} ≤ ${max}`);
+        const huge = fleetSummary(autoComplete(presetFleet(p.id, 20000), 20000, createRng(p.id)));
+        assert.equal(huge.count, 40, `${p.id}@20000 fills the cap`);
+        assert.ok(huge.cost <= max && huge.cost >= max * 0.85, `${p.id}@20000 approaches the ceiling (${huge.cost}/${max})`);
+        assert.equal(validateFleet(autoComplete(presetFleet(p.id, 20000), 20000, createRng(p.id)), 20000).ok, true);
+      }
+    }
+  });
+
+  test('maxFleetValue is the greedy costliest fleet under the caps (hand check for Terran)', () => {
+    const t = shipsOfFaction('terran');
+    const cost = (id) => t.find((s) => s.id === id).cost;
+    // 1 mothership + 2 capitals + 4 large + 12 medium (the costlier medium first) + 21 of the costlier small = 40 ships
+    const expected = cost('ter_prometeu') + 2 * cost('ter_atlas') + 4 * cost('ter_hercules') + 12 * cost('ter_orion') + 21 * cost('ter_falcao');
+    assert.equal(maxFleetValue('terran'), expected);
+    assert.ok(maxFleetValue('vorrax') > 0 && maxFleetValue('lumen') > 0 && maxFleetValue('ferrix') > 0);
+  });
+
   test('mustInclude forces the boss in even when the anchor rule would skip it', () => {
     const f = presetFleet('vor_mare', 800, { mustInclude: ['vor_colmeia'] });
     assert.ok(f.ships.some((e) => e.cls === 'vor_colmeia'));
@@ -214,10 +256,15 @@ describe('autoComplete', () => {
     assert.deepEqual(autoComplete({ faction: 'nope', ships: [] }, 1500, createRng(1)), { faction: 'nope', ships: [] });
   });
 
-  test('stops when nothing fits (full fleet unchanged)', () => {
+  test('stops when nothing fits: a full fleet at its own cost is unchanged; with budget left it trades the cheapest hulls up', () => {
     const full = { faction: 'terran', ships: [{ cls: 'ter_vespa', count: 24 }, { cls: 'ter_falcao', count: 16 }] };
-    const f = autoComplete(full, 2500, createRng(9));
-    assert.deepEqual(f, normalizeFleet(full));
+    assert.deepEqual(autoComplete(full, fleetCost(full), createRng(9)), normalizeFleet(full));
+    const up = autoComplete(full, 2500, createRng(9));
+    assert.equal(fleetShipCount(up), 40);
+    assert.ok(fleetCost(up) > fleetCost(full) && fleetCost(up) <= 2500, `trades up (${fleetCost(up)})`);
+    assert.ok(up.ships.find((e) => e.cls === 'ter_vespa').count < 24, 'the cheapest hulls were traded');
+    assert.equal(validateFleet(up, 2500).ok, true);
+    assert.deepEqual(up, autoComplete(full, 2500, createRng(1)), 'the upgrade pass is deterministic (no rng)');
   });
 });
 

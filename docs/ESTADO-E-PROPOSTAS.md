@@ -78,18 +78,18 @@ controlada pela IA "especialista", como no jogo), matriz de 1.728 batalhas entre
 
 | Grav. | Problema | Evidência | Status |
 |---|---|---|---|
-| Alta | Escada de níveis em penhasco (fácil até o 5, impossível do 13) | Orçamento inimigo ×1,2/1,3/1,5 nos níveis 13–15 **e** construtor de contra-ataque, multiplicado ainda pelo `budgetMul` da dificuldade; com +10 % de orçamento o jogador já cai para 29 % | Corrigido nesta rodada (teto do orçamento efetivo, rampa na qualidade da IA, construtor por nível) |
-| Alta | Enxame de Falcão domina | 0,713 de dano/s por ponto contra 0,13–0,36 das naves grandes; 100 % dos 38 duelos de classe | Corrigido nesta rodada (custo/dano do Falcão e curva de eficiência) |
-| Alta | Pares de presets 0 em 40 | ter_linha × lum_coro, ter_misseis × ter_linha, fer_fabrica × lum_coro 0/40; vor_garras × vor_chuva 7/40 | Corrigido nesta rodada (ajuste dos piores pares; teste `npm run balance`) |
-| Média | Níveis iniciais vazios (inimigo com 3–4 naves) | Nível 1 usa 0,5× do orçamento e o construtor aleatório gasta só 60–85 % | Corrigido nesta rodada |
-| Média | Modo sem fim para de escalar no teto de 40 naves, mas a tela anuncia 7.200 pts | Inimigo gasta ~3.000 pts a partir da onda 5 em qualquer orçamento | Corrigido nesta rodada (melhoria entre classes acima do teto e valor real exibido) |
+| Alta | Escada de níveis em penhasco (fácil até o 5, impossível do 13) | Orçamento inimigo ×1,2/1,3/1,5 nos níveis 13–15 **e** construtor de contra-ataque, multiplicado ainda pelo `budgetMul` da dificuldade; com +10 % de orçamento o jogador já cai para 29 % | Corrigido nesta rodada (teto do orçamento efetivo 1,0/1,10/1,15/1,25; construtor e preset explícitos por nível; Normal agora 100 % no 1, ~50 % no 8, 29–42 % nos 13–15, nenhum nível impossível) |
+| Alta | Enxame de Falcão domina | 0,713 de dano/s por ponto contra 0,13–0,36 das naves grandes; 100 % dos 38 duelos de classe | Corrigido nesta rodada (Falcão a 60 pts e 7 de dano; enxames legais caem para 44–56 %; nenhuma nave vence 100 % dos duelos) |
+| Alta | Pares de presets 0 em 40 | ter_linha × lum_coro, ter_misseis × ter_linha, fer_fabrica × lum_coro 0/40; vor_garras × vor_chuva 7/40 | Parcial (pares citados ter_misseis × ter_linha e vor_garras × vor_chuva na faixa; facções em 35–65 %; ainda há ~20 de 66 pares fora de 15–85 % a 20 sementes, rastreados por `npm run balance`) |
+| Média | Níveis iniciais vazios (inimigo com 3–4 naves) | Nível 1 usa 0,5× do orçamento e o construtor aleatório gasta só 60–85 % | Corrigido nesta rodada (construtor aleatório gasta 85–100 %; níveis 1–3 a 0,65/0,75/0,85×) |
+| Média | Modo sem fim para de escalar no teto de 40 naves, mas a tela anuncia 7.200 pts | Inimigo gasta ~3.000 pts a partir da onda 5 em qualquer orçamento | Corrigido nesta rodada (acima do teto de 40 naves o bot troca cascos baratos por caros; a tela mostra o valor realmente gasto) |
 | Média | Batalhas decididas nos primeiros 20 s; morte súbita e relógio de 4:00 são conteúdo morto | 90 % das mortes até 48 s; 19 de 1.920 batalhas chegam à morte súbita | Proposto (ver P7) |
 | Média | Sem progressão: nada bloqueado, sem estrelas/pontuação/desbloqueios | Todos os 15 níveis clicáveis num perfil novo; `sp.levelLocked` nunca é usado | Proposto (P2, P3) |
 | Média | "Nível concluído" vale em 2v2–6v6 mesmo com 13–18 % do dano do time | Aliados Especialista + inimigo Fácil limpam a campanha | Corrigido nesta rodada (contribuição mínima e teto da dificuldade dos aliados) |
 | Média | Orçamentos 800/2.500 inexistem no modo um jogador e os presets degradam neles | A 800 a nave-mãe some do preset; a 2.500 vor_mare vira 8 portadoras | Proposto (P8) |
-| Baixa | Naves que nunca valem a pena (Matriz, Véu, Luz Primordial, Prometeu) | Duelos 0–16 %; dano/s por ponto 0,04–0,13 | Parcial (curva de eficiência); resto em P4 |
-| Baixa | Texto do nível não bate com o inimigo em Difícil/Especialista | "Corvetas patrulham a fronteira" vira "frota de contra-ataque" | Corrigido nesta rodada (construtor explícito por nível) |
-| Baixa | Critérios de balanceamento da SPEC §8 não têm teste | Só existe o teste de espelho | Corrigido nesta rodada (`tools/balance-check.js`) |
+| Baixa | Naves que nunca valem a pena (Matriz, Véu, Luz Primordial, Prometeu) | Duelos 0–16 %; dano/s por ponto 0,04–0,13 | Parcial (curva de eficiência por custo reequilibrada: Atlas, Prometeu, Matriz, Véu mais baratos; portadoras ainda dependem das unidades geradas) |
+| Baixa | Texto do nível não bate com o inimigo em Difícil/Especialista | "Corvetas patrulham a fronteira" vira "frota de contra-ataque" | Corrigido nesta rodada (cada nível declara construtor, preset, chefe e nível de IA) |
+| Baixa | Critérios de balanceamento da SPEC §8 não têm teste | Só existe o teste de espelho | Corrigido nesta rodada (`tools/balance-check.js` / `npm run balance` + testes da curva de orçamento) |
 
 ### Propostas
 

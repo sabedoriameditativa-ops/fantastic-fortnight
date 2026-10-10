@@ -229,23 +229,61 @@ Effects of the same ability id refresh (longest duration wins) instead of stacki
 | teamWeight (focus fire) | 0 | 0.5 | 1 | 1 |
 | overkillAvoid | off | off | on | on |
 | retreat / formation / kiting | off | on | on | on |
-| budgetMul (enemy budget) | 0.8 | 1.0 | 1.05 | 1.2 |
-| builder | random | preset | counter | counter |
+| budgetMul (enemy budget) | 0.85 | 1.0 | 1.0 | 1.05 |
+| budgetCap (effective enemy budget ceiling, §4) | 1.0 | 1.10 | 1.15 | 1.25 |
+| builder (default; levels name their own, §4) | random | preset | counter | counter |
+
+Difficulty ramps through the AI knobs; the budget steps are deliberately small (budget
+dominates skill: a 10% budget edge alone costs the player ~20–35 points of win rate).
 Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
 
 ## 4. Single-player
 - Setup: level (1–15, endless after), difficulty, team size (1v1..6v6). Allies are bots of
   the player's chosen ally difficulty (default normal) with random factions and preset
   fleets; enemies follow the level.
-- Enemy budget = `round(1500 × level.enemyBudgetMul × profile.budgetMul)`; the player always has 1500.
-- Levels: 1 Primeiro Contato (terran ×0.5, random builder), 2 Patrulha de Fronteira (terran ×0.6),
-  3 Bloqueio Orbital (terran ×0.7), 4 Ninho Vorrax (vorrax ×0.7), 5 Maré Viva (vorrax ×0.8),
-  6 A Rainha Desperta (vorrax ×0.9, boss: Rainha guaranteed), 7 Luz Distante (lumen ×0.85),
-  8 Coro de Cristal (lumen ×0.95), 9 Catedral Errante (lumen ×1.0, boss Catedral),
-  10 Sinal Ferrix (ferrix ×0.95), 11 Linha de Ferro (ferrix ×1.05), 12 Mente Primária (ferrix ×1.15, boss),
-  13 Aliança Rompida (random ×1.2, counter builder), 14 Armada Negra (random ×1.3, counter),
-  15 Fim dos Tempos (random ×1.5, counter + mothership guaranteed). Level n > 15: random,
-  ×(1.5 + 0.1·(n−15)). Progress (max level cleared per difficulty) in `localStorage`.
+- Enemy budget = `round(1500 × min(level.enemyBudgetMul × profile.budgetMul, profile.budgetCap))`
+  (`levels.js effectiveBudgetMul`); the player always has 1500. The ladder ramps through
+  composition (every authored level names its builder and preset, so its description holds
+  on every difficulty), bosses and AI quality (`aiTier` shifts the enemy AI profile one step
+  up or down from the chosen difficulty, clamped) — not through points: the effective enemy
+  budget never exceeds 1.10× on Normal, 1.15× on Difícil, 1.25× on Especialista.
+- The `counter` builder is reserved for L13+ and endless. It is soft: among the presets of
+  the faction it samples one weighted by score from those scoring ≥ 85% of the best
+  (`botFleet.js COUNTER_NEAR_BEST`), so a counter-pick is a tendency, not a certainty.
+  The `random` builder spends 85–100% of the budget (the randomness is in the composition).
+- Levels (level multiplier, builder/preset, boss, AI tier):
+
+| # | name | enemy | ×budget | builder / preset | boss | aiTier |
+|---|---|---|---|---|---|---|
+| 1 | Primeiro Contato | terran | 0.65 | random | — | 0 |
+| 2 | Patrulha de Fronteira | terran | 0.75 | preset ter_misseis | — | 0 |
+| 3 | Bloqueio Orbital | terran | 0.85 | preset ter_atlas | Hércules | 0 |
+| 4 | Ninho Vorrax | vorrax | 0.85 | preset vor_mare | — | 0 |
+| 5 | Maré Viva | vorrax | 0.90 | preset vor_chuva | — | 0 |
+| 6 | A Rainha Desperta | vorrax | 0.95 | preset vor_garras | Rainha-Guerreira | 0 |
+| 7 | Luz Distante | lumen | 0.95 | preset lum_dissonancia | — | 0 |
+| 8 | Coro de Cristal | lumen | 1.00 | preset lum_coro | — | 0 |
+| 9 | Catedral Errante | lumen | 1.00 | preset lum_catedral | Catedral | 0 |
+| 10 | Sinal Ferrix | ferrix | 1.00 | preset fer_fabrica | — | 0 |
+| 11 | Linha de Ferro | ferrix | 1.00 | preset fer_ferro | — | 0 |
+| 12 | Mente Primária | ferrix | 1.00 | preset fer_apagao | Mente Primária | 0 |
+| 13 | Aliança Rompida | random | 1.00 | counter | — | +1 |
+| 14 | Armada Negra | random | 1.00 | counter | a capital | +1 |
+| 15 | Fim dos Tempos | random | 1.00 | counter | a mothership | +1 |
+
+  Level n > 15 (endless, "Além do Fim — Onda n−15"): random faction, counter builder,
+  mothership guaranteed, aiTier +1, level multiplier 1.0 + 0.05·(n−15); the profile cap
+  also rises by 0.05 per wave. A fleet is at most 40 ships, so deep endless budgets outgrow
+  the roster: the preset's upgrade pass then trades the cheapest hulls up through the whole
+  faction roster (`fleet.js rosterUpgradePass`), and `levels.js enemyBudgetInfo` /
+  `spConfig.js spLevelInfo` report the value that can really be bought (`spendable`) and the
+  value actually spent (`meta.enemySpent`) for the setup panel. Progress (max level cleared
+  per difficulty) in `localStorage`.
+- Ladder band (measured with `node tools/simulate.js --ladder normal --seeds 2`: every
+  preset at 1500, driven by the `especialista` AI as a human fleet is, vs the level's enemy):
+  pooled preset win rate on Normal ≈ 85–100% at L1, 35–80% at L8, ≥ 25% at L13–15 and no
+  level where every preset loses; Difícil a little lower, Especialista lower still but L15
+  winnable by the best fleets; Fácil wins most levels but not all of L13–15.
 - Results screen offers: play again (same fleet, new seed), next level, edit fleet, menu.
 
 ## 5. Multiplayer
@@ -285,10 +323,17 @@ Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
 ## 8. Balance and acceptance criteria (headless, `tools/simulate.js`)
 1. Determinism: same config + seed → identical `hashState` at ticks 100, 1000 and end; identical event stream.
 2. Mirror matches (each preset vs itself, sides swapped, ≥ 40 seeds): side win rate 50% ± 10, draws < 5%.
-3. Faction matrix (presets pooled, ≥ 20 seeds per pair, both sides): every faction vs every other within 35–65%.
-4. Per-preset pairs within 20–80% (hard counters allowed, stomps not).
+3. Faction matrix (presets pooled, ≥ 24 seeds per pair, both sides): every faction vs every other within 35–65%.
+4. Per-preset pairs within 15–85% over 20 seeds in each order (40 battles per pair; hard counters allowed, stomps not).
 5. Pace: median battle 60–160 s, p95 < 240 s (timeouts < 10%).
 6. Difficulty monotonic: vs a `normal` preset fleet, enemy win rate: facil < normal < dificil < especialista, with especialista ≥ 70%, facil ≤ 35%.
+6b. Single-player ladder within the §4 band (Normal, 12 presets × 2 seeds per level).
+
+Criteria 2–6b are checked by `npm run balance` (`tools/balance-check.js`: matrix 20 seeds,
+factions 24, difficulty 40, ladder Normal ×2, run as parallel `simulate.js --json`
+subprocesses; `--quick` for a smoke run). It is opt-in (a few minutes), not part of
+`npm test`; `npm test` only checks mirrors (`test/sim/mirror.test.js`) and that the
+ladder's effective budget curve is monotonic and capped (`test/rules/levels.test.js`).
 7. Never idle: every alive, non-disrupted ship has a target or a movement intent while enemies live.
 8. Abilities fire: in a 1v1 with one of every ship class per side, every ability id appears in ≥ 1 `cast` event in ≥ 80% of seeds (passives excluded).
 9. Performance: 6v6 full fleets (≈ 500 ships) ≤ 10 ms per tick average in Node (measured ≈ 5 ms;

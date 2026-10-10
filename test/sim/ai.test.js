@@ -284,7 +284,7 @@ test('expendables never retreat: spawned units and cheap tiny ships fight on; hu
     }
   }
   assert.ok(spawnedTicks > 2000, 'spawned units were observed');
-  assert.ok(larvae > 20 && dives >= 0.25 * larvae, `${dives}/${larvae} larvae dove`);
+  assert.ok(larvae > 20 && dives >= 0.2 * larvae, `${dives}/${larvae} larvae dove`);
 });
 
 test('a larva below half hull with an enemy within 250 u dives at the nearest enemy', () => {

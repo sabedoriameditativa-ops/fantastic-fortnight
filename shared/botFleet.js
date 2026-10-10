@@ -4,7 +4,7 @@
 
 import { DEFAULT_BUDGET, FLEET_LIMITS } from './constants.js';
 import {
-  FACTION_IDS, SHIPS, SIZE_CLASS, PRESET_LIST, presetsOfFaction, shipsOfFaction,
+  FACTION_IDS, SHIPS, SIZE_CLASS, PRESETS, PRESET_LIST, presetsOfFaction, shipsOfFaction,
 } from './catalog.js';
 import { AI_PROFILES } from './aiProfiles.js';
 import {
@@ -15,9 +15,16 @@ import {
 
 export const BUILDERS = ['random', 'preset', 'counter'];
 
-/** Random builder spends this fraction range of the budget (SPEC: 60–85%). */
-export const RANDOM_SPEND_MIN = 0.6;
-export const RANDOM_SPEND_MAX = 0.85;
+/** Random builder spends this fraction range of the budget (SPEC: 85–100%; the randomness is in the composition). */
+export const RANDOM_SPEND_MIN = 0.85;
+export const RANDOM_SPEND_MAX = 1.0;
+
+/**
+ * Counter builder softness: instead of always taking the best-scoring preset
+ * it samples (weighted by score) among the presets scoring at least this
+ * fraction of the best, so a counter-pick is a tendency, not a certainty.
+ */
+export const COUNTER_NEAR_BEST = 0.85;
 
 /**
  * Enemy composition categories (cost shares) used by the counter builder.
@@ -112,9 +119,10 @@ export function scorePreset(presetId, comp) {
 }
 
 /**
- * Pick the preset of a faction that best counters the enemy fleets.
- * Ties (within 1e-9) are broken with the rng. Returns null when no enemy
- * composition is known (caller falls back to a random preset).
+ * Pick a preset of the faction that counters the enemy fleets: the presets
+ * scoring at least COUNTER_NEAR_BEST × the best score are candidates and one
+ * is drawn weighted by score (a lone best is always picked). Returns null when
+ * no enemy composition is known (caller falls back to a random preset).
  * @param {string} faction
  * @param {Fleet[]} enemyFleets
  * @param {{ next(): number, pick<T>(a: T[]): T }} rng
@@ -123,14 +131,18 @@ export function scorePreset(presetId, comp) {
 export function pickCounterPreset(faction, enemyFleets, rng) {
   const comp = enemyComposition(enemyFleets);
   if (comp.total <= 0) return null;
+  const scored = presetsOfFaction(faction).map((p) => [p.id, scorePreset(p.id, comp)]);
+  if (scored.length === 0) return null;
   let best = -Infinity;
-  let tied = [];
-  for (const p of presetsOfFaction(faction)) {
-    const s = scorePreset(p.id, comp);
-    if (s > best + 1e-9) { best = s; tied = [p.id]; } else if (Math.abs(s - best) <= 1e-9) tied.push(p.id);
+  for (const [, s] of scored) if (s > best) best = s;
+  if (best <= 0) return rng.pick(scored.map(([id]) => id));
+  const cands = [], weights = [];
+  let totalW = 0;
+  for (const [id, s] of scored) {
+    if (s + 1e-9 < best * COUNTER_NEAR_BEST) continue;
+    cands.push(id); weights.push(s); totalW += s;
   }
-  if (tied.length === 0) return null;
-  return tied.length === 1 ? tied[0] : rng.pick(tied);
+  return cands.length === 1 ? cands[0] : weightedPick(cands, weights, totalW, rng.next());
 }
 
 /**
@@ -142,6 +154,8 @@ export function pickCounterPreset(faction, enemyFleets, rng) {
  * @param {string} [o.faction]              force a faction; otherwise rng.pick(FACTION_IDS)
  * @param {Fleet[]} [o.enemyFleets]         known enemy fleets (counter builder)
  * @param {'random'|'preset'|'counter'} [o.builder]  override the difficulty's builder
+ * @param {string} [o.presetId]             'preset' builder: use this preset (ignored when it is
+ *                                          not of the faction; the counter builder ignores it)
  * @param {string[]} [o.mustInclude]        class ids that must be in the fleet (bosses); they
  *                                          also decide the faction when none is forced
  * @returns {Fleet}   always valid for the budget
@@ -167,6 +181,7 @@ export function buildBotFleet(o) {
   } else {
     let presetId = null;
     if (builder === 'counter') presetId = pickCounterPreset(faction, o.enemyFleets, rng);
+    else if (o.presetId && PRESETS[o.presetId] && PRESETS[o.presetId].faction === faction) presetId = o.presetId;
     if (!presetId) presetId = rng.pick(presetsOfFaction(faction)).id;
     fleet = autoComplete(presetFleet(presetId, budget, { mustInclude: forced }), budget, rng);
   }
@@ -182,7 +197,7 @@ export function buildBotFleet(o) {
 }
 
 /**
- * Random legal fleet: spends 60–85% of the budget, never a mothership (unless
+ * Random legal fleet: spends 85–100% of the budget, never a mothership (unless
  * forced). Picks are weighted by cost so points, not ship counts, are spread
  * across classes; when the 40-ship cap blocks the spend target the cheapest
  * unit is traded up (cost floor ratchets so the loop cannot oscillate).

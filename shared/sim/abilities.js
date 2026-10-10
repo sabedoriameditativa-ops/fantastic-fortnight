@@ -3,7 +3,7 @@
 // their chosen point/target on `me.ability` for the cast that follows.
 // Difficulty knobs: thresholds are jittered by P.abilityNoise via th().
 
-import { ABILITIES } from '../catalog.js';
+import { ABILITIES, SIZE_CLASSES } from '../catalog.js';
 import { TICK_RATE } from '../constants.js';
 import { addEffect } from './ship.js';
 import { heal, queueDamage } from './damage.js';
@@ -249,15 +249,17 @@ export const ABILITY_REGISTRY = {
     trigger(ctx) {
       const { me, state } = ctx, p = P('leech');
       if (me.latch) return 0;
+      // smallest hull the leech may grab comes from the catalog (params.minTargetClass)
+      const minIdx = Math.max(0, SIZE_CLASSES.indexOf(p.minTargetClass || 'medium'));
       enemiesWithin(state, me, th(ctx, p.range), buf);
       let best = null, bd = Infinity;
       for (let i = 0; i < buf.length; i++) {
         const e = buf[i];
-        if (e.sizeIdx < 2) continue;
+        if (e.sizeIdx < minIdx) continue;
         const d = dist(me, e);
         if (d < bd) { bd = d; best = e; }
       }
-      if (!best) { seekPrey(ctx, 400, (e) => e.sizeIdx >= 2); return 0; }
+      if (!best) { seekPrey(ctx, 400, (e) => e.sizeIdx >= minIdx); return 0; }
       me.ability.castTarget = best.id;
       return 1;
     },

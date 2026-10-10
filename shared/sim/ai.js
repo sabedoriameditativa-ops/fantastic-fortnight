@@ -667,11 +667,15 @@ export function computeDesired(state, s, out) {
         // motherships hold at 0.85× their main weapon's range (not the dps-weighted engage range, which the short
         // secondary guns pull in) and advance slowly toward the enemy mass only while the fighting line is ahead
         // (with no line left the mothership is the line and advances on its own)
-        const holdAt = Math.max(0.7 * R, ANCHOR_HOLD_FRAC * weaponRange(s, s.weapons[0]));
+        let holdAt = Math.max(0.7 * R, ANCHOR_HOLD_FRAC * weaponRange(s, s.weapons[0]));
+        // an ability asked to close in (EMP storm on a cluster just out of reach): that is a deliberate
+        // push, so it overrides both the stand-off and the "stay behind the front" rule
+        const closingIn = ai.holdOverride > 0 && ai.holdOverride < holdAt;
+        if (closingIn) holdAt = ai.holdOverride;
         const ex = T.enemyCx - s.x, ey = T.enemyCy - s.y;
         const ed = Math.sqrt(ex * ex + ey * ey);
         const behindFront = T.frontDist === Infinity || ed > T.frontDist + ANCHOR_BEHIND_FRONT;
-        if (d > holdAt && ed > 200 && behindFront) { dx = ex; dy = ey; speed = cap * 0.6; }
+        if (d > holdAt && ed > 200 && (behindFront || closingIn)) { dx = closingIn ? dx : ex; dy = closingIn ? dy : ey; speed = cap * 0.6; }
         else speed = 0;
         break;
       }

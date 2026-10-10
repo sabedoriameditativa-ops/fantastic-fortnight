@@ -67,6 +67,8 @@ export const T = {
     enemyFaction: 'Facção inimiga',
     randomFaction: 'Aleatória',
     boss: 'Chefe garantido: {name}',
+    budgetOf: '(de {n})',
+    enemyAi: 'IA inimiga',
     builder: { random: 'frota aleatória', preset: 'frota predefinida', counter: 'frota de contra-ataque' },
     build: 'Montar frota →',
     quickPlay: 'Jogar com a última frota',

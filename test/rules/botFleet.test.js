@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildBotFleet, buildRandomFleet, enemyComposition, scorePreset, pickCounterPreset,
-  COUNTER_MATRIX, COUNTER_CATEGORIES, counterMatrixCoversAllPresets, builderForDifficulty,
+  COUNTER_MATRIX, COUNTER_CATEGORIES, COUNTER_NEAR_BEST, counterMatrixCoversAllPresets, builderForDifficulty,
   RANDOM_SPEND_MIN, RANDOM_SPEND_MAX,
 } from '../../shared/botFleet.js';
 import { validateFleet, fleetCost, presetFleet, fleetSummary } from '../../shared/fleet.js';
@@ -35,7 +35,9 @@ describe('buildBotFleet', () => {
     assert.equal(n, 200 * 4 * 4 * 3);
   });
 
-  test('facil: random builder, spends 60–85% of the budget and never buys a mothership', () => {
+  test('facil: random builder, spends 85–100% of the budget (randomness is in the composition) and never buys a mothership', () => {
+    assert.equal(RANDOM_SPEND_MIN, 0.85);
+    assert.equal(RANDOM_SPEND_MAX, 1.0);
     for (let seed = 0; seed < 300; seed++) {
       const faction = FACTION_IDS[seed % 4];
       const budget = BUDGET_POINTS[seed % 3];
@@ -151,21 +153,68 @@ describe('counter builder', () => {
     assert.equal(scorePreset('nope', comp), 0);
   });
 
-  test('picks differently for different enemy compositions (every faction)', () => {
+  /** Presets of a faction scoring at least `frac` × the best score against `fleets` (frac 1 → the best ones, ties included). */
+  function nearBest(faction, fleets, frac = COUNTER_NEAR_BEST) {
+    const comp = enemyComposition(fleets);
+    const scored = presetsOfFaction(faction).map((p) => [p.id, scorePreset(p.id, comp)]);
+    const best = Math.max(...scored.map(([, s]) => s));
+    return scored.filter(([, s]) => s + 1e-9 >= best * frac).map(([id]) => id);
+  }
+
+  test('picks differently for different enemy compositions (every faction): a best counter is the modal pick, only near-best presets are ever picked', () => {
     const swarm = [{ faction: 'vorrax', ships: [{ cls: 'vor_larva', count: 32 }, { cls: 'vor_zangao', count: 8 }] }];
     const heavyShield = [{ faction: 'terran', ships: [{ cls: 'ter_hercules', count: 4 }, { cls: 'ter_atlas', count: 1 }] }];
     const expected = { terran: ['ter_atlas', 'ter_misseis'], vorrax: ['vor_chuva', 'vor_garras'], lumen: ['lum_catedral', 'lum_dissonancia'], ferrix: ['fer_fabrica', 'fer_ferro'] };
     for (const faction of FACTION_IDS) {
-      const a = pickCounterPreset(faction, swarm, createRng(1));
-      const b = pickCounterPreset(faction, heavyShield, createRng(1));
-      assert.equal(a, expected[faction][0], `${faction} vs swarm`);
-      assert.equal(b, expected[faction][1], `${faction} vs heavy`);
+      for (const [fleets, want, label] of [[swarm, expected[faction][0], 'swarm'], [heavyShield, expected[faction][1], 'heavy']]) {
+        const allowed = nearBest(faction, fleets);
+        const best = nearBest(faction, fleets, 1);
+        assert.ok(best.includes(want), `${faction} vs ${label}: ${want} is a best counter (${best})`);
+        const counts = {};
+        for (let seed = 0; seed < 60; seed++) {
+          const id = pickCounterPreset(faction, fleets, createRng(`c${seed}`));
+          assert.ok(allowed.includes(id), `${faction} vs ${label}: ${id} is never a weak counter`);
+          counts[id] = (counts[id] || 0) + 1;
+        }
+        const modal = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+        assert.ok(best.includes(modal), `${faction} vs ${label}: most frequent pick ${JSON.stringify(counts)} is a best counter (${best})`);
+      }
     }
-    // through buildBotFleet: dificil terran vs swarm → flak/carrier doctrine (Atlas present)
-    const vsSwarm = buildBotFleet({ budget: 1500, difficulty: 'dificil', rng: createRng(3), faction: 'terran', enemyFleets: swarm });
-    assert.ok(vsSwarm.ships.some((e) => e.cls === 'ter_atlas'));
-    const vsHeavy = buildBotFleet({ budget: 1500, difficulty: 'especialista', rng: createRng(3), faction: 'terran', enemyFleets: heavyShield });
-    assert.ok(vsHeavy.ships.some((e) => e.cls === 'ter_lanca') && vsHeavy.ships.find((e) => e.cls === 'ter_orion').count >= 4);
+    // different compositions → different picks
+    assert.notEqual(nearBest('terran', swarm, 1)[0], nearBest('terran', heavyShield, 1)[0]);
+    // through buildBotFleet: the counter builder only ever fields a near-best counter
+    for (let seed = 0; seed < 20; seed++) {
+      const vsSwarm = buildBotFleet({ budget: 1500, difficulty: 'dificil', rng: createRng(seed), faction: 'terran', enemyFleets: swarm });
+      const anchors = nearBest('terran', swarm).map((id) => PRESETS[id].ships[0][0]);
+      assert.ok(vsSwarm.ships.some((e) => anchors.includes(e.cls)), `seed ${seed}: shaped like a near-best counter (${anchors})`);
+    }
+  });
+
+  test('counter softness: a counter-pick is a tendency, not a certainty (COUNTER_NEAR_BEST < 1, several candidates get picked)', () => {
+    assert.ok(COUNTER_NEAR_BEST > 0.5 && COUNTER_NEAR_BEST < 1);
+    const line = [{ faction: 'terran', ships: [{ cls: 'ter_orion', count: 6 }, { cls: 'ter_hercules', count: 2 }] }];
+    const picks = new Set();
+    for (let seed = 0; seed < 60; seed++) picks.add(pickCounterPreset('lumen', line, createRng(`soft${seed}`)));
+    assert.ok(picks.size >= 2, `several near-best presets get picked: ${[...picks]}`);
+    for (const id of picks) assert.ok(nearBest('lumen', line).includes(id));
+    // a lone best (every other preset below COUNTER_NEAR_BEST × best) is always picked
+    const lone = [{ faction: 'vorrax', ships: [{ cls: 'vor_larva', count: 32 }] }]; // swarm+organic → ter_atlas 1.4 vs 1.0 / 0.8
+    assert.deepEqual(nearBest('terran', lone), ['ter_atlas']);
+    for (let seed = 0; seed < 20; seed++) assert.equal(pickCounterPreset('terran', lone, createRng(seed)), 'ter_atlas');
+  });
+
+  test('presetId: the preset builder uses the level preset of its faction and ignores one of another faction', () => {
+    for (let seed = 0; seed < 10; seed++) {
+      const f = buildBotFleet({ budget: 1500, difficulty: 'normal', rng: createRng(`p${seed}`), faction: 'lumen', builder: 'preset', presetId: 'lum_dissonancia' });
+      assert.ok(f.ships.some((e) => e.cls === 'lum_ressonante' && e.count >= 2), `seed ${seed}: Dissonância-shaped`);
+      assert.equal(validateFleet(f, 1500).ok, true);
+    }
+    const other = buildBotFleet({ budget: 1500, difficulty: 'normal', rng: createRng(1), faction: 'terran', builder: 'preset', presetId: 'lum_dissonancia' });
+    assert.equal(other.faction, 'terran');
+    // the counter builder ignores presetId (it picks its own counter)
+    const swarm = [{ faction: 'vorrax', ships: [{ cls: 'vor_larva', count: 32 }, { cls: 'vor_zangao', count: 8 }] }];
+    const counter = buildBotFleet({ budget: 1500, difficulty: 'dificil', rng: createRng(2), faction: 'terran', builder: 'counter', presetId: 'ter_linha', enemyFleets: swarm });
+    assert.ok(!counter.ships.some((e) => e.cls === 'ter_prometeu') || counter.ships.some((e) => e.cls === 'ter_atlas'), 'not forced into ter_linha');
   });
 
   test('falls back to a random preset when no enemy fleets are known', () => {

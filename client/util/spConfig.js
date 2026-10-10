@@ -1,14 +1,16 @@
 // Single-player battle configuration: the player's fleet (AI 'especialista'),
 // ally bots (chosen difficulty, random factions) and enemy bots per level and
-// difficulty (levels.js enemyBudget, builder from the profile, boss
-// mustInclude). Deterministic given the seed. Pure (no DOM).
+// difficulty (levels.js: enemyBudget, the level's builder/preset, boss
+// mustInclude, enemy AI tier). Deterministic given the seed. Pure (no DOM).
 
 import { DEFAULT_BUDGET, TEAM_SIZES, DIFFICULTIES } from '/shared/constants.js';
 import { FACTION_IDS, presetsOfFaction, PRESETS } from '/shared/catalog.js';
 import { createRng } from '/shared/rng.js';
-import { presetFleet, validateFleet } from '/shared/fleet.js';
+import { presetFleet, validateFleet, fleetCost } from '/shared/fleet.js';
 import { buildBotFleet } from '/shared/botFleet.js';
-import { levelInfo, enemyBudget, levelBuilder, levelEnemyFaction, levelMustInclude } from '/shared/levels.js';
+import {
+  levelInfo, enemyBudget, enemyBudgetInfo, levelBuilder, levelPreset, levelEnemyAi, levelEnemyFaction, levelMustInclude,
+} from '/shared/levels.js';
 
 export const BOT_NAMES = [
   'Almirante Kael', 'Capitã Ysolde', 'Comodoro Brax', 'Nyx-7', 'Tenente Orin', 'Vashti', 'Rook', 'Mestre Ilun',
@@ -32,6 +34,27 @@ export function normalizeSpSetup(raw) {
 }
 
 /**
+ * What the setup panel can show about the enemy before the fleet is built:
+ * budget (formula), what it can really buy (`spendable`, 40-ship cap),
+ * builder, preset, AI profile and bosses.
+ * @param {{ level:number, difficulty:string }} setup
+ * @param {number} [budget]
+ */
+export function spLevelInfo(setup, budget = DEFAULT_BUDGET) {
+  const s = normalizeSpSetup(setup);
+  const level = levelInfo(s.level);
+  const info = enemyBudgetInfo(level, s.difficulty, budget);
+  return {
+    level, difficulty: s.difficulty,
+    enemyBudget: info.budget, enemySpendable: info.spendable, budgetCapped: info.capped, budgetMul: info.mul,
+    builder: levelBuilder(level, s.difficulty),
+    preset: level.preset && PRESETS[level.preset] ? PRESETS[level.preset] : null,
+    enemyAi: levelEnemyAi(level, s.difficulty),
+    bosses: info.factions.flatMap((f) => levelMustInclude(level, f)),
+  };
+}
+
+/**
  * Build the BattleConfig for a single-player battle.
  * @param {Object} o
  * @param {{ level:number, difficulty:string, teamSize:number, allyDifficulty:string }} o.setup
@@ -52,6 +75,7 @@ export function buildSpConfig(o) {
   const level = levelInfo(setup.level);
   const eBudget = enemyBudget(level, setup.difficulty, budget);
   const builder = levelBuilder(level, setup.difficulty);
+  const enemyAi = levelEnemyAi(level, setup.difficulty);
   const names = rng.shuffle(BOT_NAMES.slice());
   let nameIdx = 0;
   const nextName = () => names[nameIdx++ % names.length];
@@ -66,15 +90,23 @@ export function buildSpConfig(o) {
   const ourFleets = [playerFleet, ...allyFleets];
   const fixedFaction = FACTION_IDS.includes(level.enemyFaction) ? level.enemyFaction : null;
   const enemyFactions = [];
+  let enemySpent = 0;
   for (let i = 0; i < setup.teamSize; i++) {
     const faction = fixedFaction || levelEnemyFaction(level, rng);
     const mustInclude = i === 0 ? levelMustInclude(level, faction) : [];
-    const fleet = buildBotFleet({ budget: eBudget, difficulty: setup.difficulty, rng, faction, builder, enemyFleets: ourFleets, mustInclude });
+    const fleet = buildBotFleet({
+      budget: eBudget, difficulty: setup.difficulty, rng, faction, builder, presetId: levelPreset(level, faction),
+      enemyFleets: ourFleets, mustInclude,
+    });
     enemyFactions.push(faction);
-    players.push({ id: `bot_e${i + 1}`, name: nextName(), team: 1, isBot: true, fleet, ai: setup.difficulty });
+    enemySpent += fleetCost(fleet);
+    players.push({ id: `bot_e${i + 1}`, name: nextName(), team: 1, isBot: true, fleet, ai: enemyAi });
   }
   const config = { seed, players };
-  const meta = { mode: 'sp', setup, level, enemyBudget: eBudget, builder, budget, seed, enemyFactions, playerFleet };
+  const meta = {
+    mode: 'sp', setup, level, enemyBudget: eBudget, enemySpent: Math.round(enemySpent / setup.teamSize), enemyAi, builder,
+    budget, seed, enemyFactions, playerFleet,
+  };
   return { config, meta };
 }
 
