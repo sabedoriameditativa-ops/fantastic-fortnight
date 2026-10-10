@@ -1,6 +1,6 @@
 // Battle camera: auto fit-to-fleets biased toward the action, exponential
 // smoothing, zoom limits, trauma-based shake, follow(id), free mode (wheel /
-// drag) with automatic return, world <-> screen helpers.
+// drag) that stays until the player returns to auto, world <-> screen helpers.
 //
 // Screen coordinates are CSS pixels inside the 16:9 letterboxed viewport
 // (vx, vy, vw, vh) set by the renderer. Pure module (no DOM).
@@ -15,7 +15,8 @@ export const ZOOM_MAX = 2.0;
  */
 export function createCamera(o) {
   const world = o.world;
-  const zoomMin = o.zoomMin ?? ZOOM_MIN, zoomMax = o.zoomMax ?? ZOOM_MAX;
+  let zoomMin = o.zoomMin ?? ZOOM_MIN;
+  const zoomMax = o.zoomMax ?? ZOOM_MAX;
   let reducedMotion = !!o.reducedMotion;
   const seed = (o.seed ?? 1) | 0;
 
@@ -25,7 +26,6 @@ export function createCamera(o) {
     vx: 0, vy: 0, vw: 1280, vh: 720,
     shakeX: 0, shakeY: 0, trauma: 0,
     mode: 'auto', followId: 0,
-    freeUntil: 0,
     // action tracking
     action: new Map(),        // id -> weight (recent damage, decays)
     lastDeath: null,          // { x, y, t }
@@ -49,8 +49,23 @@ export function createCamera(o) {
     let cxw = 0, cyw = 0, wsum = 0;
     let n = 0;
     const teams = [0, 0];
+    // team centroids first: a ship far behind its own line (a retreating straggler) does not
+    // stretch the frame, but both centroids are always kept in view
+    const tc = [[0, 0, 0], [0, 0, 0]];
+    for (const v of ships.values()) if (v.team === 0 || v.team === 1) { const c = tc[v.team]; c[0] += v.x; c[1] += v.y; c[2]++; }
+    const cx = [tc[0][2] ? tc[0][0] / tc[0][2] : 0, tc[1][2] ? tc[1][0] / tc[1][2] : 0];
+    const cy = [tc[0][2] ? tc[0][1] / tc[0][2] : 0, tc[1][2] ? tc[1][1] / tc[1][2] : 0];
+    const both = tc[0][2] > 0 && tc[1][2] > 0;
+    const dCent = both ? Math.hypot(cx[0] - cx[1], cy[0] - cy[1]) : 0;
+    if (both) for (let t = 0; t < 2; t++) { if (cx[t] < x0) x0 = cx[t]; if (cx[t] > x1) x1 = cx[t]; if (cy[t] < y0) y0 = cy[t]; if (cy[t] > y1) y1 = cy[t]; }
     for (const v of ships.values()) {
       const r = (v.size || 30) * 0.5;
+      if (both && (v.team === 0 || v.team === 1) && ships.size > 12) {
+        const e = 1 - v.team;
+        const dEnemy = Math.hypot(v.x - cx[e], v.y - cy[e]);
+        const recent = cam.action.get(v.id) || 0;
+        if (dEnemy > dCent + 500 && recent < 0.05) continue;   // straggler: does not drive the frame
+      }
       if (v.x - r < x0) x0 = v.x - r; if (v.x + r > x1) x1 = v.x + r;
       if (v.y - r < y0) y0 = v.y - r; if (v.y + r > y1) y1 = v.y + r;
       const recent = cam.action.get(v.id) || 0;
@@ -94,6 +109,8 @@ export function createCamera(o) {
     /** Set the viewport rect (CSS px) the camera renders into. */
     setViewport(vx, vy, vw, vh) {
       cam.vx = vx; cam.vy = vy; cam.vw = Math.max(1, vw); cam.vh = Math.max(1, vh);
+      // a 6v6 world (4000 x 2250) must fit on a 720p window: the fixed ZOOM_MIN left ships off-screen
+      zoomMin = Math.min(o.zoomMin ?? ZOOM_MIN, cam.vw / (world.w + 200), cam.vh / (world.h + 200));
     },
     setReducedMotion(b) { reducedMotion = !!b; },
 
@@ -111,7 +128,6 @@ export function createCamera(o) {
         const f = Math.exp(-dt / 1.5);
         for (const [id, w] of cam.action) { const nw = w * f; if (nw < 0.01) cam.action.delete(id); else cam.action.set(id, nw); }
       }
-      if (cam.mode === 'free' && now > cam.freeUntil) cam.mode = 'auto';
       if (cam.mode === 'follow') {
         const v = ships.get(cam.followId);
         if (v) { cam.tx = v.x; cam.ty = v.y; }
@@ -142,7 +158,6 @@ export function createCamera(o) {
     setMode(m) {
       if (m === 'follow' && !cam.followId) m = 'auto';
       cam.mode = m;
-      if (m === 'free') cam.freeUntil = lastNow + 6000;
       if (m === 'auto') { cam.action.clear(); }
     },
     /** Multiply the zoom (free mode), keeping the point under (px,py) fixed. */
@@ -155,13 +170,12 @@ export function createCamera(o) {
       }
       cam.tzoom = nz;
       if (cam.mode !== 'follow') cam.mode = 'free';
-      cam.freeUntil = lastNow + 6000;
     },
     /** Pan by screen pixels (free mode). */
     pan(dx, dy) {
       cam.tx -= dx / cam.zoom; cam.ty -= dy / cam.zoom;
       cam.x = cam.tx; cam.y = cam.ty;
-      cam.mode = 'free'; cam.freeUntil = lastNow + 6000;
+      cam.mode = 'free';
       applyLimits(); cam.tx = cam.x; cam.ty = cam.y;
     },
     /** Add screen shake (0..1). */

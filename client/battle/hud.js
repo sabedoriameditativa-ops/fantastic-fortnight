@@ -22,6 +22,7 @@ import { createEventLog } from '../util/eventLog.js';
  * @param {(x:number)=>void} o.onSpeed
  * @param {(name:'names'|'grid'|'camera'|'sound')=>void} o.onToggle
  * @param {()=>void} o.onQuit
+ * @param {()=>void} [o.onReconnect]  shown as a button while the connection is lost
  * @param {()=>number} o.latency       ms (network)
  */
 export function createHud(root, o) {
@@ -84,16 +85,18 @@ export function createHud(root, o) {
       speedWrap.appendChild(b);
     }
   }
-  const liveEl = h('div.hud-live', { test: 'hud-live' }, h('span.dot'), h('span.lbl', { text: T.battle.live }), h('span.lat.muted.mono'));
+  const btnReconnect = h('button.btn.btn-sm.btn-primary.hidden', { type: 'button', test: 'hud-reconnect', onClick: () => { if (o.onReconnect) o.onReconnect(); } }, T.battle.reconnect);
+  const liveEl = h('div.hud-live', { test: 'hud-live' }, h('span.dot'), h('span.lbl', { text: T.battle.live }), h('span.lat.muted.mono'), btnReconnect);
   const clockEl = h('div.hud-clock', timeEl, o.isLocal ? speedWrap : liveEl);
   const top = h('div.hud-top', teamEls[0].el, clockEl, teamEls[1].el);
   const banner = h('div.hud-banner.hidden');
   const logEl = h('div.hud-log', { test: 'hud-log', 'aria-live': 'polite' });
   const btnNames = h('button.btn.btn-sm', { type: 'button', test: 'hud-names', class: o.settings.showNames ? 'on' : '', onClick: () => o.onToggle('names') }, svgIcon('tag', 11), T.battle.names);
   const btnGrid = h('button.btn.btn-sm', { type: 'button', test: 'hud-grid', class: o.settings.grid ? 'on' : '', onClick: () => o.onToggle('grid') }, svgIcon('grid', 11), T.battle.grid);
-  const btnCam = h('button.btn.btn-sm', { type: 'button', test: 'hud-camera', onClick: () => o.onToggle('camera') }, svgIcon('camera', 11), T.battle.cameraAuto);
+  const btnCam = h('button.btn.btn-sm', { type: 'button', test: 'hud-camera', onClick: () => o.onToggle('camera') }, svgIcon('camera', 11), h('span', { text: T.battle.cameraAuto }));
   const btnSound = h('button.btn.btn-sm', { type: 'button', test: 'hud-sound', class: o.settings.muted ? '' : 'on', onClick: () => o.onToggle('sound') }, svgIcon('sound', 11), T.battle.sound);
   const right = h('div.hud-right', btnNames, btnGrid, btnCam, btnSound);
+  let camMode = 'auto';
   const btnQuit = h('button.btn.btn-sm.btn-ghost', { type: 'button', test: 'hud-quit', onClick: () => o.onQuit() }, svgIcon('cross', 10), T.battle.quit);
   const left = h('div.hud-left', btnQuit);
   const playersEl = h('div.hud-players', { test: 'hud-players' });
@@ -244,7 +247,16 @@ export function createHud(root, o) {
       status = s;
       liveEl.classList.toggle('warn', s === 'reconnecting');
       liveEl.classList.toggle('bad', s === 'lost');
+      btnReconnect.classList.toggle('hidden', s !== 'lost' || !o.onReconnect);
       liveEl.querySelector('.lbl').textContent = s === 'ok' ? T.battle.live : s === 'reconnecting' ? T.battle.reconnecting : T.battle.lost;
+    },
+    /** @param {'auto'|'free'|'follow'} m */
+    setCameraMode(m) {
+      if (m === camMode) return;
+      camMode = m;
+      btnCam.classList.toggle('on', m !== 'auto');
+      btnCam.lastChild.textContent = m === 'auto' ? T.battle.cameraAuto : T.battle.cameraFree;
+      btnCam.title = m === 'auto' ? T.battle.cameraAuto : `${T.battle.cameraFree} — ${T.battle.cameraAuto} (C)`;
     },
     setToggles({ showNames, grid, muted }) {
       if (showNames !== undefined) btnNames.classList.toggle('on', !!showNames);

@@ -405,9 +405,12 @@ describe('room: start → countdown → battle → results → rematch', () => {
     assert.deepEqual(host.last('room').rematchVotes, ['h']);
     assert.equal(room.rematch(b).ok, true);
     assert.equal(room.phase, 'results');
-    room.onDisconnect(w); // disconnected humans do not block
+    room.onDisconnect(w); // a human whose socket blipped keeps the seat for the grace period: wait for them
     assert.equal(room.phase, 'results');
     assert.equal(room.rematch(spec).ok, true);
+    assert.equal(room.phase, 'results', 'the disconnected-within-grace player still has to vote');
+    room.onReconnect(w);
+    assert.equal(room.rematch(w).ok, true);
     assert.equal(room.phase, 'lobby');
     assert.equal(startMatch.calls[0].stopped, true);
     const st = host.last('room');
@@ -416,7 +419,7 @@ describe('room: start → countdown → battle → results → rematch', () => {
     assert.equal(st.slots[0][0].hasFleet, true);
     assert.equal(st.slots[0][0].ready, false);
     assert.equal(st.slots[1][0].hasFleet, true);
-    assert.equal(st.slots[1][1].connected, false);
+    assert.equal(st.slots[1][1].connected, true);
     // set_fleet allowed in results (prepare the next round)
   });
 

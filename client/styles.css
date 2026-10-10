@@ -16,8 +16,8 @@
   --team-a: #3fb6ff;
   --team-b: #ff7a3d;
   --f-terran: #8a96a6;
-  --f-vorrax: #9c4d4f;
-  --f-lumen: #7c5cff;
+  --f-vorrax: #d16a6d;
+  --f-lumen: #a48cff;
   --f-ferrix: #7fb3a8;
   --track: #0e1626;
   --font-title: "Orbitron", "Exo 2", "Segoe UI", system-ui, sans-serif;
@@ -203,6 +203,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .table tr.me td { background: rgba(53, 200, 255, 0.07); }
 .table tr.dead td { opacity: 0.55; }
 .table-wrap { overflow-x: auto; }
+@media (max-width: 640px) { .table-wrap { -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); mask-image: linear-gradient(90deg, #000 88%, transparent); } }
+kbd { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px; background: rgba(5, 7, 12, 0.6); }
 
 /* ---- menu ---- */
 .menu-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100%; gap: 22px; text-align: center; padding-top: 48px; }
@@ -239,7 +241,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .faction-card { position: relative; border: 1px solid var(--line); background: rgba(5, 7, 12, 0.55); cursor: pointer; padding: 8px 10px 10px; text-align: left; color: var(--text); font: inherit; transition: all var(--dur); border-radius: var(--radius); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .faction-card canvas { width: 100%; height: 86px; }
 .faction-card .fname { font-family: var(--font-title); font-size: 13px; letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.faction-card .ftag { font-size: 11.5px; color: var(--muted); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.faction-card .ftag { font-size: 11.5px; color: var(--muted); line-height: 1.3; }
 .faction-card:hover { border-color: var(--line-hi); }
 .faction-card.on { border-color: var(--fc, var(--accent)); box-shadow: 0 0 16px color-mix(in srgb, var(--fc, var(--accent)) 45%, transparent), inset 0 0 0 1px var(--fc, var(--accent)); }
 .faction-card.on .fname { color: var(--fc, var(--accent)); }
@@ -260,6 +262,12 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .ship-card .sc-meta { display: flex; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
 .ship-card .sc-stats { display: grid; gap: 3px; }
 .ship-card .sc-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.chip.good { box-shadow: inset 0 0 0 1px rgba(125, 255, 154, 0.7); color: #b8ffc8; }
+.chip.bad { box-shadow: inset 0 0 0 1px rgba(255, 77, 94, 0.6); color: #ffb3bb; opacity: 0.85; }
+.sc-ability-btn { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: help; text-align: left; }
+.sc-ability-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.enemy-intel .badge { text-transform: uppercase; }
+.fb-confirm-sm { display: none; }
 .ship-card .sc-ability { font-size: 11.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; min-height: 18px; }
 .ship-card .sc-ability b { color: var(--text); font-weight: 500; border-bottom: 1px dotted var(--muted); cursor: help; }
 .ship-card .sc-ctl { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 2px; }
@@ -308,7 +316,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .chat-log .m { word-break: break-word; }
 .chat-log .m b { color: var(--accent); font-weight: 600; }
 .chat-log .m.sys { color: var(--muted); font-style: italic; }
-.countdown-overlay { position: fixed; inset: 0; z-index: 30; background: rgba(5, 7, 12, 0.75); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+.countdown-overlay { position: fixed; inset: 0; z-index: 30; background: rgba(5, 7, 12, 0.93); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
 .countdown-num { font-family: var(--font-title); font-size: clamp(64px, 14vw, 120px); font-weight: 700; color: #eef7ff; text-shadow: 0 0 30px rgba(53, 200, 255, 0.7); animation: count-pop 900ms ease-out; }
 @keyframes count-pop { from { transform: scale(1.4); opacity: 0.2; } to { transform: scale(1); opacity: 1; } }
 .countdown-text { font-family: var(--font-title); letter-spacing: 0.2em; color: var(--muted); }
@@ -410,9 +418,24 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .opt-row .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
 
 /* ---- responsive ---- */
+@media (max-width: 1000px) {
+  /* SAIR must never sit on top of the team bars: move it next to the toggles */
+  .hud-left { top: auto; bottom: 12px; }
+  .hud-log { bottom: 48px; }
+}
+@media (pointer: coarse) {
+  /* touch targets: at least 40 px (WCAG 24, platform guidance 44-48) */
+  .btn-sm, .btn-icon, .hud-right .btn, .hud-left .btn, .hud-clock .speed .btn, .seg-btn { min-height: 40px; min-width: 40px; }
+  .ship-card .btn-icon { min-width: 44px; min-height: 40px; font-size: 16px; }
+  .hud-right { gap: 6px; }
+}
 @media (max-width: 960px) {
   .fb-layout, .lobby-layout, .res-layout, .sp-grid, .codex-detail { grid-template-columns: 1fr; }
   .fb-side { position: static; }
+  /* budget + confirm stay in view while the roster scrolls */
+  .fb-budget { position: sticky; top: 0; z-index: 6; background: rgba(5, 7, 12, 0.96); backdrop-filter: blur(6px); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .fb-budget .budget-head { flex: 1 1 auto; }
+  .fb-confirm-sm { display: inline-flex; }
   .faction-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .faction-lore { grid-template-columns: 1fr; }
   .faction-lore .passive { max-width: none; }
@@ -426,8 +449,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
   .level-grid { grid-template-columns: repeat(3, 1fr); }
   .slots { grid-template-columns: 1fr; }
   .roster { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-  .hud-log { width: 62%; bottom: 44px; }
-  .hud-right { max-width: 40%; }
+  .hud-log { width: 56%; bottom: 96px; }
+  .hud-right { max-width: 44%; }
   .hud-right .btn { font-size: 10px; padding: 4px 6px; }
   .hud-left { top: auto; bottom: 12px; }
   .hud-top { top: 6px; gap: 6px; }

@@ -133,6 +133,8 @@ export function env(v, t, p, dest) {
   const sus = Math.max(MIN_GAIN, (p.s || 0) * peak);
   const hold = Math.max(0, p.hold || 0);
   const r = Math.max(0.01, p.r || 0.05);
+  // a late envelope (t > voice start) must not leak the source at the default gain 1 first
+  if (v.t !== undefined && t > v.t) g.gain.setValueAtTime(0, v.t);
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(peak, t + a);
   g.gain.exponentialRampToValueAtTime(sus, t + a + d);
@@ -596,8 +598,8 @@ function castArea(v) {   // EMP / dissonance / singularity: rising zap then elec
   const sq = osc(v, 'square', 2400, t, g);
   pitchSweep(sq.frequency, 2400, 300, t + 0.15, t + 0.7);
   const ng = env(v, t + 0.15, { a: 0.005, d: 0.3, r: 0.4, peak: gain * 0.4 }, out);
-  const n = noise(v, 'crackle', t, hp(v, 2000, 0.7, ng));
-  play(v, o, t, t + 0.9); play(v, sq, t, t + 0.9); play(v, n, t, t + 0.9);
+  const n = noise(v, 'crackle', t + 0.15, hp(v, 2000, 0.7, ng));
+  play(v, o, t, t + 0.9); play(v, sq, t, t + 0.9); play(v, n, t + 0.15, t + 0.9);
   send(v, g, 0.5);
 }
 

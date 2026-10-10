@@ -114,6 +114,12 @@ Variáveis de ambiente úteis:
 | `HOST` | interface de rede (padrão: todas) |
 | `MAX_ROOMS` | limite de salas simultâneas |
 | `FE_MAX_TICKS`, `FE_TICK_MS`, `FE_COUNTDOWN_MS` | encurtam batalhas/contagem (usado pelos testes) |
+| `MAX_SOCKETS_PER_IP` | conexões simultâneas por endereço (padrão `64`; `0` desliga) |
+| `MAX_ROOMS_PER_IP` | salas abertas por endereço (padrão `8`; `0` desliga) |
+| `TRUST_PROXY` | `1` atrás de um proxy reverso (Render, Fly…): usa `X-Forwarded-For` para os limites por endereço |
+| `FE_DRAIN_MS` | ao receber SIGTERM, espera até este tempo (padrão `25000`) para as batalhas terminarem antes de encerrar |
+| `FE_OPEN_BROWSER` | `1` abre o navegador quando o servidor sobe (o mesmo que `--open`); `NO_BROWSER=1` no `iniciar.sh` desliga |
+| `NODE_ENV` | `production` esconde as páginas de desenvolvimento em `/dev/` |
 
 `GET /health` responde `{ ok, rooms, uptime, sessions }`.
 
@@ -169,19 +175,19 @@ As dificuldades mudam os bots (e, no modo um jogador, o orçamento inimigo):
 |---|---|---|---|---|
 | Reação / precisão da IA | lenta, erra alvos e habilidades | média | rápida | perfeita |
 | Foco de fogo, recuo, formação | não | sim | sim | sim |
-| Como monta a frota | aleatória, gasta 60–85% | predefinição | **contra-ataque** à sua frota | **contra-ataque** |
-| Orçamento inimigo (× do nível) | menor | igual | maior | ainda maior |
+| Como monta a frota | aleatória, gasta 85–100% | predefinição do nível | predefinição do nível (contra-ataque a partir do 13) | predefinição do nível (contra-ataque a partir do 13) |
+| Orçamento inimigo (× do nível) | 0,85× | 1,0× | 1,0× | 1,05× (teto 1,0 / 1,10 / 1,15 / 1,25) |
 
 Os valores exatos ficam em `shared/aiProfiles.js`. Jogadores humanos sempre têm
 a IA de nave no nível *Especialista* — a dificuldade só afeta os bots.
 
 Os 15 níveis formam uma campanha: **1–3** Confederação Terrana (orçamento inimigo
-50–70% do seu), **4–6** Enxame Vorrax (chefe: Rainha-Guerreira no 6), **7–9**
-Ascendência Lúmen (chefe: Catedral no 9), **10–12** Nexo Ferrix (chefe: Mente
-Primária no 12), **13–15** facção aleatória com frotas de contra-ataque e orçamento
-120–150% (no 15 o inimigo sempre traz uma nave-mãe). A partir do **16** os níveis
-são infinitos e o orçamento inimigo cresce 10% por nível. O progresso (maior nível
-concluído por dificuldade) fica salvo no navegador.
+65–85% do seu), **4–6** Enxame Vorrax (chefe: Rainha-Guerreira no 6), **7–9**
+Ascendência Lúmen (chefe: Catedral no 9), **10–12** Nexo Ferrix (chefe: Mente Primária
+no 12), **13–15** facção aleatória com frotas de contra-ataque, IA um nível acima da
+escolhida e orçamento igual ao seu (uma nave-capital garantida no 14, uma nave-mãe no 15).
+A partir do 16 os níveis são infinitos: o orçamento inimigo cresce 5% por onda e, acima de
+40 naves, o bot troca os cascos mais baratos pelos mais caros.
 
 ### Regras da batalha
 
@@ -213,6 +219,8 @@ reduzido, qualidade dos efeitos, nomes e grade padrão, seu nome, e pode zerar o
 
 ```bash
 npm test                     # testes unitários (node:test, test/**/*.test.js)
+npm run test:full            # o mesmo com as amostras completas da SPEC (FE_SEEDS=10; é o que o CI roda)
+npm run balance              # verificação de balanceamento (matriz, facções, dificuldade, escada; SPEC §8)
 npm run e2e                  # ponta a ponta no Chromium (Playwright): sobe o servidor
                              # numa porta livre e joga partidas reais pelo navegador
 npm run simulate -- --help   # simulador headless (frota × frota, matrizes, dificuldade)
@@ -239,6 +247,7 @@ node tools/simulate.js --a ter_falcao:6,ter_orion:3 --b lum_coro --seeds 20 --ai
 node tools/simulate.js --matrix --seeds 20        # todas as predefinições × todas (taxa de vitória)
 node tools/simulate.js --factions --seeds 20      # facção × facção, agregando predefinições
 node tools/simulate.js --difficulty --seeds 30    # cada dificuldade contra uma frota "normal"
+node tools/simulate.js --ladder normal --seeds 2  # a escada de níveis do modo um jogador (12 predefinições por nível)
 node tools/simulate.js --a ter_linha --b fer_ferro --dump 7 --out /tmp/dump   # eventos de uma semente
 ```
 

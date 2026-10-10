@@ -3,7 +3,7 @@
 // Emits a BattleFeed whose frames have exactly the server's shape plus `at`.
 // Speed 0/1/2/4; pauses automatically while the tab is hidden.
 
-import { createBattle, stepBattle, makeSnapshot, getResult, getInitialShips, battleWorld } from '/shared/sim/battle.js';
+import { createBattle, stepBattle, makeSnapshot, getResult, makeStartInfo } from '/shared/sim/battle.js';
 import { TICK_MS, TICK_RATE, SNAPSHOT_EVERY, MAX_TICKS } from '/shared/constants.js';
 import { createFeedBase, nowMs, normalizeSpeed } from './feed.js';
 import { createSimLoop } from '../util/simLoop.js';
@@ -16,19 +16,7 @@ const WORKER_START_TIMEOUT_MS = 4000;
  * @param {object} state  BattleState
  */
 export function buildStartInfo(config, state) {
-  return {
-    seed: config.seed,
-    players: config.players.map((p) => ({
-      id: p.id, name: p.name, team: p.team, isBot: !!p.isBot, faction: p.fleet.faction, fleet: p.fleet,
-      ai: p.ai || (p.isBot ? 'normal' : 'especialista'),
-    })),
-    ships: getInitialShips(state),
-    world: battleWorld(state),
-    tickRate: TICK_RATE,
-    snapshotEvery: SNAPSHOT_EVERY,
-    maxTicks: config.maxTicks || MAX_TICKS,
-    isLocal: true,
-  };
+  return { ...makeStartInfo(config, state), isLocal: true };
 }
 
 /**

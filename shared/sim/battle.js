@@ -5,6 +5,7 @@
 import { createRng } from '../rng.js';
 import {
   MAX_TICKS, SUDDEN_DEATH_TICK, SUDDEN_DEATH_RAMP, SUDDEN_DEATH_RAMP_TICKS, worldSize, POS_SCALE, ANGLE_STEPS, HP_SCALE,
+  TICK_RATE, SNAPSHOT_EVERY,
 } from '../constants.js';
 import { AI_PROFILES, HUMAN_AI_PROFILE, getAiProfile } from '../aiProfiles.js';
 import { SHIPS } from '../catalog.js';
@@ -43,7 +44,31 @@ function validateConfig(config) {
     if (p.team !== 0 && p.team !== 1) throw new Error(`player ${p.id}: team must be 0 or 1`);
     if (!p.fleet || !Array.isArray(p.fleet.ships)) throw new Error(`player ${p.id}: fleet required`);
     for (const e of p.fleet.ships) if (!SHIPS[e.cls]) throw new Error(`player ${p.id}: unknown class ${e.cls}`);
+    // a typo here would silently become the strongest AI (getAiProfile's fallback)
+    if (p.ai !== undefined && p.ai !== null && !AI_PROFILES[p.ai]) throw new Error(`player ${p.id}: unknown ai profile ${p.ai}`);
   }
+}
+
+/**
+ * BattleStartInfo (docs/ARCHITECTURE.md §3): everything a client needs to render a battle from
+ * its first frame. Built here once so the server, the local runner and the worker never drift.
+ * Bots default to the 'normal' profile and humans to the best one, like createBattle does.
+ * @param {object} config BattleConfig
+ * @param {object} state  the freshly created battle state
+ */
+export function makeStartInfo(config, state) {
+  return {
+    seed: config.seed,
+    players: config.players.map((p) => ({
+      id: p.id, name: p.name, team: p.team, isBot: !!p.isBot, faction: p.fleet.faction, fleet: p.fleet,
+      ai: p.ai || (p.isBot ? 'normal' : HUMAN_AI_PROFILE.id),
+    })),
+    ships: getInitialShips(state),
+    world: battleWorld(state),
+    tickRate: TICK_RATE,
+    snapshotEvery: SNAPSHOT_EVERY,
+    maxTicks: config.maxTicks || MAX_TICKS,
+  };
 }
 
 /**

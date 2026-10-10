@@ -19,7 +19,7 @@ export const TICK_MS = 25;
 export const STEPS_PER_BAR = 16;
 
 /** Layer thresholds (intensity ≥ on; off when < on − HYSTERESIS). */
-export const LAYER_ON = [0, 0.1, 0.25, 0.45, 0.65, 0.85];
+export const LAYER_ON = [0, 0.1, 0.2, 0.35, 0.5, 0.68];
 export const HYSTERESIS = 0.15;
 export const PROG_B_LAYER = 4;
 
@@ -70,8 +70,9 @@ export function computeIntensity(s) {
   const minAlive = Math.min(a[0] ?? 1, a[1] ?? 1);
   const destroyed = Math.max(0, Math.min(1, Number(s.destroyedFrac) || 0));
   const elapsed = Math.max(0, Number(s.elapsedSec ?? s.elapsed) || 0);
-  const x = 0.35 * destroyed + 0.25 * Math.min(1, elapsed / 90) + 0.4 * (1 - Math.max(0, Math.min(1, minAlive)));
-  return Math.max(0, Math.min(1, x));
+  const density = Math.max(0, Math.min(1, Number(s.density) || 0));
+  const x = 0.45 * destroyed + 0.2 * Math.min(1, elapsed / 60) + 0.35 * (1 - Math.max(0, Math.min(1, minAlive)));
+  return Math.max(0, Math.min(1, Math.max(x, density)));
 }
 
 /**
@@ -377,19 +378,19 @@ export function createMusicEngine(o) {
       th.onStep = (t, step, time) => {
         if (step === 0) stingerVictory(time, t.bus);
         const bar = Math.floor(step / STEPS_PER_BAR);
-        if (bar >= 2) {
-          const prog = PROGRESSIONS.victory;
-          if (step % 32 === 0) pad(time, prog[((bar - 2) / 2) % prog.length], 32 * t.stepDur, t.bus, { cutoff: 1200, gain: 0.12, send: 0.3 });
-          if (rng.next() < 0.18) arp(time, [62, 66, 69, 74, 78, 81][Math.floor(rng.next() * 6)] + 12, d.input, { gain: 0.07 });
-        }
+        const prog = PROGRESSIONS.victory;
+        // the pad enters under the stinger (quietly) so the theme never falls silent between the two
+        if (step % 32 === 0) pad(time, prog[Math.floor(bar / 2) % prog.length], 32 * t.stepDur, t.bus, { cutoff: bar < 2 ? 700 : 1200, gain: bar < 2 ? 0.06 : 0.12, send: 0.3 });
+        if (bar >= 1 && rng.next() < 0.18) arp(time, [62, 66, 69, 74, 78, 81][Math.floor(rng.next() * 6)] + 12, d.input, { gain: bar < 2 ? 0.045 : 0.07 });
       };
     },
     defeat(th) {
-      th.drones.push(drone(th.startAt + 1.5, mtof(38), th.bus, { gain: 0.12 }));
+      th.drones.push(drone(th.startAt, mtof(38), th.bus, { gain: 0.12 }));
       th.onStep = (t, step, time) => {
         if (step === 0) stingerDefeat(time, t.bus);
         const bar = Math.floor(step / STEPS_PER_BAR);
-        if (bar >= 1 && step % 32 === 16) {
+        // first pad at step 16 of bar 0 (under the stinger's tail), then every two bars
+        if (step % 32 === 16) {
           const prog = PROGRESSIONS.defeat;
           pad(time, prog[Math.floor(bar / 2) % prog.length], 32 * t.stepDur, t.bus, { cutoff: 500, gain: 0.12, type: 'triangle', send: 0.35 });
         }

@@ -166,6 +166,10 @@ async function main() {
       const gshot = async (name) => { const p = join(OUT, `${String(shots.length + 1).padStart(2, '0')}-${name}.png`); await guest.screenshot({ path: p }); shots.push(p); console.log('shot', p); };
       const gclick = async (test) => { await guest.click(`[data-test="${test}"]`); await sleep(250); };
       await guest.goto(url(`?sala=${code}&debug=1`), { waitUntil: 'load' });
+      // a friend opening the link has no name yet: the entry asks for it inline
+      await guest.waitForSelector('[data-test="mp-name"]', { timeout: 10000 });
+      await guest.fill('[data-test="mp-name"]', 'Bia');
+      await gclick('mp-name-ok');
       await guest.waitForSelector('[data-test="room-code"]', { timeout: 15000 });
       await sleep(600); await gshot('lobby-guest-joined');
       // host: bots in the remaining slots, fleet, ready

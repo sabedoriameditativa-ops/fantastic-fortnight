@@ -91,7 +91,9 @@ const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
  */
 export function validateName(s) {
   if (typeof s !== 'string') return null;
-  const name = s.replace(/\s+/g, ' ').trim();
+  // Unicode format characters (bidi overrides, zero-width joiners, soft hyphens...) let a name
+  // impersonate another or render invisibly: strip them before the length / control checks.
+  const name = s.replace(/[\p{Cf}\u2028\u2029]/gu, '').replace(/\s+/g, ' ').trim();
   if (name.length < 1 || name.length > MAX_NAME_LENGTH) return null;
   if (CONTROL_CHARS.test(name)) return null;
   return name;

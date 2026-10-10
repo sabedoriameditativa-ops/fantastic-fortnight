@@ -111,7 +111,8 @@ ships: spawns beyond it are skipped.
 ## 3. Ship AI
 
 All of this runs inside the simulation (identical on server and client). Each ship
-`decide()`s every `thinkInterval` ticks (staggered by `id % interval`); the actuator runs
+`decide()`s every `thinkInterval` ticks (staggered by its team-local slot, `slot % interval`, so
+mirrored fleets think in the same order on both sides); the actuator runs
 every tick. Terminology from `docs/design/battle-ai.md` §2–3.
 
 ### 3.1 Roles → default movement when engaged
@@ -119,17 +120,22 @@ every tick. Terminology from `docs/design/battle-ai.md` §2–3.
 |---|---|---|---|
 | diver | tiny ships, Zangão, Carrapato | `orbit` target at 0.6·range (tangent by id parity) | ignore formation once engaged; prefer support/carrier/kiter targets behind the line |
 | brawler | Falcão, Órion, Hércules, Mandíbula, Rainha, Ressonante, Serafim, Disruptor, Bastião | `hold` at 0.7·range | |
-| kiter | Cuspidor, Prisma, Harmônico, Sentinela, Aríete, Catedral | `kite` band 0.75–0.95·range | backs away from faster threats while firing |
+| kiter | Cuspidor, Prisma, Harmônico, Sentinela, Aríete, Catedral | `kite` band 0.75–0.95·range | backs off below 0.75·range until past 0.85·range (dead band; heading is the memory); a fixed gun (arc < 180°) backs off only from a threat it outruns by enough to pay for turning around to shoot (`(speed − t.speed)·cooldown > t.speed·2·(180° − arc)/turnRate`) and, whenever the gun is ready with an enemy in reach but outside the arc, turns to face it for the shot if that turn costs ≤ 0.5·cooldown; in the band turrets strafe along the tangent, fixed guns with arc ≥ 80° strafe 10° inside the arc (target stays in arc), narrower guns stand and face the target |
 | striker | Lança | `approach` to 0.8·range, fire, then `kite` | uses stealth to close |
 | escort | Ártemis | `escortSlot` 60 u in front of the most valuable ally | engages anything within 1.2·range |
-| support | Véu | `escortSlot` behind the most valuable ally | targets by ability |
-| carrier | Atlas, Matriz, Fabricador, Núcleo | `backline`: 250 u behind the team centroid toward own side; flee threats within 200 u | |
-| anchor | motherships | `hold`, speed ≤ 0.6·max, advances slowly with the team | |
+| support | Véu | `escortSlot` behind the medium+ ship of the fighting line nearest the line centroid (whole team) | never another support or a tiny; without such a ship the most valuable non-support within 500 u, then the anchor; targets by ability |
+| carrier | Atlas, Matriz, Fabricador, Núcleo | `backline`: 250 u behind the front third of the line (on the enemy-centroid → line-centroid axis); when the nearest enemy is beyond 0.9·own gun range and the carrier outranges it (`e.maxRange < 0.9·gun range`), pulled toward it by ≤ 125 u; 40 u dead band; flee threats within 200 u | a carrier a line ship outguns (Matriz spores 300 u vs 450 u autocannons) or with point defense only never steps up: its worth is what it launches |
+| anchor | motherships | `hold` at max(0.7·engageRange, 0.85·main-gun range), speed ≤ 0.6·max, advances toward the enemy mass only while behind the front third of the line (minus 60 u), or when no line ship is left | never leads the fleet |
+
+Brawlers with turret guns (arc ≥ 180°) keep a stand-off in `hold`: back off at 0.6·max below 0.45·range until past 0.6·range (fixed-gun brawlers only stop).
+Ships in `escortSlot` (near the slot), `kite` or `retreat` whose fixed-arc main gun is ready while an enemy is within its reach but outside the arc turn to face that enemy for the shot (if the turn costs ≤ 0.5·cooldown), then move on.
 
 Other modes: `formation` (advance phase: keep slot relative to the team anchor, move at
 the group speed = slowest non-diver alive ship), `retreat` (to nearest support/carrier or
 rear point; hull < threshold by role: diver 0.35, kiter 0.4, brawler 0.25, escort/support 0.45;
-exit at +0.2 or when alone; a retreat ended by the 10 s cap starts a 15 s cooldown before another; hulls that cannot regenerate exit when shield ≥ 60% of cap), `idleAdvance` (no target: move toward enemy centroid at 0.5·max).
+hulls that cannot regenerate enter only with shield < 30% of cap and exit when shield ≥ 60%; others exit at +0.2;
+also exits when alone or by the 10 s cap; EVERY exit starts a 15 s cooldown before another retreat (no flip-flop);
+spawned units (cost 0) and tiny ships cheaper than 20 never retreat; a larva below 50% hull with an enemy within 250 u dives at the nearest enemy instead), `idleAdvance` (no target: move toward enemy centroid at 0.5·max).
 
 Phases: `advance` until first contact (any ship within 1.1·range of an enemy) or 45 s,
 then `engage` (`['phase','engage']`).
@@ -148,15 +154,26 @@ switch target only if best > current·1.25 + 0.05, or current invalid, or commit
 ```
 Weights per role as in `docs/design/battle-ai.md` §2.3. Weapons with `minTargetClass` or
 `pd` select their own sub-targets each tick (PD: nearest interceptable projectile, then
-nearest enemy).
+nearest enemy). A heavy-alpha weapon (damage × salvo ≥ 60) whose effective damage exceeds
+2× the ship target's hp+shield picks the shootable enemy with the best min(ehp, damage)×accuracy
+instead (the ship target, i.e. movement, is unchanged). The per-tick fallback that gives a
+target-less ship the nearest enemy prefers, for a main gun hitting for ≥ 100 per trigger pull,
+the nearest enemy with ehp ≥ half that hit.
 
-### 3.3 Team coordination (`teamThink`, every 10 ticks, teams staggered)
+### 3.3 Team coordination (`teamThink`, every 10 ticks, both teams on the same tick)
 - Team centroid (cost-weighted), anchor (mothership → highest-cost capital → virtual), phase.
+- Front of the line (`frontDist`): distance from the enemy centroid of the ship at the first
+  third of the purchased non-diver/carrier/anchor ships sorted nearest-first (carriers hold
+  behind it, the anchor never advances past it).
 - Greedy focus allocation: iterate own ships by (long-range first, then id), assign each the
-  best enemy by `(cost/ehp) × dmgMult × proximity × (allocDps·3 < ehp ? 1 : 0.3) × (enemy is
-  targeting a low-hp ally ? 1.5 : 1)`; `allocDps` accumulates. Assignment is a suggestion
-  (`W.team`), not an order.
-- Protectees for escorts/supports: highest-cost ally within 500 u.
+  best enemy by `(cost/ehp) × dmgMult × proximity × (enemy is targeting a low-hp ally ? 1.5 : 1)`;
+  `allocDps` accumulates. A target whose ehp the allocated dps kills within 2 s is saturated
+  (score × 0.3) and takes no further ships while an unsaturated candidate exists (focus spills
+  to the next target). Assignment is a suggestion (`W.team`), not an order.
+- Protectees: escorts take the highest-cost ally within 500 u; supports take the medium+ ship of
+  the fighting line (brawler/kiter/escort/striker) nearest the line centroid, searched over the
+  whole team, never another support nor a tiny; without one, the most valuable non-support
+  non-tiny ally within 500 u; else the anchor.
 - Leash: non-divers stay within 350 u (advance) / 900 u (engage) of the anchor.
 
 ### 3.4 Expected incoming damage
@@ -169,12 +186,12 @@ damage of projectiles in flight toward me. Used by retreat, shields, teleports, 
 | afterburner | target farther than range+100 and < 3·range, or retreating with incoming > 30% hp, or targeted by ≥ 3 |
 | countermeasures | ≥ 1 interceptable projectile homing on self |
 | stealth_strike | enemy large+ within 700 and torpedo ready within 2 s; stays untargetable until it fires |
-| flak_curtain | ≥ 3 enemy interceptables in flight toward allies within 300, or ≥ 6 enemy tiny within 320 |
+| flak_curtain | ≥ 3 enemy interceptables in flight toward allies within 300, or a swarm: ≥ 3 enemy tiny within 320, ≥ 4 within 450, or an ally within 300 with ≥ 2 tiny within 120 u of it |
 | barrage_fire | ≥ 2 enemy medium+ within 520 or enemy capital+ in range |
 | reactive_armor | hull < 60% or targeted by ≥ 3 |
 | launch_squadron | ready and (tick < 60 or enemy within 1000) |
 | siege_protocol | ≥ 50% of allied surviving cost within 600 and ≥ 3 enemies within 700 |
-| bile_burst | passive: on death (and when hull < 20% the larva dives into the nearest enemy and detonates) |
+| bile_burst | passive: on death (and when hull < 50% with an enemy within 250 u the larva dives into the nearest enemy and detonates; larvae never retreat) |
 | frenzy | an allied Vorrax died within 150 u in the last 10 ticks |
 | acid_cloud | ≥ 2 enemies within a 100 u circle inside range (densest point) |
 | leech | enemy medium+ within 150 u; detaches if host dies/teleports (0.5 s stun) |
@@ -189,7 +206,7 @@ damage of projectiles in flight toward me. Used by retreat, shields, teleports, 
 | phase_jump | defensive: shield < 25% and ≥ 2 enemies within 300 → away from enemy centroid; offensive: shield > 80%, no enemy within 480, enemy capital+ within 900 → toward it |
 | aurora | ≥ 3 allies within 400 with shield < 50% |
 | singularity | ≥ 4 enemies or ≥ 2 medium+ within a 250 u circle inside 800 u |
-| overclock | ≥ 3 other Vetores targeting my target |
+| overclock | ≥ 2 other Vetores within 400 u targeting my target (3 Vetores on one target, as the catalog says) |
 | turret_mode | no enemy within 250 and an enemy within 1.5·range |
 | emp_pulse | enemy with shield > 50% within 150 or enemy organic medium+ within 150 |
 | reactive_nanites | hull < 35% |
@@ -212,23 +229,61 @@ Effects of the same ability id refresh (longest duration wins) instead of stacki
 | teamWeight (focus fire) | 0 | 0.5 | 1 | 1 |
 | overkillAvoid | off | off | on | on |
 | retreat / formation / kiting | off | on | on | on |
-| budgetMul (enemy budget) | 0.8 | 1.0 | 1.05 | 1.2 |
-| builder | random | preset | counter | counter |
+| budgetMul (enemy budget) | 0.85 | 1.0 | 1.0 | 1.05 |
+| budgetCap (effective enemy budget ceiling, §4) | 1.0 | 1.10 | 1.15 | 1.25 |
+| builder (default; levels name their own, §4) | random | preset | counter | counter |
+
+Difficulty ramps through the AI knobs; the budget steps are deliberately small (budget
+dominates skill: a 10% budget edge alone costs the player ~20–35 points of win rate).
 Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
 
 ## 4. Single-player
 - Setup: level (1–15, endless after), difficulty, team size (1v1..6v6). Allies are bots of
   the player's chosen ally difficulty (default normal) with random factions and preset
   fleets; enemies follow the level.
-- Enemy budget = `round(1500 × level.enemyBudgetMul × profile.budgetMul)`; the player always has 1500.
-- Levels: 1 Primeiro Contato (terran ×0.5, random builder), 2 Patrulha de Fronteira (terran ×0.6),
-  3 Bloqueio Orbital (terran ×0.7), 4 Ninho Vorrax (vorrax ×0.7), 5 Maré Viva (vorrax ×0.8),
-  6 A Rainha Desperta (vorrax ×0.9, boss: Rainha guaranteed), 7 Luz Distante (lumen ×0.85),
-  8 Coro de Cristal (lumen ×0.95), 9 Catedral Errante (lumen ×1.0, boss Catedral),
-  10 Sinal Ferrix (ferrix ×0.95), 11 Linha de Ferro (ferrix ×1.05), 12 Mente Primária (ferrix ×1.15, boss),
-  13 Aliança Rompida (random ×1.2, counter builder), 14 Armada Negra (random ×1.3, counter),
-  15 Fim dos Tempos (random ×1.5, counter + mothership guaranteed). Level n > 15: random,
-  ×(1.5 + 0.1·(n−15)). Progress (max level cleared per difficulty) in `localStorage`.
+- Enemy budget = `round(1500 × min(level.enemyBudgetMul × profile.budgetMul, profile.budgetCap))`
+  (`levels.js effectiveBudgetMul`); the player always has 1500. The ladder ramps through
+  composition (every authored level names its builder and preset, so its description holds
+  on every difficulty), bosses and AI quality (`aiTier` shifts the enemy AI profile one step
+  up or down from the chosen difficulty, clamped) — not through points: the effective enemy
+  budget never exceeds 1.10× on Normal, 1.15× on Difícil, 1.25× on Especialista.
+- The `counter` builder is reserved for L13+ and endless. It is soft: among the presets of
+  the faction it samples one weighted by score from those scoring ≥ 85% of the best
+  (`botFleet.js COUNTER_NEAR_BEST`), so a counter-pick is a tendency, not a certainty.
+  The `random` builder spends 85–100% of the budget (the randomness is in the composition).
+- Levels (level multiplier, builder/preset, boss, AI tier):
+
+| # | name | enemy | ×budget | builder / preset | boss | aiTier |
+|---|---|---|---|---|---|---|
+| 1 | Primeiro Contato | terran | 0.65 | random | — | 0 |
+| 2 | Patrulha de Fronteira | terran | 0.75 | preset ter_misseis | — | 0 |
+| 3 | Bloqueio Orbital | terran | 0.85 | preset ter_atlas | Hércules | 0 |
+| 4 | Ninho Vorrax | vorrax | 0.85 | preset vor_mare | — | 0 |
+| 5 | Maré Viva | vorrax | 0.90 | preset vor_chuva | — | 0 |
+| 6 | A Rainha Desperta | vorrax | 0.95 | preset vor_garras | Rainha-Guerreira | 0 |
+| 7 | Luz Distante | lumen | 0.95 | preset lum_dissonancia | — | 0 |
+| 8 | Coro de Cristal | lumen | 1.00 | preset lum_coro | — | 0 |
+| 9 | Catedral Errante | lumen | 1.00 | preset lum_catedral | Catedral | 0 |
+| 10 | Sinal Ferrix | ferrix | 1.00 | preset fer_fabrica | — | 0 |
+| 11 | Linha de Ferro | ferrix | 1.00 | preset fer_ferro | — | 0 |
+| 12 | Mente Primária | ferrix | 1.00 | preset fer_apagao | Mente Primária | 0 |
+| 13 | Aliança Rompida | random | 1.00 | counter | — | +1 |
+| 14 | Armada Negra | random | 1.00 | counter | a capital | +1 |
+| 15 | Fim dos Tempos | random | 1.00 | counter | a mothership | +1 |
+
+  Level n > 15 (endless, "Além do Fim — Onda n−15"): random faction, counter builder,
+  mothership guaranteed, aiTier +1, level multiplier 1.0 + 0.05·(n−15); the profile cap
+  also rises by 0.05 per wave. A fleet is at most 40 ships, so deep endless budgets outgrow
+  the roster: the preset's upgrade pass then trades the cheapest hulls up through the whole
+  faction roster (`fleet.js rosterUpgradePass`), and `levels.js enemyBudgetInfo` /
+  `spConfig.js spLevelInfo` report the value that can really be bought (`spendable`) and the
+  value actually spent (`meta.enemySpent`) for the setup panel. Progress (max level cleared
+  per difficulty) in `localStorage`.
+- Ladder band (measured with `node tools/simulate.js --ladder normal --seeds 2`: every
+  preset at 1500, driven by the `especialista` AI as a human fleet is, vs the level's enemy):
+  pooled preset win rate on Normal ≈ 85–100% at L1, 35–80% at L8, ≥ 25% at L13–15 and no
+  level where every preset loses; Difícil a little lower, Especialista lower still but L15
+  winnable by the best fleets; Fácil wins most levels but not all of L13–15.
 - Results screen offers: play again (same fleet, new seed), next level, edit fleet, menu.
 
 ## 5. Multiplayer
@@ -268,10 +323,18 @@ Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
 ## 8. Balance and acceptance criteria (headless, `tools/simulate.js`)
 1. Determinism: same config + seed → identical `hashState` at ticks 100, 1000 and end; identical event stream.
 2. Mirror matches (each preset vs itself, sides swapped, ≥ 40 seeds): side win rate 50% ± 10, draws < 5%.
-3. Faction matrix (presets pooled, ≥ 20 seeds per pair, both sides): every faction vs every other within 35–65%.
-4. Per-preset pairs within 20–80% (hard counters allowed, stomps not).
+3. Faction matrix (presets pooled, ≥ 24 seeds per pair, both sides): every faction vs every other within 35–65%.
+4. Per-preset pairs within 15–85% over 20 seeds in each order (40 battles per pair; hard counters allowed, stomps not).
 5. Pace: median battle 60–160 s, p95 < 240 s (timeouts < 10%).
 6. Difficulty monotonic: vs a `normal` preset fleet, enemy win rate: facil < normal < dificil < especialista, with especialista ≥ 70%, facil ≤ 35%.
+6b. Single-player ladder within the §4 band (Normal, 12 presets × 2 seeds per level).
+
+Criteria 2–6b are checked by `npm run balance` (`tools/balance-check.js`: matrix 20 seeds,
+factions 24, difficulty 40, ladder Normal ×2, run as parallel `simulate.js --json`
+subprocesses; `--quick` for a smoke run). It is opt-in (a few minutes), not part of
+`npm test`; `npm test` only checks mirrors (`test/sim/mirror.test.js`) and that the
+ladder's effective budget curve is monotonic and capped (`test/rules/levels.test.js`).
 7. Never idle: every alive, non-disrupted ship has a target or a movement intent while enemies live.
 8. Abilities fire: in a 1v1 with one of every ship class per side, every ability id appears in ≥ 1 `cast` event in ≥ 80% of seeds (passives excluded).
-9. Performance: 6v6 full fleets (≈ 500 ships) ≤ 10 ms per tick average in Node.
+9. Performance: 6v6 full fleets (≈ 500 ships) ≤ 10 ms per tick average in Node (measured ≈ 5 ms;
+   the unit test asserts < 20 ms to absorb slow CI runners).

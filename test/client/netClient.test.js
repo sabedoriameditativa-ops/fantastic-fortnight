@@ -10,8 +10,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (!fn()) { if (Date.now() - t0 > ms) throw new Error('timeout waiting'); await wait(10); } };
 
 /** Minimal fake server speaking the ARCHITECTURE §4.2 protocol (subset). */
-function fakeServer() {
-  const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+function fakeServer(port = 0) {
+  const wss = new WebSocketServer({ port, host: '127.0.0.1' });
   const sessions = new Map(); // token → session
   const rooms = new Map();
   const received = [];
@@ -225,7 +225,7 @@ describe('NetClient', () => {
   test('gives up after the backoff schedule → status lost; reconnect() retries', async () => {
     const local = fakeServer();
     await until(() => !!local.wss.address());
-    const c = createNetClient(local.url, { ...opts(), backoff: [20, 20] });
+    const c = createNetClient(local.url, { ...opts(), backoff: [20, 20], retryWindowMs: 0 });
     await c.connect('Ana');
     await local.close();
     await until(() => c.status === 'lost', 3000);
@@ -239,7 +239,7 @@ describe('NetClient', () => {
   test('connect() after the backoff is exhausted rejects with CONNECT_FAILED instead of hanging', async () => {
     const local = fakeServer();
     await until(() => !!local.wss.address());
-    const c = createNetClient(local.url, { ...opts(), backoff: [20, 20] });
+    const c = createNetClient(local.url, { ...opts(), backoff: [20, 20], retryWindowMs: 0 });
     await c.connect('Ana');
     await local.close();
     await until(() => c.status === 'lost', 3000);
@@ -253,6 +253,40 @@ describe('NetClient', () => {
     await until(() => c.status === 'reconnecting');
     c.dispose();
     await assert.rejects(p, (e) => e.code === 'DISCONNECTED' || e.code === 'CONNECT_FAILED');
+  });
+
+  test('keeps retrying through the grace window (not just 5 tries) and recovers when the server is back', async () => {
+    const local = fakeServer();
+    await until(() => !!local.wss.address());
+    const port = local.wss.address().port;
+    const c = createNetClient(local.url, { ...opts(), backoff: [20, 20], retryWindowMs: 5000 });
+    await c.connect('Ana');
+    await local.close();
+    await until(() => c.status === 'reconnecting', 2000);
+    await new Promise((r) => setTimeout(r, 150));   // well past 2 x 20 ms: the old client would be 'lost' by now
+    assert.equal(c.status, 'reconnecting', 'still trying while the server keeps the seat');
+    const again = fakeServer(port);
+    await until(() => !!again.wss.address());
+    await until(() => c.status === 'ok', 4000);
+    c.dispose();
+    await again.close();
+  });
+
+  test('close code 4001 (session replaced by another tab) is terminal: status replaced, token forgotten, no ping-pong', async () => {
+    const local = fakeServer();
+    await until(() => !!local.wss.address());
+    const store = new Map();
+    const c = createNetClient(local.url, { ...opts(), store, backoff: [20, 20] });
+    await c.connect('Ana');
+    const serverWs = [...local.wss.clients][0];
+    serverWs.close(4001, 'replaced');
+    await until(() => c.status === 'replaced', 2000);
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(c.status, 'replaced');
+    assert.equal(local.wss.clients.size, 0, 'did not reconnect');
+    assert.ok(!store.get('fe.token'), 'token cleared');
+    c.dispose();
+    await local.close();
   });
 
   test('a late error for a request that already timed out is surfaced as unsolicited (no rid)', async () => {

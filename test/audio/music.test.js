@@ -95,14 +95,14 @@ describe('music engine', () => {
     run(engine, ctx, 0.5);
     const m = engine.music;
     const L = m.current.layers;
-    m.setIntensity(0.7);
+    m.setIntensity((LAYER_ON[4] + LAYER_ON[5]) / 2);
     assert.deepEqual(m.layersOn, [true, true, true, true, true, false]);
     assert.equal(L[3].gain.events.at(-1).v, 1);
     assert.equal(L[4].gain.events.at(-1).v, 1);
     assert.equal(L[4].gain.events.at(-1).m, 'tgt');
     assert.equal(m.progB, true);
-    m.setIntensity(0.6);
-    assert.equal(m.layersOn[4], true, 'hysteresis keeps L4 at 0.6');
+    m.setIntensity(LAYER_ON[4] - HYSTERESIS / 2);
+    assert.equal(m.layersOn[4], true, 'hysteresis keeps L4 just under its threshold');
     m.setIntensity(LAYER_ON[4] - HYSTERESIS - 0.01);
     assert.equal(m.layersOn[4], false);
     assert.equal(L[4].gain.events.at(-1).v, 0);
@@ -120,9 +120,12 @@ describe('music engine', () => {
   test('computeIntensity follows the design formula and clamps', () => {
     assert.equal(computeIntensity(null), 0);
     assert.equal(computeIntensity({ aliveFrac: [1, 1], destroyedFrac: 0, elapsedSec: 0 }), 0);
-    const x = computeIntensity({ aliveFrac: [0.6, 0.5], destroyedFrac: 0.45, elapsedSec: 90 });
-    assert.ok(Math.abs(x - (0.35 * 0.45 + 0.25 + 0.4 * 0.5)) < 1e-9);
+    const x = computeIntensity({ aliveFrac: [0.6, 0.5], destroyedFrac: 0.45, elapsedSec: 60 });
+    assert.ok(Math.abs(x - (0.45 * 0.45 + 0.2 + 0.35 * 0.5)) < 1e-9);
     assert.equal(computeIntensity({ aliveFrac: [0, 0], destroyedFrac: 1, elapsedSec: 999 }), 1);
+    // the action-density term (sound requests per second, from the engine) can only raise it
+    assert.equal(computeIntensity({ aliveFrac: [1, 1], destroyedFrac: 0, elapsedSec: 0, density: 0.7 }), 0.7);
+    assert.ok(computeIntensity({ aliveFrac: [0.2, 0.9], destroyedFrac: 0.8, elapsedSec: 60, density: 0.1 }) > 0.5);
   });
 
   test('scene transition: old lin→0 and new lin→1 at the same t, on a bar boundary of the old theme', async () => {

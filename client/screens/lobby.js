@@ -31,10 +31,15 @@ export function mount(root, props, ctx) {
 
   // ---- helpers ----
   const myName = () => state.playerName || 'Comandante';
+  const CALLSIGNS = ['Falcão', 'Nebulosa', 'Quasar', 'Órbita', 'Cometa', 'Vórtice', 'Zênite', 'Aurora', 'Pulsar', 'Andrômeda', 'Sirius', 'Vega'];
+  function randomCallsign() {
+    const a = CALLSIGNS[Math.floor(Math.random() * CALLSIGNS.length)];
+    return `${a}-${Math.floor(10 + Math.random() * 90)}`;
+  }
   function fail(e) { if (!disposed) ctx.toast(errorMessage(e && e.code || 'UNKNOWN', e && e.detail), 'error'); }
 
   async function ensureNet() {
-    if (!state.playerName) { ctx.toast(T.mp.needName, 'warn'); }
+    if (!state.playerName) { ctx.toast(T.mp.needName, 'warn'); renderEntry(T.mp.needName); return null; }
     renderConnecting();
     try {
       net = await ctx.getNet();
@@ -49,6 +54,8 @@ export function mount(root, props, ctx) {
   }
 
   let subscribedTo = null;
+  let latTimer = null;
+  let pendingCode = null;   // room code typed / linked before the player had a name
   function subscribe() {
     if (!net || subscribedTo === net) return;
     subscribedTo = net;
@@ -111,24 +118,47 @@ export function mount(root, props, ctx) {
       if (!net || !net.connected) { if (!(await ensureNet())) return; }
       createBtn.disabled = true;
       try { const room = await net.createRoom({ teamSize, budget }); chatMessages.length = 0; renderRoom(room); }
-      catch (e) { fail(e); createBtn.disabled = false; }
+      catch (e) { fail(e); createBtn.disabled = false; if (view !== 'entry') renderEntry(); }
     }
     async function join() {
       const code = normalizeRoomCode(codeInput.value);
       if (!isRoomCode(code)) { ctx.toast(T.mp.codeHint, 'warn'); codeInput.focus(); return; }
+      if (!state.playerName) { pendingCode = code; renderEntry(T.mp.needName); return; }
       if (!net || !net.connected) { if (!(await ensureNet())) return; }
       joinBtn.disabled = true;
       try { const room = await net.joinRoom(code); chatMessages.length = 0; renderRoom(room); }
-      catch (e) { fail(e); joinBtn.disabled = false; }
+      catch (e) { fail(e); joinBtn.disabled = false; if (view !== 'entry') renderEntry(); }
+    }
+    // no name yet (first visit, or a friend's ?sala= link): ask for it right here instead of
+    // bouncing the player back to the menu; a valid code already typed is joined right after
+    let namePanel = null;
+    if (!state.playerName) {
+      const nameInput = h('input.input', { type: 'text', test: 'mp-name', maxlength: 20, placeholder: T.mp.namePlaceholder, autocomplete: 'nickname', value: '' });
+      const useName = () => {
+        const v = ctx.setPlayerName(nameInput.value);
+        if (!v) { ctx.toast(T.mp.needName, 'warn'); nameInput.focus(); return; }
+        const code = normalizeRoomCode(codeInput.value);
+        if (isRoomCode(code)) { pendingCode = null; props.joinCode = code; renderEntry(); }
+        else renderEntry();
+      };
+      nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') useName(); });
+      namePanel = h('div.panel.stack', { test: 'mp-name-panel', style: { marginBottom: '12px' } },
+        h('h2', { text: T.mp.nameTitle }),
+        h('div.row.gap.wrap', nameInput,
+          button(T.mp.nameOk, { test: 'mp-name-ok', primary: true, onClick: useName }),
+          button(T.mp.nameRandom, { test: 'mp-name-random', class: 'btn-sm', onClick: () => { nameInput.value = randomCallsign(); nameInput.focus(); } })),
+        h('div.tiny.muted', { text: T.mp.nameHint }));
+      setTimeout(() => { try { nameInput.focus(); } catch { /* ignore */ } }, 50);
     }
     add(container, 
       head(T.mp.title, T.mp.subtitle),
-      errorText ? h('div.validation.error', { style: { marginBottom: '12px' } }, errorText, ' ', button('↻', { test: 'retry-connect', class: 'btn-sm', onClick: () => ensureNet().then((n) => { if (n) renderEntry(); }) })) : null,
+      errorText && errorText !== T.mp.needName ? h('div.validation.error', { style: { marginBottom: '12px' } }, errorText, ' ', button('↻', { test: 'retry-connect', class: 'btn-sm', onClick: () => ensureNet().then((n) => { if (n) renderEntry(); }) })) : null,
+      namePanel,
       h('div.small.muted', { test: 'conn-status', style: { marginBottom: '10px' }, text: net && net.connected ? fmt(T.mp.connected, { name: net.name }) : '' }),
       h('div.sp-grid',
         h('div.panel.stack', h('h2', { text: T.mp.createTitle }),
-          h('label.field', h('span.lbl', { text: T.mp.teamSize }), segmented(TEAM_SIZES.map((n) => ({ value: n, label: `${n}v${n}`, test: `create-teamsize-${n}` })), { value: teamSize, onChange: (v) => { teamSize = v; } })),
-          h('label.field', h('span.lbl', { text: T.mp.budget }), segmented(BUDGET_LIST.map((b) => ({ value: b.points, label: `${b.name} · ${b.points}`, test: `create-budget-${b.id}` })), { value: budget, onChange: (v) => { budget = v; } })),
+          h('label.field', h('span.lbl', { text: T.mp.teamSize }), segmented(TEAM_SIZES.map((n) => ({ value: n, label: `${n}v${n}`, test: `create-teamsize-${n}` })), { label: T.mp.teamSize, value: teamSize, onChange: (v) => { teamSize = v; } })),
+          h('label.field', h('span.lbl', { text: T.mp.budget }), segmented(BUDGET_LIST.map((b) => ({ value: b.points, label: `${b.name} · ${b.points}`, test: `create-budget-${b.id}` })), { label: T.mp.budget, value: budget, onChange: (v) => { budget = v; } })),
           createBtn),
         h('div.panel.stack', h('h2', { text: T.mp.joinTitle }), h('div.row.gap.wrap', codeInput, joinBtn), h('div.tiny.muted', { text: T.mp.codeHint })),
       ),
@@ -136,8 +166,8 @@ export function mount(root, props, ctx) {
     if (props.joinCode && isRoomCode(normalizeRoomCode(props.joinCode))) {
       codeInput.value = normalizeRoomCode(props.joinCode);
       props.joinCode = null;
-      join();
-    }
+      if (state.playerName) join(); else pendingCode = codeInput.value;
+    } else if (pendingCode) codeInput.value = pendingCode;
   }
 
   // ---- room ----
@@ -160,6 +190,9 @@ export function mount(root, props, ctx) {
       try { await navigator.clipboard.writeText(text); ctx.toast(msg, 'ok', 1800); }
       catch { ctx.toast(T.app.copyFailed, 'warn'); }
     };
+    const latencyEl = h('span.mono.small', { test: 'latency', text: fmt(T.lobby.latency, { ms: num(net.latencyMs) }) });
+    if (latTimer) clearInterval(latTimer);
+    latTimer = setInterval(() => { if (disposed || !net) { clearInterval(latTimer); latTimer = null; return; } latencyEl.textContent = fmt(T.lobby.latency, { ms: num(net.latencyMs) }); }, 1000);
     const headEl = h('div.screen-head',
       h('div.titles',
         h('div.row.gap.wrap', h('span.room-code', { test: 'room-code', text: room.code }),
@@ -168,7 +201,7 @@ export function mount(root, props, ctx) {
         h('div.subtitle.row.gap.wrap',
           h('span', { text: `${room.teamSize}v${room.teamSize} · ${num(room.budget)} ${T.app.points} · ${T.lobby.botDifficulty}: ${difficultyName(room.botDifficulty)}` }),
           h('span.badge', { text: T.lobby.phase[room.phase] || room.phase }),
-          h('span.mono.small', { test: 'latency', text: fmt(T.lobby.latency, { ms: num(net.latencyMs) }) }),
+          latencyEl,
         ),
       ),
       h('div.actions', button(T.lobby.leave, { test: 'leave-room', class: 'btn-danger', onClick: leave })),
@@ -338,6 +371,7 @@ export function mount(root, props, ctx) {
   return {
     unmount() {
       disposed = true;
+      if (latTimer) { clearInterval(latTimer); latTimer = null; }
       hideCountdown();
       for (const off of offs) { try { off(); } catch { /* ignore */ } }
       for (const s of stops) s();

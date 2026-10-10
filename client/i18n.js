@@ -67,6 +67,8 @@ export const T = {
     enemyFaction: 'Facção inimiga',
     randomFaction: 'Aleatória',
     boss: 'Chefe garantido: {name}',
+    budgetOf: '(de {n})',
+    enemyAi: 'IA inimiga',
     builder: { random: 'frota aleatória', preset: 'frota predefinida', counter: 'frota de contra-ataque' },
     build: 'Montar frota →',
     quickPlay: 'Jogar com a última frota',
@@ -82,6 +84,12 @@ export const T = {
 
   builder: {
     title: 'Montar frota',
+    enemy: 'Inimigo',
+    strongVs: 'Forte contra este casco:',
+    weakVs: 'Fraco:',
+    vsEnemyHull: 'contra o casco inimigo',
+    enemyHint: 'Os chips de arma de cada nave ficam verdes ou vermelhos conforme o casco inimigo.',
+    abilityOf: 'Habilidade: {name}',
     subtitleSp: 'Nível {level} · {levelName} · {difficulty}',
     subtitleMp: 'Sala {code} · orçamento {budget} pts',
     faction: 'Facção',
@@ -163,6 +171,11 @@ export const T = {
     reconnecting: 'Reconectando…',
     connectionLost: 'Conexão perdida.',
     needName: 'Digite um nome antes de jogar online.',
+    nameTitle: 'Como quer ser chamado?',
+    namePlaceholder: 'Seu nome de comandante',
+    nameOk: 'Continuar',
+    nameRandom: 'Sortear nome',
+    nameHint: 'O nome aparece na sala, na batalha e nos resultados. Até 20 caracteres.',
   },
 
   lobby: {
@@ -232,12 +245,16 @@ export const T = {
     live: 'AO VIVO',
     reconnecting: 'Reconectando…',
     lost: 'Conexão perdida',
+    reconnect: 'Reconectar',
     suddenDeath: 'MORTE SÚBITA',
     suddenDeathHint: 'Sem regeneração · dano crescente',
     engage: 'CONTATO',
     names: 'Nomes',
     grid: 'Grade',
     cameraAuto: 'Câmera auto',
+    cameraFree: 'Câmera livre',
+    autoStart: 'Começa automaticamente em {n} s',
+    counterHint: 'Eficaz contra este casco',
     sound: 'Som',
     quit: 'Sair',
     quitConfirm: 'Abandonar a batalha?',
@@ -271,6 +288,8 @@ export const T = {
     youWon: 'Você venceu!',
     youLost: 'Você perdeu.',
     reasonElim: 'Todas as naves inimigas foram destruídas.',
+    reasonElimLost: 'Todas as suas naves foram destruídas.',
+    reasonElimNeutral: 'Um dos lados foi completamente destruído.',
     reasonTimeout: 'Tempo esgotado — vence quem manteve mais valor de frota.',
     reasonTimeoutDmg: 'Tempo esgotado — desempate por dano causado.',
     reasonDraw: 'Nenhum dos lados conseguiu se impor.',
@@ -329,6 +348,17 @@ export const T = {
 
   howto: {
     title: 'Como jogar',
+    controlsTitle: 'Controles na batalha',
+    controls: [
+      ['Espaço', 'começar / pausar e continuar (um jogador)'],
+      ['1 · 2 · 4', 'velocidade ×1, ×2, ×4 (um jogador; no multijogador o tempo é do servidor)'],
+      ['N', 'mostrar ou ocultar os nomes das naves'],
+      ['G', 'grade da arena'],
+      ['C', 'voltar à câmera automática'],
+      ['Esc', 'sair da batalha'],
+      ['Roda · arrastar · pinça', 'zoom e deslocamento da câmera (ela fica livre até você voltar à automática)'],
+      ['Clique ou toque numa nave', 'seguir a nave; duplo clique ou duplo toque volta à câmera automática'],
+    ],
     steps: [
       { title: '1. Escolha uma facção', text: 'Cada facção tem 8 naves, um tipo de casco e uma passiva. Terranos são blindados e disciplinados; Vorrax regeneram e vêm em número; Lúmen têm escudos enormes e cascos frágeis; Ferrix se reconstroem e atravessam blindagens.' },
       { title: '2. Monte a frota dentro do orçamento', text: 'Cada nave custa pontos. O orçamento padrão é 1500. Há limites por classe de tamanho (1 nave-mãe, 2 capitais, 4 grandes, 12 médias, 24 pequenas, 24 minúsculas — 32 para Vorrax) e no máximo 40 naves. Use as predefinições como ponto de partida.' },
@@ -381,6 +411,8 @@ export const T = {
     RATE_LIMITED: 'Calma! Muitas mensagens em pouco tempo.',
     ROOM_NOT_FOUND: 'Sala não encontrada. Confira o código.',
     ROOM_FULL: 'A sala está cheia.',
+    ROOM_MAINTENANCE: 'O servidor vai reiniciar em instantes. Tente criar a sala novamente daqui a pouco.',
+    ROOM_ADDRESS_LIMIT: 'Já existem salas demais abertas a partir do seu endereço. Feche uma sala antes de criar outra.',
     ROOM_LIMIT: 'O servidor atingiu o limite de salas. Tente novamente mais tarde.',
     NOT_HOST: 'Somente o anfitrião pode fazer isso.',
     WRONG_PHASE: 'Essa ação não é possível nesta fase da sala.',
@@ -425,6 +457,8 @@ export function errorMessage(code, detail) {
   if (isFleetCode(code)) return fleetErrorMessage(code, detail);
   // the server also answers ROOM_FULL when it cannot create another room (detail 'server' | 'codes')
   if (code === 'ROOM_FULL' && (detail === 'server' || detail === 'codes')) return T.err.ROOM_LIMIT;
+  if (code === 'ROOM_FULL' && detail === 'address') return T.err.ROOM_ADDRESS_LIMIT;
+  if (code === 'ROOM_FULL' && detail === 'maintenance') return T.err.ROOM_MAINTENANCE;
   const s = T.err[code];
   if (!s) return fmt(T.err.UNKNOWN, { code: code || '?' });
   let d = '';

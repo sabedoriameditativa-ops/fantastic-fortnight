@@ -5,12 +5,14 @@
 // sessionStorage so a reload resumes the session. Pure enough to be tested in
 // Node 22 (global WebSocket) against a fake `ws` server.
 
-import { C2S, S2C } from '/shared/protocol.js';
-import { PROTOCOL_VERSION } from '/shared/constants.js';
+import { C2S, S2C, validateMessage } from '/shared/protocol.js';
+import { PROTOCOL_VERSION, RECONNECT_GRACE_MS } from '/shared/constants.js';
 import { createEmitter, createFeedBase, nowMs } from './feed.js';
 import { sessionStore, readString, writeString, KEYS } from '../util/storage.js';
 
 const BACKOFF_MS = [500, 1000, 2000, 4000, 4000];
+// close codes after which reconnecting with the same token is wrong (session replaced / refused)
+const TERMINAL_CLOSE_CODES = new Set([4000, 4001, 4003]);
 const REQUEST_TIMEOUT_MS = 10000;
 const PING_INTERVAL_MS = 5000;
 /** Requests whose response is the next `room` push (the server may ack too). */
@@ -34,6 +36,8 @@ export function createNetClient(url, opts = {}) {
   const backoff = opts.backoff || BACKOFF_MS;
   const requestTimeoutMs = opts.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   const pingIntervalMs = opts.pingIntervalMs ?? PING_INTERVAL_MS;
+  // keep trying for as long as the server keeps the seat (RECONNECT_GRACE_MS), at the capped backoff
+  const retryWindowMs = opts.retryWindowMs ?? RECONNECT_GRACE_MS;
   const version = opts.version ?? PROTOCOL_VERSION;
 
   const base = createFeedBase({ isLocal: false });
@@ -51,6 +55,8 @@ export function createNetClient(url, opts = {}) {
   let connectWaiters = [];
   let attempt = 0;
   let reconnectTimer = null;
+  let lostAt = 0;          // when the current outage started (ms)
+  let terminalCode = 0;    // close code that ended the session for good (0 = none)
   let pingTimer = null;
   let latencyMs = 0;
   let disposed = false;
@@ -63,7 +69,16 @@ export function createNetClient(url, opts = {}) {
     ev.status.emit(s);
     if (s === 'ok') base.emitStatus('ok');
     else if (s === 'reconnecting') base.emitStatus('reconnecting');
-    else if (s === 'lost' || s === 'closed') base.emitStatus('lost');
+    else if (s === 'lost' || s === 'closed' || s === 'replaced') base.emitStatus('lost');
+  }
+
+  // the browser tells us when the network is back: do not wait out the backoff
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('online', () => {
+      if (disposed || intentionalClose || !everWelcomed) return;
+      if (status === 'reconnecting' && reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; open(); }
+      else if (status === 'lost' && !terminalCode) client.reconnect();
+    });
   }
 
   function send(obj) {
@@ -106,7 +121,8 @@ export function createNetClient(url, opts = {}) {
         token = msg.token || token;
         writeString(store, KEYS.token, token);
         writeString(store, KEYS.playerId, playerId);
-        attempt = 0;
+        attempt = 0; lostAt = 0;
+        send({ t: C2S.PING, c: Date.now() });   // a latency reading right away, not after 5 s
         const wasReconnect = everWelcomed;
         everWelcomed = true;
         setStatus('ok');
@@ -141,12 +157,14 @@ export function createNetClient(url, opts = {}) {
       case S2C.ROOM: {
         const { t, ...state } = msg;
         room = state;
+        if (room && room.code) writeString(store, KEYS.room, room.code);   // lets a refreshed tab come back
         resolveRoomRequests(room);
         ev.room.emit(room);
         break;
       }
       case S2C.LEFT: {
         room = null;
+        writeString(store, KEYS.room, '');
         base.resetBattle();
         for (const [id, p] of [...pending]) if (p.t === C2S.LEAVE_ROOM) { pending.delete(id); p.resolve(); }
         ev.left.emit(msg.reason || 'left');
@@ -200,6 +218,8 @@ export function createNetClient(url, opts = {}) {
       let msg;
       try { msg = JSON.parse(typeof e.data === 'string' ? e.data : String(e.data)); } catch { return; }
       if (!msg || typeof msg.t !== 'string') return;
+      // a buggy proxy or a server/client version skew must not reach the renderer
+      if (!validateMessage(msg, 's2c')) { if (typeof console !== 'undefined') console.warn('[net] dropped malformed message', msg.t); return; }
       try { handle(msg); } catch (err) { if (typeof console !== 'undefined') console.error('[net] handler error', err); }
     };
     // A refused connection fires 'error' (and, in browsers, 'close'); Node's
@@ -207,7 +227,7 @@ export function createNetClient(url, opts = {}) {
     let settled = false;
     const failed = () => { if (settled) return; settled = true; if (sock === ws) onClosed(); };
     sock.onerror = () => { if (sock.readyState !== 1) failed(); };
-    sock.onclose = () => failed();
+    sock.onclose = (e) => { if (e && TERMINAL_CLOSE_CODES.has(e.code) && sock === ws) terminalCode = e.code; failed(); };
   }
 
   function rejectConnectWaiters(code) {
@@ -228,8 +248,17 @@ export function createNetClient(url, opts = {}) {
       setStatus('lost');
       return;
     }
-    if (attempt >= backoff.length) {
-      // backoff exhausted: anyone awaiting connect() (lobby → getNet) must learn it, not hang
+    if (terminalCode) {
+      // the server replaced this session (another tab took the token) or refused it:
+      // reconnecting would only kick the other tab back. Forget the token and stop.
+      token = null; writeString(store, KEYS.token, '');
+      rejectConnectWaiters('CONNECT_FAILED');
+      setStatus(terminalCode === 4001 ? 'replaced' : 'lost');
+      return;
+    }
+    if (attempt === 0) lostAt = Date.now();
+    if (attempt >= backoff.length && Date.now() - lostAt > retryWindowMs) {
+      // the server has dropped the seat by now: anyone awaiting connect() must learn it, not hang
       rejectConnectWaiters('CONNECT_FAILED');
       setStatus('lost');
       return;
@@ -272,7 +301,7 @@ export function createNetClient(url, opts = {}) {
     /** Force a reconnect attempt after status 'lost'. */
     reconnect() {
       if (disposed || status === 'ok' || status === 'connecting' || status === 'reconnecting') return;
-      attempt = 0;
+      attempt = 0; lostAt = 0; terminalCode = 0;
       setStatus(everWelcomed ? 'reconnecting' : 'connecting');
       open();
     },
@@ -299,11 +328,13 @@ export function createNetClient(url, opts = {}) {
     onError: (cb) => ev.error.on(cb),
     onChat: (cb) => ev.chat.on(cb),
     onLeft: (cb) => ev.left.on(cb),
-    /** Connection status: idle | connecting | ok | reconnecting | lost | closed. */
+    /** Connection status: idle | connecting | ok | reconnecting | lost | replaced | closed. */
     onStatus: (cb) => { const off = ev.status.on(cb); try { cb(status); } catch { /* ignore */ } return off; },
 
     feed,
     get latencyMs() { return latencyMs; },
+    /** Room code of the session this tab may resume (sessionStorage), or ''. */
+    get storedRoomCode() { return readString(store, KEYS.room, '') || ''; },
     get status() { return status; },
     get room() { return room; },
     get playerId() { return playerId; },

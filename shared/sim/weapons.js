@@ -14,6 +14,8 @@ import { orderedShips } from './queries.js';
 const buf = [];
 const coneBuf = [];
 const MAX_RADIUS = SIZE_CLASS.mothership.radius;
+const ALPHA_MIN = 60;          // a trigger pull of at least this much damage counts as a heavy-alpha shot ...
+const ALPHA_WASTE_FACTOR = 2;  // ... and is not spent on a target with less than half of it in ehp when a better one is shootable
 
 /** Effective range of a weapon right now (buffs included). */
 export function weaponRange(s, w) {
@@ -98,7 +100,15 @@ export function fireWeapons(state) {
       if (tick < w.readyAt) continue;
       if (w.def.pd && tryPointDefense(state, s, w)) continue;
       let t = target && canShoot(s, w, target, tick) ? target : null;
-      if (!t) t = bestShootable(state, s, w);
+      if (t) {
+        // heavy-alpha weapons (railguns, torpedoes, beams) do not dump their shot into a gnat the ship happens to
+        // target when a more valuable enemy is shootable; the ship's target (movement) is unchanged
+        const alpha = w.def.damage * (w.def.salvo || 1);
+        if (alpha >= ALPHA_MIN && alpha * getTables().frac[s.clsIdx][w.idx][t.clsIdx] > ALPHA_WASTE_FACTOR * (t.hp + t.shield + t.extraShield)) {
+          const alt = bestShootable(state, s, w);
+          if (alt) t = alt;
+        }
+      } else t = bestShootable(state, s, w);
       if (!t) continue;
       if (w.def.charge) {
         w.charging = t.id;

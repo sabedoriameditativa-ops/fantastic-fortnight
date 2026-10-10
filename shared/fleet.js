@@ -317,8 +317,10 @@ function cyclePass(ledger, preset) {
 
 /**
  * When the total-ship cap is hit with budget left (swarm presets at Guerra
- * Total), trade the cheapest owned unit for a pricier preset entry, walking
- * the preset in priority order, until no trade fits.
+ * Total, endless-mode enemies), trade the cheapest owned unit for a pricier
+ * preset entry, walking the preset in priority order, until no trade fits;
+ * then keep trading up through the whole faction roster, cheapest affordable
+ * upgrade first (so unspent budget becomes real ships, not a number).
  */
 function upgradePass(ledger, preset) {
   for (let guard = 0; guard < FLEET_LIMITS.maxShips * 4; guard++) {
@@ -337,9 +339,59 @@ function upgradePass(ledger, preset) {
       ledger.buy(cheapest); // undo
     }
     if (!traded) break;
-    // the cycle pass may now fit more cheap units in the freed budget — it
-    // cannot, since the total cap is still hit; nothing else to do.
   }
+  rosterUpgradePass(ledger);
+}
+
+/**
+ * Trade the cheapest owned unit for the cheapest roster ship that is pricier
+ * and fits (caps, budget, anchor rule, at most one mothership), repeating
+ * while the fleet is at the ship cap with budget left. Each step is the
+ * smallest affordable upgrade, so the fleet climbs from the cheapest hulls to
+ * the most expensive ones gradually. Terminates: every trade raises the spent
+ * total and the budget is finite.
+ * @param {ReturnType<typeof createLedger>} ledger
+ */
+function rosterUpgradePass(ledger) {
+  const roster = shipsOfFaction(ledger.faction).slice().sort((a, b) => a.cost - b.cost);
+  for (let guard = 0; guard < FLEET_LIMITS.maxShips * 8; guard++) {
+    if (ledger.total < FLEET_LIMITS.maxShips) break;
+    let cheapest = null;
+    for (const ship of roster) if (ledger.count(ship.id) > 0) { cheapest = ship; break; }
+    if (!cheapest) break;
+    let traded = false;
+    for (const ship of roster) {
+      if (ship.cost <= cheapest.cost) continue;
+      if (ship.sizeClass === 'mothership' && ledger.sizeCount('mothership') > 0) continue;
+      if (!passesAnchorRule(ledger, ship.id)) continue;
+      ledger.sell(cheapest.id);
+      if (ledger.canBuy(ship.id)) { ledger.buy(ship.id); traded = true; break; }
+      ledger.buy(cheapest.id); // undo
+    }
+    if (!traded) break;
+  }
+}
+
+/**
+ * Most valuable fleet a faction can field: at most FLEET_LIMITS.maxShips
+ * ships under the size-class caps, so this is the sum of the costliest
+ * purchasable units (greedy by cost is optimal with a pure count cap). Any
+ * budget above it is unspendable; the UI shows this instead of the formula.
+ * @param {string} faction
+ * @returns {number}
+ */
+export function maxFleetValue(faction) {
+  const roster = shipsOfFaction(faction).slice().sort((a, b) => b.cost - a.cost);
+  const bySize = {};
+  let total = 0, value = 0;
+  for (const ship of roster) {
+    const cap = sizeClassCap(faction, ship.sizeClass);
+    while (total < FLEET_LIMITS.maxShips && (bySize[ship.sizeClass] || 0) < cap) {
+      bySize[ship.sizeClass] = (bySize[ship.sizeClass] || 0) + 1;
+      total++; value += ship.cost;
+    }
+  }
+  return value;
 }
 
 /** Relative desirability of each size class when auto-completing. */
@@ -350,7 +402,9 @@ const AUTOCOMPLETE_SIZE_WEIGHT = { tiny: 2, small: 4, medium: 3, large: 2, capit
  * weighted (size-class preference × diversity: classes already owned in
  * numbers weigh less) and drawn from `rng`, so the result is deterministic for
  * a given rng state. A mothership is only considered when the fleet has none
- * and it passes the anchor rule. Stops when nothing affordable fits the caps.
+ * and it passes the anchor rule. Stops when nothing affordable fits the caps;
+ * if that is the 40-ship cap with budget left, the cheapest hulls are traded
+ * up through the roster (see rosterUpgradePass) so the budget is really spent.
  *
  * @param {Fleet} fleet       validated or at least well-formed fleet
  * @param {number} budget
@@ -382,6 +436,8 @@ export function autoComplete(fleet, budget = DEFAULT_BUDGET, rng) {
     if (candidates.length === 0) break;
     ledger.buy(weightedPick(candidates, weights, totalW, next()));
   }
+  // At the ship cap with budget left (endless-mode enemies, Guerra Total): trade up.
+  rosterUpgradePass(ledger);
   return ledger.toFleet();
 }
 

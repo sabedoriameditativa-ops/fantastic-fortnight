@@ -197,12 +197,22 @@ async function main() {
   console.log(`listening ${server.port}`);
   if (process.env.FE_OPEN_BROWSER === '1' || process.argv.includes('--open')) openBrowser(`http://localhost:${server.port}`);
   let shuttingDown = false;
+  // Deploys send SIGTERM: instead of killing every battle instantly, refuse new rooms and wait
+  // up to FE_DRAIN_MS (default 25 s, inside Render's shutdown window) for battles to end.
+  const drainMs = Math.max(0, Number(process.env.FE_DRAIN_MS ?? 25_000) || 0);
   const shutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`${signal}: encerrando...`);
-    server.close().then(() => process.exit(0));
-    setTimeout(() => process.exit(0), 3000).unref();
+    const finish = () => { server.close().then(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); };
+    const battles = () => { try { return server.lobby.health().battles || 0; } catch { return 0; } };
+    if (typeof server.lobby.drain === 'function') server.lobby.drain();
+    if (drainMs > 0 && battles() > 0) {
+      console.log(`aguardando ${battles()} batalha(s) terminarem (até ${Math.round(drainMs / 1000)} s)...`);
+      const t0 = Date.now();
+      const poll = setInterval(() => { if (battles() === 0 || Date.now() - t0 >= drainMs) { clearInterval(poll); finish(); } }, 500);
+      poll.unref();
+    } else finish();
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));

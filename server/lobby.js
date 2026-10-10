@@ -11,7 +11,7 @@ import { createRoom } from './room.js';
 /** Default maximum number of simultaneous rooms. */
 export const DEFAULT_MAX_ROOMS = 50;
 /** Rooms a single remote address may have alive at once (0 = unlimited). */
-export const DEFAULT_MAX_ROOMS_PER_ADDRESS = 4;
+export const DEFAULT_MAX_ROOMS_PER_ADDRESS = 8;
 
 /**
  * Random room code.
@@ -99,7 +99,9 @@ export function createLobby({
     return null;
   }
 
+  let draining = false;
   function createRoomFor(session, { teamSize, budget, botDifficulty }) {
+    if (draining) return { ok: false, code: ERR.ROOM_FULL, detail: 'maintenance' };
     if (rooms.size >= maxRooms) return { ok: false, code: ERR.ROOM_FULL, detail: 'server' };
     const current = roomOf(session);
     const addr = typeof session.remoteAddress === 'string' && session.remoteAddress ? session.remoteAddress : null;
@@ -210,8 +212,13 @@ export function createLobby({
     },
     /** `/health` body. */
     health() {
-      return { ok: true, rooms: rooms.size, uptime: Math.round((Date.now() - startedAt) / 1000) };
+      let battles = 0, players = 0;
+      for (const room of rooms.values()) { if (room.phase === 'battle') battles++; players += room.size || 0; }
+      return { ok: true, rooms: rooms.size, battles, players, draining, uptime: Math.round((Date.now() - startedAt) / 1000) };
     },
+    /** Shutdown is coming: refuse new rooms so running battles can finish (server/index.js). */
+    drain() { draining = true; },
+    get draining() { return draining; },
     /** Destroy every room (shutdown). */
     closeAll(reason = 'room_closed') {
       for (const room of [...rooms.values()]) room.destroy(reason);

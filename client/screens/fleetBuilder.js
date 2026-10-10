@@ -9,7 +9,7 @@ import { num, dec } from '../util/format.js';
 import { animateShip } from '../util/shipCanvas.js';
 import { randomSeed } from '../util/url.js';
 import { DEFAULT_BUDGET, FLEET_LIMITS } from '/shared/constants.js';
-import { FACTIONS, FACTION_IDS, SHIPS, SHIP_LIST, SIZE_CLASSES, SIZE_CLASS, ABILITIES, WEAPON_TYPE_NAMES, shipsOfFaction, presetsOfFaction, shipDps, shipEhp } from '/shared/catalog.js';
+import { FACTIONS, FACTION_IDS, SHIPS, SHIP_LIST, SIZE_CLASSES, SIZE_CLASS, ABILITIES, WEAPON_TYPE_NAMES, DAMAGE_MULT, shipsOfFaction, presetsOfFaction, shipDps, shipEhp } from '/shared/catalog.js';
 import { validateFleet, normalizeFleet, fleetCost, fleetShipCount, fleetSummary, presetFleet, autoComplete, sizeClassCap } from '/shared/fleet.js';
 import { createRng } from '/shared/rng.js';
 import { levelInfo } from '/shared/levels.js';
@@ -74,6 +74,45 @@ export function mount(root, props, ctx) {
     refresh();
   }
 
+  // ---- enemy intel (what you are about to fight and what hurts it) ----
+  function enemyFactionId() {
+    if (mode === 'sp') { const s = props.setup || state.spSetup; const lv = levelInfo(s.level); return lv.enemyFaction && FACTIONS[lv.enemyFaction] ? lv.enemyFaction : null; }
+    const room = props.room || (state.net && state.net.room);
+    const myId = state.net ? state.net.playerId : null;
+    if (!room || !room.slots) return null;
+    let myTeam = -1;
+    for (let t = 0; t < room.slots.length; t++) for (const sl of room.slots[t]) if (sl && sl.playerId === myId) myTeam = t;
+    if (myTeam < 0) return null;
+    const enemy = (room.slots[1 - myTeam] || []).map((sl) => sl && sl.faction).filter((f) => f && FACTIONS[f]);
+    return enemy.length === 1 ? enemy[0] : null;
+  }
+  const enemyFid = enemyFactionId();
+  const enemyHull = enemyFid ? FACTIONS[enemyFid].hull : null;
+  /** weapon types sorted by multiplier vs the enemy hull: [[type, mult], ...] */
+  const vsEnemy = enemyHull ? Object.keys(DAMAGE_MULT).map((w) => [w, DAMAGE_MULT[w][enemyHull] ?? 1]).sort((a, b) => b[1] - a[1]) : [];
+  const multText = (m) => `×${m.toFixed(1).replace('.', ',')}`;
+  let enemyEl = null;
+  if (enemyFid) {
+    const ef = FACTIONS[enemyFid];
+    const lv = mode === 'sp' ? levelInfo((props.setup || state.spSetup).level) : null;
+    const boss = lv && lv.boss && SHIPS[lv.boss] ? SHIPS[lv.boss].name : lv && lv.bossSizeClass ? T.builder.sizeClass[lv.bossSizeClass] : null;
+    const good = vsEnemy.filter((r) => r[1] > 1.05).slice(0, 3), bad = vsEnemy.filter((r) => r[1] < 0.95).slice(-3).reverse();
+    enemyEl = h('div.panel.tight.enemy-intel', { test: 'enemy-intel' },
+      h('div.row.gap.wrap',
+        h('span.badge', { class: `f-${enemyFid}`, text: T.builder.enemy }),
+        h('b', { text: ef.name }),
+        h('span.muted', { text: `${T.codex.hullType}: ${T.hullType[ef.hull] || ef.hull}` }),
+        boss ? h('span.muted', { text: `${T.sp.boss}: ${boss}` }) : null,
+      ),
+      h('div.row.gap.wrap.small', { style: { marginTop: '4px' } },
+        good.length ? h('span', h('span.ok', { text: `${T.builder.strongVs} ` }), ...good.map(([w, m]) => h('span.chip.good', { class: `w-${w}`, text: `${WEAPON_TYPE_NAMES[w]} ${multText(m)}` }))) : null,
+        bad.length ? h('span', h('span.danger', { text: `${T.builder.weakVs} ` }), ...bad.map(([w, m]) => h('span.chip.bad', { class: `w-${w}`, text: `${WEAPON_TYPE_NAMES[w]} ${multText(m)}` }))) : null,
+        h('span.tiny.muted', { text: T.builder.enemyHint }),
+      ),
+    );
+  }
+  const chipClass = (w) => { if (!enemyHull) return ''; const m = DAMAGE_MULT[w.type] ? (DAMAGE_MULT[w.type][enemyHull] ?? 1) : 1; return m > 1.05 ? 'good' : m < 0.95 ? 'bad' : ''; };
+
   // ---- header / budget ----
   const costEl = h('span.num', { test: 'budget-cost' });
   const budgetFill = h('div.bar-fill');
@@ -114,8 +153,12 @@ export function mount(root, props, ctx) {
       const btnPlus = h('button.btn.btn-sm.btn-icon', { type: 'button', test: `ship-add-${ship.id}`, title: fmt(T.builder.add, { name: ship.name }), onClick: (e) => { e.stopPropagation(); buyShip(ship.id); } }, '+');
       const cap = sizeClassCap(faction, ship.sizeClass);
       const ab = ABILITIES[ship.ability];
-      const abEl = h('b', { text: ab ? ab.name : '' });
-      if (ab) tooltip(abEl, `${ab.name} (${T.codex.kind[ab.kind] || ab.kind})\n${ab.desc}${ab.cooldown ? `\n${fmt(T.codex.cooldown, { s: ab.cooldown })}` : ''}`);
+      // a real button: on touch a tap opens the description instead of buying the ship
+      const abEl = h('button.sc-ability-btn', { type: 'button', test: `ship-ability-${ship.id}`, 'data-sfx': 'none', 'aria-label': ab ? fmt(T.builder.abilityOf, { name: ab.name }) : '' }, h('b', { text: ab ? ab.name : '' }));
+      if (ab) {
+        const tip = tooltip(abEl, `${ab.name} (${T.codex.kind[ab.kind] || ab.kind})\n${ab.desc}${ab.cooldown ? `\n${fmt(T.codex.cooldown, { s: ab.cooldown })}` : ''}`);
+        abEl.addEventListener('click', (e) => { e.stopPropagation(); tip.toggle(); });
+      }
       const countBadge = h('span.sc-count.hidden');
       const card = h('div.ship-card', { test: `ship-card-${ship.id}`, role: 'button', tabindex: '0', title: T.builder.hint,
         onClick: () => buyShip(ship.id),
@@ -132,7 +175,7 @@ export function mount(root, props, ctx) {
           statBar(T.builder.dps, scale(shipDps(ship), MAX.dps), { icon: 'dps', text: dec(shipDps(ship), 0), title: `${T.builder.dps}: ${dec(shipDps(ship), 1)} · ${T.builder.range} ${Math.max(...ship.weapons.map((w) => w.range))} u`, color: 'linear-gradient(90deg,#ffb347,#ff7a3d)' }),
           statBar(T.builder.speed, scale(ship.speed, MAX.speed), { icon: 'speed', text: num(ship.speed), title: `${T.builder.speed}: ${ship.speed} u/s`, color: 'linear-gradient(90deg,#7c5cff,#b8f0ff)' }),
         ),
-        h('div.sc-chips', ship.weapons.map((w) => h('span.chip', { class: `w-${w.type}`, title: `${w.name} · ${WEAPON_TYPE_NAMES[w.type]} · ${w.damage}×${w.salvo} / ${w.cooldown}s · ${w.range}u`, text: WEAPON_TYPE_NAMES[w.type] }))),
+        h('div.sc-chips', ship.weapons.map((w) => h('span.chip', { class: `w-${w.type} ${chipClass(w)}`, title: `${w.name} · ${WEAPON_TYPE_NAMES[w.type]} · ${w.damage}×${w.salvo} / ${w.cooldown}s · ${w.range}u${enemyHull ? ` · ${T.builder.vsEnemyHull} ${multText(DAMAGE_MULT[w.type] ? (DAMAGE_MULT[w.type][enemyHull] ?? 1) : 1)}` : ''}`, text: WEAPON_TYPE_NAMES[w.type] }))),
         h('div.sc-ability', svgIcon('star', 11), abEl),
         h('div.sc-ctl', btnMinus, qty, btnPlus),
       );
@@ -167,6 +210,8 @@ export function mount(root, props, ctx) {
   const totalsEl = h('div.row.between.small.muted');
   const validEl = h('div.validation', { test: 'fleet-validation' });
   const confirmBtn = button(mode === 'sp' ? T.builder.confirmSp : T.builder.confirmMp, { test: 'fleet-confirm', primary: true, class: 'btn-lg btn-block', onClick: confirm });
+  // the same action inside the sticky budget bar (phones/tablets scroll the side panel away)
+  const confirmBtnSm = button(mode === 'sp' ? T.builder.confirmSp : T.builder.confirmMp, { test: 'fleet-confirm-sm', primary: true, class: 'btn-sm fb-confirm-sm', onClick: confirm });
 
   function refresh() {
     const f = fleet();
@@ -211,6 +256,7 @@ export function mount(root, props, ctx) {
     else if (budget - cost > 0) { validEl.className = 'validation warn'; validEl.textContent = fmt(T.builder.warnUnspent, { n: num(budget - cost) }); }
     else { validEl.className = 'validation ok'; validEl.textContent = T.builder.valid; }
     confirmBtn.disabled = !v.ok || busy;
+    confirmBtnSm.disabled = !v.ok || busy;
     confirmBtn.classList.toggle('btn-pulse', v.ok && !busy);
   }
 
@@ -265,7 +311,8 @@ export function mount(root, props, ctx) {
     h('div.fb-layout',
       h('div.fb-main',
         h('div.panel.tight', h('h3', { text: T.builder.faction }), factionCards, h('div', { style: { marginTop: '10px' } }, loreEl)),
-        h('div.panel.tight', budgetHead),
+        enemyEl,
+        h('div.panel.tight.fb-budget', budgetHead, confirmBtnSm),
         h('div.panel.tight', h('div.panel-title', h('h3', { text: T.builder.presets })), presetRow),
         h('div.panel.tight', h('div.panel-title', h('h3', { text: T.builder.roster }), h('span.tiny.muted', { text: T.builder.hint })), roster),
       ),

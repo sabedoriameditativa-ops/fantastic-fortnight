@@ -518,7 +518,7 @@ Delay do arp: `DelayNode 0.375*60/bpm` (dotted 8th), feedback `Gain 0.35`, LP 3 
 | Menu | i – VI – III – VII | Dm [50 57 62 65] · Bb [46 53 58 62] · F [41 48 53 57] · C [48 55 60 64] |
 | Frota (builder) | i – VII – VI – VII (brilhante, dórico opcional: B natural no 2º ciclo) | Dm · C · Bb · C |
 | Batalha A (base) | i – i – VI – VII | Dm · Dm · Bb · C |
-| Batalha B (intensidade ≥ 0.6) | i – bII – i – V (frígio: Eb) | Dm · Eb [51 58 63] · Dm · A [45 52 57 61 (A7)] |
+| Batalha B (intensidade ≥ 0.5) | i – bII – i – V (frígio: Eb) | Dm · Eb [51 58 63] · Dm · A [45 52 57 61 (A7)] |
 | Vitória | IV – V – I em Ré **maior** | G [55 59 62] · A [57 61 64] · D [50 54 57 62] |
 | Derrota | i → i(b5) descendo | Dm [50 53 57] → Ddim [50 53 56] → sustain D2 (38) |
 
@@ -540,7 +540,9 @@ Delay do arp: `DelayNode 0.375*60/bpm` (dotted 8th), feedback `Gain 0.35`, LP 3 
 **Batalha** — 128 BPM, camadas por `intensity ∈ [0,1]`:
 
 ```
-intensity = clamp( 0.35*destroyedFrac + 0.25*min(1, elapsed/90s) + 0.4*(1 - min(aliveFracA, aliveFracB)) )
+intensity = clamp( max( 0.45*destroyedFrac + 0.2*min(1, elapsed/60s) + 0.35*(1 - min(aliveFracA, aliveFracB)), density ) )
+// density = clamp((sound requests per second) / 40) smoothed over 3 s: a heavy exchange pushes the layers up even in short fights
+// sudden death forces intensity = 1 (all layers)
 // destroyedFrac = total mass destroyed / total initial mass; updated from snapshots at 4 Hz; smoothed with 2 s time constant
 ```
 
@@ -548,10 +550,10 @@ intensity = clamp( 0.35*destroyedFrac + 0.25*min(1, elapsed/90s) + 0.4*(1 - min(
 |---|---|---|
 | L0 Pad + drone | sempre | pad Batalha A, cutoff 900 + 900·intensity |
 | L1 Bass | ≥ 0.1 | `x . x . x . x x` colcheias, tônica, com nota de passagem (7º) no último 16th do compasso |
-| L2 Kick + hat | ≥ 0.25 | kick em 1, 3 (+ 2.5 ghost quando ≥0.5); hat 16ths gain 0.1 (open no 4.5) |
-| L3 Snare + arp | ≥ 0.45 | snare em 2, 4; arp 16ths padrão `[0,4,7,4, 0,4,9,4]` sobre a tríade atual |
-| L4 Lead + progressão B | ≥ 0.65 | troca para Batalha B na próxima barra múltipla de 4; lead frase de 2 compassos da pentatônica, rngMusic escolhe entre 4 frases pré-escritas: `[62,65,67,69,72,69,67,65]`, `[69,72,74,72,69,67,65,67]`, … |
-| L5 Toms + double kick | ≥ 0.85 | toms em 3.5/4/4.5 (midi 50/45/43), kick 8ths |
+| L2 Kick + hat | ≥ 0.2 | kick em 1, 3 (+ 2.5 ghost quando ≥0.5); hat 16ths gain 0.1 (open no 4.5) |
+| L3 Snare + arp | ≥ 0.35 | snare em 2, 4; arp 16ths padrão `[0,4,7,4, 0,4,9,4]` sobre a tríade atual |
+| L4 Lead + progressão B | ≥ 0.5 | troca para Batalha B na próxima barra múltipla de 4; lead frase de 2 compassos da pentatônica, rngMusic escolhe entre 4 frases pré-escritas: `[62,65,67,69,72,69,67,65]`, `[69,72,74,72,69,67,65,67]`, … |
+| L5 Toms + double kick | ≥ 0.68 | toms em 3.5/4/4.5 (midi 50/45/43), kick 8ths |
 
 Cada camada tem um `Gain` próprio (`layers[k]`) que rampa com `setTargetAtTime(target, now, 0.8)`; **as notas são sempre agendadas** (histerese: camada só "sai" se intensity cair 0,15 abaixo do limiar) — evita que a bateria entre e saia a cada tick. A troca de progressão só acontece em fronteira de 4 compassos.
 

@@ -131,13 +131,16 @@ export function fleetToArray(fleet) → string[]           // expanded class ids
  * @param {string} [o.faction]          force a faction; otherwise rng.pick(FACTION_IDS)
  * @param {Fleet[]} [o.enemyFleets]     known enemy fleets (used by 'counter' builders)
  * @param {'random'|'preset'|'counter'} [o.builder]  override the difficulty's builder
+ * @param {string} [o.presetId]        preset builder: the level's preset (ignored by counter)
  * @returns {Fleet}   always valid for the budget
  */
 export function buildBotFleet(o)
-// facil: random legal fleet, spends 60–85% of budget, never buys a mothership.
-// normal: random preset of the faction scaled to budget (presetFleet) then autoComplete.
-// dificil / especialista: 'counter' — scores each preset of the faction against the enemy fleets'
-//   size/hull/shield mix (see SPEC §5.3 matrix), picks the best (ties by rng), scales, autoCompletes.
+// random: spends 85–100% of the budget, never buys a mothership.
+// preset: the given/level preset scaled to budget (presetFleet) then autoComplete.
+// counter: scores each preset of the faction against the enemy fleets' size/hull/shield mix
+//   (see SPEC §5.3 matrix) and samples (weighted) among those within 85% of the best
+//   (COUNTER_NEAR_BEST), scales, autoCompletes. Levels pick the builder (shared/levels.js);
+//   the difficulty only changes the AI profile and the budget multiplier/cap.
 ```
 
 ### 2.3 `shared/levels.js`
@@ -148,6 +151,9 @@ export const HUMAN_AI_PROFILE = AI_PROFILES.especialista
 export const LEVELS = [ { n, name, desc, enemyFaction: string|'random', enemyBudgetMul, builder, boss?: string } ... ]  // 15 entries
 export function levelInfo(n) → level   // n > 15: endless scaling (SPEC §5.1)
 export function enemyBudget(level, difficulty, baseBudget) → number  // round(base * level.enemyBudgetMul * AI_PROFILES[difficulty].budgetMul)
+export function effectiveBudgetMul(level, difficulty) → min(level.enemyBudgetMul × profile.budgetMul, profile.budgetCap + 0.05·wave)
+export function enemyBudgetInfo(level, difficulty, base) → { budget, mul, spendable, capped, factions }   // spendable = what the faction roster can really buy (40-ship cap)
+export function levelPreset(level, faction) / levelEnemyAi(level, difficulty)   // LEVELS entries carry preset?, aiTier?, boss?, bossSizeClass?
 ```
 
 ### 2.4 `shared/protocol.js`
@@ -171,6 +177,9 @@ export function stepBattle(state) → SimEvent[]      // advances exactly one ti
 export function makeSnapshot(state) → Snapshot
 export function getResult(state) → BattleResult | null
 export function hashState(state) → string            // hex; identical for identical (config, tick)
+// test/sim/golden.test.js pins hashState at ticks 100/1000/end + the outcome of three fixed battles
+// (test/sim/golden.json). An intentional balance/AI/engine change regenerates it:
+//   node test/sim/golden.test.js --update
 export function runToEnd(config, { onTick } = {}) → BattleResult
 export function battleWorld(state) → { w, h }
 export const AI_PROFILES  // re-export from levels.js for convenience
@@ -245,7 +254,7 @@ A **frame** is what both the local runner and the server emit every `SNAPSHOT_EV
 ## 4. Server
 
 ### 4.1 Static (`server/static.js`)
-Serves `client/` at `/` and `shared/` at `/shared/` with correct MIME types (`.js` → `text/javascript`, `.html`, `.css`, `.svg`, `.json`, `.ico`), `Cache-Control: no-cache`, path traversal blocked, `/` → `client/index.html`. `/health` returns JSON `{ ok, rooms, uptime }`.
+Serves `client/` at `/` and `shared/` at `/shared/` with correct MIME types (`.js` → `text/javascript`, `.html`, `.css`, `.svg`, `.json`, `.ico`), `Cache-Control: no-cache`, path traversal blocked, `/` → `client/index.html`. `/health` returns JSON `{ ok, rooms, battles, draining, uptime, sessions }`. With `NODE_ENV=production` the developer pages under `/dev/` are not served.
 
 ### 4.2 Protocol (JSON text frames, `t` = type; C2S may carry `rid` echoed in `ack`/`error`)
 
@@ -296,7 +305,7 @@ Serves `client/` at `/` and `shared/` at `/shared/` with correct MIME types (`.j
  * @property {Difficulty} botDifficulty
  * @property {'lobby'|'countdown'|'battle'|'results'} phase
  * @property {Slot[][]} slots            [team0[], team1[]]
- * @property {{ id, name }[]} spectators
+ * @property {{ id, name, connected }[]} spectators
  * @property {string[]} rematchVotes
  * @property {string} you                the receiving player's id
  *
@@ -374,7 +383,9 @@ Renderer.setOptions({ showNames, grid, reducedMotion, quality })
 Renderer.registerShips(ships)   // idempotent: register ShipInit entries unknown so far (spawned units after a reconnect)
 Renderer.resync(start)          // reconnect: registerShips(start.ships) + mark start.dead + interpolator reset
 Renderer.getView()          // { ships: Map<id, {x,y,a,hp,sh,flags,cls,team,owner}>, tick } — used by HUD
-Renderer.camera             // { follow(id), setMode('auto'|'free'), zoomBy(f), pan(dx,dy) }
+Renderer.camera             // { follow(id), setMode('auto'|'free'), zoomBy(f), pan(dx,dy), mode, zoom, followId, jumpTo(x,y,z) }
+Renderer.onEnd(cb)          // called once the end-of-battle presentation has played (screens/battle.js shows results after it)
+Renderer.viewport           // { x, y, w, h } CSS px of the arena inside the canvas (full canvas between 3:4 and 21:9, letterboxed beyond)
 Renderer.dispose()
 ```
 Interpolation delay: 120 ms local, 160 ms network. Events are applied when presentation time crosses their frame.
@@ -409,7 +420,8 @@ export const audio = {
 - `node tools/simulate.js --matrix --seeds 20` (all presets × all presets, prints win-rate table)
 - `node tools/simulate.js --factions --seeds 20` (faction × faction pooled over presets)
 - `node tools/simulate.js --difficulty --seeds 30` (each difficulty vs a normal preset fleet)
-- Unit tests run with `npm test` (node:test, `test/**/*.test.js`). E2E with `npm run e2e` (Playwright, Chromium at `/opt/pw-browsers`, module at `/opt/node-tools/node_modules/playwright/index.mjs` with fallback to `import('playwright')`).
+- `node tools/simulate.js --ladder <difficulty|all> [--levels 1-15] --seeds 2` replays the single-player ladder; `npm run balance` (tools/balance-check.js) prints SPEC §8 pass/fail (matrix, factions, difficulty, ladder).
+- Unit tests run with `npm test` (node:test, `test/**/*.test.js`; the slow ability sweep uses 4 seeds by default) and `npm run test:full` (`FE_SEEDS=10`, the SPEC sample sizes; what CI runs). The golden fixture (`test/sim/golden.json`) must be regenerated with `node test/sim/golden.test.js --update` whenever a simulation outcome changes on purpose. E2E with `npm run e2e` (Playwright, Chromium at `/opt/pw-browsers`, module at `/opt/node-tools/node_modules/playwright/index.mjs` with fallback to `import('playwright')`).
 
 ## 7. Conventions
 

@@ -18,13 +18,13 @@ import {
 import { createMusicEngine, computeIntensity } from './music.js';
 
 export const SETTINGS_KEY = 'frotaEstelar.audio.v1';
-export const DEFAULT_SETTINGS = Object.freeze({ master: 0.8, music: 0.7, sfx: 0.9, ui: 0.8, muted: false });
+export const DEFAULT_SETTINGS = Object.freeze({ master: 0.8, music: 0.8, sfx: 0.75, ui: 0.8, muted: false });
 export const MAX_VOICES = 24;
 export const COALESCE_WINDOW = 0.03;
 export const COALESCE_MAX_MUL = 2.2;
 export const CULL_GAIN = 0.03;
 /** Headroom trim on the music bus so a full-intensity battle at slider 100% never peaks above 0 dBFS. */
-export const MUSIC_TRIM = 0.8;
+export const MUSIC_TRIM = 1.0;
 export const TICK_MS = 25;
 const BUS_NAMES = ['master', 'music', 'sfx', 'ui'];
 const SCENES = ['none', 'menu', 'builder', 'battle', 'victory', 'defeat'];
@@ -138,6 +138,7 @@ function defaultStorage() {
  * @param {Storage|null} [deps.storage]
  * @param {(fn:Function, ms:number)=>any} [deps.setInterval]
  * @param {(h:any)=>void} [deps.clearInterval]
+ * @param {(fn:Function, ms:number)=>any} [deps.setTimeout]
  * @param {Document|null} [deps.document]
  * @param {number|string} [deps.seed]   seed for the noise bank / music rng
  */
@@ -147,6 +148,7 @@ export function createAudioEngine(deps = {}) {
     storage: deps.storage !== undefined ? deps.storage : defaultStorage(),
     setInterval: deps.setInterval || ((fn, ms) => setInterval(fn, ms)),
     clearInterval: deps.clearInterval || ((h) => clearInterval(h)),
+    setTimeout: deps.setTimeout || ((fn, ms) => setTimeout(fn, ms)),
     document: deps.document !== undefined ? deps.document : (typeof document !== 'undefined' ? document : null),
     seed: deps.seed !== undefined ? deps.seed : (typeof Date !== 'undefined' ? Date.now() : 1),
   };
@@ -172,7 +174,8 @@ export function createAudioEngine(deps = {}) {
   const projectiles = new Map();     // projId → { type, size, faction } for missile/torpedo impacts
   const beds = [null, null];         // engine ambience per team
   const teamFaction = [null, null];
-  const battle = { aliveFrac: [1, 1], destroyedFrac: 0, elapsedSec: 0, engaged: false, suddenDeath: false };
+  const battle = { aliveFrac: [1, 1], destroyedFrac: 0, elapsedSec: 0, engaged: false, suddenDeath: false, density: 0 };
+  const densitySample = { t: 0, n: 0 };
   let frameSerial = 0;
   const stats = { voices: 0, created: 0, coalesced: 0, dropped: 0, culled: 0, maxVoices: 0, ui: 0, nodesCreated: 0 };
 
@@ -269,6 +272,8 @@ export function createAudioEngine(deps = {}) {
       buses.music.gain.setTargetAtTime(0, now, 0.1);
       music.pause();
       for (const b of beds) if (b) b.gain.gain.setTargetAtTime(0, now, 0.1);
+      // background tab: after the fade, suspend the context so no audio is rendered at all
+      D.setTimeout(() => { if (hidden) suspend(); }, 400);
     } else {
       music.resume();
       applySettings();
@@ -601,7 +606,10 @@ export function createAudioEngine(deps = {}) {
           }
           case 'hit': {
             const dst = safeLookup(e[1]); if (!dst) break;
-            play(e[4] ? 'hit.shield' : 'hit.hull', { x: dst.x, y: dst.y, size: sizeOf(dst), faction: dst.faction, seed: eventSeed(e[1], e[2], e[4]), delay });
+            // a point-defence tick and a railgun strike must not sound the same: gain from the damage amount
+            const amount = Math.max(1, Number(e[2]) || 1);
+            const gain = 0.5 + 0.5 * clamp(Math.log2(amount / 8) / 4, 0, 1);
+            play(e[4] ? 'hit.shield' : 'hit.hull', { x: dst.x, y: dst.y, size: sizeOf(dst), faction: dst.faction, seed: eventSeed(e[1], e[2], e[4]), delay, gain });
             break;
           }
           case 'sbreak': {
@@ -685,10 +693,22 @@ export function createAudioEngine(deps = {}) {
     if (Array.isArray(s.aliveFrac)) battle.aliveFrac = [clamp(Number(s.aliveFrac[0]) || 0, 0, 1), clamp(Number(s.aliveFrac[1]) || 0, 0, 1)];
     battle.destroyedFrac = clamp(Number(s.destroyedFrac) || 0, 0, 1);
     battle.elapsedSec = Math.max(0, Number(s.elapsedSec ?? s.elapsed) || 0);
+    // action density: sound requests per second (played, coalesced or dropped), smoothed over ~3 s,
+    // so a heavy exchange pushes the music up even in a short battle
+    const nowMs = Date.now();
+    const total = stats.created + stats.coalesced + stats.dropped;
+    if (densitySample.t > 0) {
+      const dt = Math.max(0.05, (nowMs - densitySample.t) / 1000);
+      const rate = Math.max(0, total - densitySample.n) / dt;
+      const target = clamp(rate / 40, 0, 0.9);
+      const k = 1 - Math.exp(-dt / 3);
+      battle.density = battle.density + (target - battle.density) * k;
+    }
+    densitySample.t = nowMs; densitySample.n = total;
     if (!music) return;
     let x = computeIntensity(battle);
     if (battle.engaged) x = Math.max(x, 0.12);
-    if (battle.suddenDeath) x = Math.max(x, 0.66);
+    if (battle.suddenDeath) x = 1;   // sudden death: every layer on
     music.setIntensity(x);
   }
 
@@ -700,7 +720,7 @@ export function createAudioEngine(deps = {}) {
     const next = SCENES.includes(s) ? s : 'menu';
     if (next === scene) return;
     scene = next;
-    if (next !== 'battle') { battle.engaged = false; battle.suddenDeath = false; }
+    if (next !== 'battle') { battle.engaged = false; battle.suddenDeath = false; battle.density = 0; densitySample.t = 0; }
     if (next === 'battle') { teamFaction[0] = null; teamFaction[1] = null; projectiles.clear(); }
     if (!ctx) return;
     music.setScene(next);
@@ -726,6 +746,9 @@ export function createAudioEngine(deps = {}) {
     settings.muted = !!b;
     saveSettings();
     applySettings();
+    // muted: once the fade is done, stop rendering the graph (battery on phones); unmute resumes
+    if (settings.muted) D.setTimeout(() => { if (settings.muted && !hidden) suspend(); }, 250);
+    else resume();
   }
 
   /** @returns {{ master:number, music:number, sfx:number, ui:number, muted:boolean }} */

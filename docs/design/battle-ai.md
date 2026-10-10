@@ -235,16 +235,29 @@ intentToDesired(s):
   t = ship(s.ai.targetId); d = dist
   switch s.ai.intent.moveMode:
     approach:  dir = toward(t), speed = max
-    hold:      dir = toward(t) (só para virar), speed = d > R*0.7 ? max : 0     // brawler
-    kite:      lo = 0.75*R, hi = 0.95*R
+    hold:      dir = toward(t) (só para virar); speed = d > R*0.7 ? max : 0     // brawler
+               torre (arco ≥ 180°): recua a 0.6*max se d < 0.45*R até passar de 0.6*R (banda morta; o heading é a memória)
+               anchor: holdAt = max(0.7*R, 0.85*alcance da arma principal); avança a 0.6*max rumo ao centroide inimigo
+                       só enquanto estiver atrás do terço da frente da linha (T.frontDist + 60) ou sem linha
+    kite:      lo = 0.75*R, hi = 0.95*R   (banda morta: recua abaixo de lo até passar de 0.85*R)
+               arma fixa (arco < 180°): só recua de ameaça que consegue deixar para trás pagando a volta para atirar
+                       ((speed − t.speed)*cooldown > t.speed*2*(180° − arco)/turnRate); com a arma pronta e inimigo
+                       ao alcance fora do arco, vira para ele e atira (se a volta custar ≤ 0.5*cooldown)
                if d < lo: dir = normalize(away(t) + tangent(t)*0.6), speed = max
                elif d > hi: dir = toward(t), speed = max
-               else: dir = tangent(t), speed = 0.6*max                            // mantém evasão
+               else: torre → dir = tangent(t), speed = 0.6*max                    // mantém evasão
+                     arma fixa com arco ≥ 80° → espiral 10° dentro do arco (alvo fica no arco)
+                     arma mais estreita → parada, de frente para o alvo
     orbit:     dir = normalize(tangent(t) + toward(t)*(d > 0.6*R ? 0.8 : -0.3)), speed = max   // diver
     escortSlot: a = ship(protecteeId); enemyDir = normalize(enemyCentroid - a.pos)
                slot = a.pos - enemyDir*(a.radius + s.radius + 50) + perp(enemyDir)*slotOffset(s)
                dir = toward(slot), speed = min(max, dist(slot)*2)                 // chega e para
+               perto do slot, arma fixa pronta com inimigo ao alcance → vira para ele e atira
+    backline:  ponto = centroideInimigo + eixo*(T.frontDist + 250)               // 250 u atrás do terço da frente da linha
+               se o inimigo mais próximo está além de 0.9*alcance e o carrier o supera em alcance → puxa ≤ 125 u na direção dele
+               banda morta de 40 u; ameaça a 200 u → foge
     retreat:   dir = toward(safePoint), speed = max
+               arma fixa pronta com inimigo ao alcance fora do arco → vira para ele e atira (volta ≤ 0.5*cooldown)
     formation: dir = toward(formationSlot), speed = min(max, groupSpeed)
     idleAdvance: dir = toward(enemyCentroid), speed = 0.5*max
   // tangent(t) = perpendicular escolhida por paridade de id (metade orbita horário, metade anti-horário → menos colisão)
@@ -257,10 +270,11 @@ Mapeamento classe → modo padrão quando engajado: Interceptador/Bombardeiro/Ca
 
 `safePoint` para retreat: posição do aliado de Apoio mais próximo, senão `teamAnchor.pos + (teamAnchor.pos − enemyCentroid)·200`, senão o próprio spawn.
 
-**Retreat** (não para `anchor`, não em Fácil, não em morte súbita):
-- entra se `hp/hpMax < RETREAT_AT[role]` (diver 0.35, kiter 0.4, brawler 0.25, escort 0.45) **e** (existe Apoio vivo **ou** `shield < 0.2·shieldMax` e regen possível);
-- sai se `hp/hpMax > RETREAT_AT + 0.2` ou `shield > 0.6·shieldMax` ou nenhum aliado vivo num raio de 600 (sozinho = luta).
-- Durante retreat a nave continua atirando em quem estiver no arco (não muda alvo, só move).
+**Retreat** (não para `anchor`, não em Fácil, não em morte súbita, nunca para unidades geradas (cost 0) nem naves tiny de custo < 20 — são descartáveis; larvas com menos de 50 % de casco e inimigo a 250 u mergulham no mais próximo em vez de fugir):
+- entra se `hp/hpMax < RETREAT_AT[role]` (diver 0.35, kiter 0.4, brawler 0.25, escort 0.45) **e** há aliado num raio de 600 **e** (a nave regenera casco **ou** `shield < 0.3·shieldMax` — casco sem regeneração só tem o escudo para recuperar; com escudo cheio não há o que recuperar);
+- sai se `hp/hpMax > RETREAT_AT + 0.2` (com regeneração) ou `shield ≥ 0.6·shieldMax` (sem), ou nenhum aliado vivo num raio de 600 (sozinho = luta), ou pelo teto de 10 s;
+- **toda** saída inicia um cooldown de 15 s sem novo retreat (sem isso uma nave cuja condição de saída já vale no próximo think — escudo cheio, casco baixo — pisca entre retreat e luta a 5 Hz).
+- Durante retreat a nave continua atirando em quem estiver no arco (não muda alvo, só move); arma fixa pronta com inimigo ao alcance fora do arco → vira para ele e atira se a volta custar ≤ 0.5·cooldown.
 
 ### 2.5 Dano esperado (`expectedIncoming`)
 
@@ -319,13 +333,20 @@ teamThink(T):
     cands = 8 inimigos mais próximos de s dentro de s.maxRange*1.3 (hash), ∪ top-3 globais por value/ehp se cands vazio
     best = argmax over cands of
        (e.cost / ehp(e)) * effMult(s, e) * proximity(s, e)      // proximity = 1 - clamp(d/(1.3R), 0, 0.8)
-       * (e.allocDps*3 < ehp(e) ? 1.0 : 0.3)                    // teto: já tem dano para matar em 3 s? vai pra outro
+       * (saturado(e) ? 0.3 : 1.0)                              // saturado = e.allocDps*2 ≥ ehp(e): já tem dano para matar em 2 s
        * (e.ai.targetId é aliado nosso com hp < 0.4 ? 1.5 : 1)   // defende quem está sendo focado
+    // limite de foco por valor: um candidato saturado só é escolhido se NENHUM candidato não-saturado existe
+    // (o dano "transborda" para o próximo alvo em vez de 8-10 naves empilharem num casco de 36 ehp)
     s.ai.assignedId = best.id;  best.allocDps += s.dpsVs(best)
   T.focusTargets = top-3 de theirs por allocDps/ehp
+  // frente da linha: T.frontDist = distância ao centroide inimigo da nave no primeiro terço das naves de linha
+  // (compradas, não diver/carrier/anchor) ordenadas da mais próxima; carriers ficam atrás dela e o anchor não a ultrapassa
 
   // ---- proteção ----
   for cada escort s: s.ai.protecteeId = aliado de maior cost em 500 u (Nave-mãe > Porta-naves > Cruzador > Artilharia), senão T.anchor
+  for cada support s: s.ai.protecteeId = nave média+ da linha (brawler/kiter/escort/striker) mais perto do centroide da linha,
+                      buscada no time inteiro — nunca outro support nem uma tiny (dois Véus escoltando um ao outro derivam
+                      para longe da batalha); sem ela, o aliado não-support de maior cost em 500 u; senão T.anchor
   // ---- leash ----
   T.leash = T.phase == 'advance' ? 350 : 900
   T.groupSpeed = min maxSpeed entre brawlers/anchor vivos (fase advance)

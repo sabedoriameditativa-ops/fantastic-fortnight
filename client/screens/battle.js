@@ -8,10 +8,10 @@ import { animateShip } from '../util/shipCanvas.js';
 import { createRenderer } from '../battle/renderer.js';
 import { createLocalRunner } from '../battle/localRunner.js';
 import { createHud } from '../battle/hud.js';
-import { FACTIONS, SHIPS } from '/shared/catalog.js';
+import { FACTIONS, SHIPS, DAMAGE_MULT, WEAPON_TYPE_NAMES } from '/shared/catalog.js';
 import { fleetToArray } from '/shared/fleet.js';
 
-const INTRO_MS = 2600;
+const INTRO_MS = 8000;   // long enough to read both fleets; 'Começar' skips it
 const END_OVERLAY_MS = 2300;
 
 /**
@@ -96,6 +96,7 @@ export function mount(root, props, ctx) {
       onSpeed: setSpeed,
       onToggle: toggle,
       onQuit: quit,
+      onReconnect: isLocal ? null : () => { if (state.net) state.net.reconnect(); },
       latency: () => (state.net ? state.net.latencyMs : 0),
     });
     hud.setStatus(feed.isLocal ? 'ok' : (state.net ? (state.net.status === 'ok' ? 'ok' : state.net.status === 'reconnecting' ? 'reconnecting' : 'lost') : 'ok'));
@@ -106,11 +107,21 @@ export function mount(root, props, ctx) {
   }
   function me(start) { return (start.players || []).find((p) => p.id === myPlayerId) || null; }
 
+  let introTick = null;
   function startClock() {
+    const hadIntro = !!introEl;
     if (introEl) { introEl.remove(); introEl = null; }
     if (introTimer) { clearTimeout(introTimer); introTimer = null; }
+    if (introTick) { clearInterval(introTick); introTick = null; }
     if (hud) hud.setIntro(false);
+    if (hadIntro) { try { audio.play('ui.go'); } catch { /* ignore */ } }
     if (isLocal) setSpeed(speed > 0 ? speed : 1);
+  }
+
+  /** Two or three weapon types that hit this hull hardest, e.g. "torpedo ×1,4 · kinético ×1,2". */
+  function counterHints(hullType) {
+    const rows = Object.keys(DAMAGE_MULT).map((w) => [w, DAMAGE_MULT[w][hullType] ?? 1]).filter((r) => r[1] > 1.05).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    return rows.map(([w, m]) => `${WEAPON_TYPE_NAMES[w] || w} ×${m.toFixed(1).replace('.', ',')}`).join(' · ');
   }
 
   function showIntro(start) {
@@ -128,20 +139,27 @@ export function mount(root, props, ctx) {
           stops.push(animateShip(cv, cls, { team: t, angle: t === 0 ? -0.2 : Math.PI + 0.2, pad: 3 }, { animate: false }));
           row.appendChild(h('span', { style: { position: 'relative' } }, cv, h('span.badge.tiny', { text: `×${n}`, style: { position: 'absolute', right: '0', bottom: '0', fontSize: '9px', padding: '0 3px', background: 'rgba(5,7,12,.7)' } })));
         }
+        const hull = f ? f.hull : null;
+        const hints = hull ? counterHints(hull) : '';
         el.appendChild(h('div.pl',
           h('div.pn', { class: t === 0 ? 'team-a' : 'team-b', text: p.name + (p.id === myPlayerId ? ` (${T.app.you})` : '') }),
-          h('div.small.muted', { text: [f ? f.name : p.faction, p.isBot ? `${T.app.bot} ${T.difficulty[p.ai] || ''}`.trim() : ''].filter(Boolean).join(' · ') }),
+          h('div.small.muted', { text: [f ? f.name : p.faction, hull ? `${T.codex.hullType}: ${T.hullType[hull] || hull}` : '', p.isBot ? `${T.app.bot} ${T.difficulty[p.ai] || ''}`.trim() : ''].filter(Boolean).join(' · ') }),
           row,
+          hints && t !== myTeam ? h('div.tiny.muted', { test: 'intro-counter', text: `${T.battle.counterHint}: ${hints}` }) : null,
         ));
       }
       return el;
     };
+    const totalMs = INTRO_MS;
+    const autoEl = h('div.small.muted', { test: 'battle-intro-auto', text: fmt(T.battle.autoStart, { n: Math.ceil(totalMs / 1000) }) });
     introEl = h('div.battle-overlay', { test: 'battle-intro' },
       h('div.reveal', side(0), h('div.vs', { text: T.battle.vs }), side(1)),
-      h('button.btn.btn-primary', { type: 'button', test: 'battle-begin', onClick: startClock }, T.battle.begin),
+      h('div.row.gap.center', h('button.btn.btn-primary', { type: 'button', test: 'battle-begin', onClick: startClock }, T.battle.begin), autoEl),
     );
     hudRoot.appendChild(introEl);
-    introTimer = setTimeout(startClock, ctx.reducedMotion() ? 800 : INTRO_MS);
+    const t0 = Date.now();
+    introTimer = setTimeout(startClock, totalMs);
+    introTick = setInterval(() => { autoEl.textContent = fmt(T.battle.autoStart, { n: Math.max(0, Math.ceil((totalMs - (Date.now() - t0)) / 1000)) }); }, 250);
   }
 
   function setSpeed(x) {
@@ -200,10 +218,25 @@ export function mount(root, props, ctx) {
   }
 
   let clearedLevel = false;
+  /**
+   * In team formats the level only counts as cleared when the player pulled their weight:
+   * at least their fair share (1/teamSize) of the team's damage and one purchased ship alive.
+   */
+  function contributed(r) {
+    const start = feed.lastStart;
+    const players = (start && start.players) || [];
+    const mine = r.players && r.players[myPlayerId];
+    const mates = players.filter((p) => p.team === 0);
+    if (mates.length <= 1 || !mine) return true;
+    let teamDmg = 0;
+    for (const p of mates) teamDmg += (r.players[p.id] && r.players[p.id].damageDealt) || 0;
+    const share = teamDmg > 0 ? mine.damageDealt / teamDmg : 0;
+    return share >= 1 / mates.length * 0.85 && mine.shipsAlive > 0;
+  }
   function onEnd(r) {
     if (disposed || !r) return;
     result = r;
-    if (isLocal && props.meta && r.winner === 0) {
+    if (isLocal && props.meta && r.winner === 0 && contributed(r)) {
       ctx.markLevelCleared(props.meta.setup.difficulty, props.meta.setup.level);
       clearedLevel = true;
     }
@@ -212,7 +245,9 @@ export function mount(root, props, ctx) {
     setTimeout(() => { if (!disposed && endShown !== true) showEnd(); }, 2500);
   }
 
+  let camModeShown = 'auto';
   function loop(t) {
+    if (renderer && hud) { const m = renderer.camera.mode; if (m !== camModeShown) { camModeShown = m; hud.setCameraMode(m); } }
     raf = 0;
     if (disposed) return;
     if (renderer) {
@@ -259,6 +294,7 @@ export function mount(root, props, ctx) {
       if (raf) cancelAnimationFrame(raf);
       if (endTimer) clearTimeout(endTimer);
       if (introTimer) clearTimeout(introTimer);
+      if (introTick) clearInterval(introTick);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('resize', onResize);
       for (const off of offs) { try { off(); } catch { /* ignore */ } }

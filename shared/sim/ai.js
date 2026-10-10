@@ -4,12 +4,13 @@
 // movement actuator computeDesired(). All randomness goes through state.rng.
 
 import { TICK_RATE } from '../constants.js';
-import { clamp, noise } from './math.js';
+import { clamp, noise, angleDiff } from './math.js';
 import { queryCircle } from './spatial.js';
 import { getTables } from './tables.js';
 import { isTargetable, ehp, maxSpeed } from './ship.js';
 import { enemiesWithin, alliesWithin, nearestEnemy, nearestEnemyGlobal, orderedShips } from './queries.js';
 import { ABILITY_REGISTRY } from './abilities.js';
+import { weaponRange, reachRange } from './weapons.js';
 import { ABILITIES } from '../catalog.js';
 
 const KILL_HORIZON = 20;      // s of my dps needed for killability 0
@@ -17,9 +18,27 @@ const COMMIT_TICKS = 2 * TICK_RATE;
 const HYSTERESIS = 1.25;
 const ADVANCE_MAX_TICKS = 45 * TICK_RATE;
 const MAX_RETREAT_TICKS = 10 * TICK_RATE;
-const RETREAT_COOLDOWN_TICKS = 15 * TICK_RATE; // after a retreat ends by the time cap, no new retreat for this long
+const RETREAT_COOLDOWN_TICKS = 15 * TICK_RATE; // after ANY retreat ends, no new retreat for this long (real hysteresis)
 const RETREAT_SHIELD_EXIT = 0.6;               // hulls that cannot regenerate leave retreat once shields are back to this fraction
+const RETREAT_SHIELD_ENTRY = 0.3;              // ... and only start one once their shield is nearly gone (a full shield is nothing to recover)
+const TINY_RETREAT_MIN_COST = 20;              // cheap tiny ships (larvae, Vetores) are expendable: they never retreat
+const BILE_DIVE_HP = 0.5;                      // larvae dive into the nearest enemy (bile burst) below this hull fraction ...
+const BILE_DIVE_RANGE = 250;                   // ... when one is this close
+const FOCUS_SPILL_SECONDS = 2;                 // team focus: a target whose ehp the allocated dps kills within this time takes no further ships
+const HEAVY_ALPHA = 100;                       // a main gun hitting for this much per trigger pull picks fallback targets worth the shot
 const ORBIT_MAX_OFFSET = Math.PI / 3;          // fixed-arc divers never aim their orbit more than 60° off the target
+const KITE_BACK_IN = 0.75, KITE_BACK_OUT = 0.85, KITE_FAR = 0.95; // kite band: back off below 0.75·R until past 0.85·R; close in beyond 0.95·R
+const KITE_AWAY_ANGLE = (2 * Math.PI) / 3;     // a kiter whose heading is this far off the target is in its back-off run (hysteresis without extra state)
+const KITE_ARC_MARGIN = Math.PI / 18;          // band strafe keeps the target 10° inside a fixed gun arc (heading lag on the spiral) ...
+const KITE_STRAFE_MIN = (7 * Math.PI) / 18;    // ... and only strafes when that angle is ≥ 70° (arc ≥ 80°); narrower guns stand and face the target
+const FACE_TURN_MAX = 0.5;                     // a fixed gun turns to take a shot only when the turn costs at most this fraction of its cooldown
+const CARRIER_STANDOFF = 250;                  // carriers hold this far behind the front of the fighting line (SPEC §3.1) ...
+const CARRIER_RANGE_CAP = 0.9;                 // ... but no farther from the nearest enemy than this fraction of their own gun range ...
+const CARRIER_PULL_MAX = 125;                  // ... pulled toward it by at most this much (still well behind the front)
+const CARRIER_DEAD_BAND = 40;                  // carriers only move once the backline point drifted this far
+const ANCHOR_HOLD_FRAC = 0.85;                 // motherships hold at this fraction of their main weapon's range ...
+const ANCHOR_BEHIND_FRONT = 60;                // ... and never advance past the front third of the fighting line (minus this margin)
+const HOLD_BACK_IN = 0.45, HOLD_BACK_OUT = 0.6; // turret brawlers back off below 0.45·R until past 0.6·R (dead band against stacking)
 const SHORT_PHASE_TICKS = 1.5 * TICK_RATE; // targets phased out for at most this long are kept
 
 /** Scoring weights per role (design battle-ai §2.3, extended for striker/support/carrier). */
@@ -47,8 +66,11 @@ export function makeTeamState(team) {
     team, phase: 'advance', cx: 0, cy: 0, enemyCx: 0, enemyCy: 0, anchorId: 0, anchorX: 0, anchorY: 0,
     leash: 350, groupSpeed: 30, hasSupport: false, aliveCost: 0, nonCarriers: 0, lineEngaged: false, order: [],
     lineCx: 0, lineCy: 0, // cost-weighted centroid of the purchased non-carrier ships (the fighting line); carriers hold behind it
+    frontDist: Infinity, // distance from the enemy centroid to the front third of the line (purchased non-diver/carrier/anchor ships); Infinity without such ships
   };
 }
+
+const frontBuf = [];
 
 // ---------------------------------------------------------------------------
 // Per tick bookkeeping
@@ -96,15 +118,35 @@ export function recomputeTargeting(state) {
   }
 }
 
+/** Nearest targetable enemy within `R` with at least `minEhp` of hull+shield, else the nearest of all. */
+function nearestEnemyWorth(state, s, R, minEhp) {
+  enemiesWithin(state, s, R, qbuf);
+  let best = null, bd = Infinity, any = null, ad = Infinity;
+  for (let i = 0; i < qbuf.length; i++) {
+    const e = qbuf[i];
+    const d2 = (e.x - s.x) * (e.x - s.x) + (e.y - s.y) * (e.y - s.y);
+    if (d2 < ad) { ad = d2; any = e; }
+    if (d2 < bd && ehp(e) >= minEhp) { bd = d2; best = e; }
+  }
+  return best || any;
+}
+
 function engage(state) {
   state.engaged = true;
   state.engagedTick = state.tick;
   state.events.push(['phase', 'engage']);
 }
 
-/** Pick the nearest targetable enemy as the ship's target (fallback). */
+/**
+ * Pick the nearest targetable enemy as the ship's target (fallback between thinks). A ship whose main gun hits
+ * for HEAVY_ALPHA or more (railguns, the Primordial beam) prefers the nearest enemy worth that shot (ehp of at
+ * least half of it) so its next trigger pull does not go into a gnat that happens to be closest.
+ */
 function ensureTarget(state, s) {
-  let t = nearestEnemy(state, s, Math.max(600, s.maxRange * 1.5));
+  const R = Math.max(600, s.maxRange * 1.5);
+  const w0 = s.weapons[0];
+  const alpha = w0.def.damage * w0.def.salvo;
+  let t = alpha >= HEAVY_ALPHA ? nearestEnemyWorth(state, s, R, alpha * 0.5) : nearestEnemy(state, s, R);
   if (!t) t = nearestEnemyGlobal(state, s, true);
   s.ai.targetId = t ? t.id : 0;
   s.ai.targetSince = state.tick;
@@ -122,7 +164,7 @@ const qbuf = [];
 const cand8 = [];
 const candD = [];
 
-/** Team-level coordination (SPEC §3.3), every 10 ticks, teams staggered. */
+/** Team-level coordination (SPEC §3.3), every 10 ticks, both teams on the same tick. */
 export function teamThink(state, team) {
   const T = state.teams[team], ships = state.ships, tick = state.tick, TB = getTables();
   const ours = state.alive[team], theirs = state.alive[1 - team];
@@ -157,6 +199,17 @@ export function teamThink(state, team) {
   if (ew > 0) { ex /= ew; ey /= ew; } else { ex = team === 0 ? state.world.w : 0; ey = state.world.h / 2; }
   T.cx = cx; T.cy = cy; T.lineCx = lx; T.lineCy = ly; T.enemyCx = ex; T.enemyCy = ey; T.aliveCost = cost; T.hasSupport = hasSupport; T.nonCarriers = nonCarriers;
   T.groupSpeed = groupSpeed;
+  // front of the line: the distance (to the enemy centroid) of the ship at the first third of the line ships sorted
+  // nearest-first. Carriers hold behind it and the anchor never advances past it; a cost centroid would be dragged
+  // back by the mothership itself and let carriers hide out of range (and the mothership lead the charge).
+  frontBuf.length = 0;
+  for (let i = 0; i < ours.length; i++) {
+    const s = ships[ours[i] - 1];
+    if (!s.purchased || s.role === 'diver' || s.role === 'carrier' || s.role === 'anchor') continue;
+    frontBuf.push(Math.sqrt((s.x - ex) * (s.x - ex) + (s.y - ey) * (s.y - ey)));
+  }
+  if (frontBuf.length > 0) { frontBuf.sort((a, b) => a - b); T.frontDist = frontBuf[Math.floor(frontBuf.length / 3)]; }
+  else T.frontDist = Infinity;
   // phase
   if (!state.engaged && tick >= ADVANCE_MAX_TICKS) engage(state);
   if (!state.engaged) { // first-contact check through the grid
@@ -222,7 +275,10 @@ export function teamThink(state, team) {
       }
     }
     if (n === 0) { if (g1) cand8[n++] = g1; if (g2) cand8[n++] = g2; if (g3) cand8[n++] = g3; }
-    let best = null, bestScore = -1, curScore = -1;
+    // focus-fire limit by target value: a target whose ehp the dps already allocated kills within FOCUS_SPILL_SECONDS
+    // is "saturated" and takes no further ships while an unsaturated candidate exists (the damage spills to the
+    // next target instead of piling 8-10 ships on one hull)
+    let best = null, bestScore = -1, bestSat = null, bestSatScore = -1, curScore = -1, curSat = false;
     for (let k = 0; k < n; k++) {
       const e = cand8[k];
       const ee = Math.max(1, ehp(e));
@@ -230,35 +286,70 @@ export function teamThink(state, team) {
       const proximity = 1 - clamp(d / R, 0, 0.8);
       let sc = ((e.cost + 10) / ee) * TB.shipEff[s.clsIdx][e.clsIdx] * Math.min(1, ee / Math.max(1, TB.alpha[s.clsIdx])) * proximity;
       sc *= 1 + Math.min(2, TB.rawDps[e.clsIdx] / 60); // dangerous enemies first
-      sc *= e.allocDps * 3 < ee ? 1 : 0.3;
+      const sat = e.allocDps * FOCUS_SPILL_SECONDS >= ee;
+      if (sat) sc *= 0.3;
       const et = e.ai.targetId > 0 ? ships[e.ai.targetId - 1] : null;
       if (et && et.team === team && et.hp < 0.4 * et.hpMax) sc *= 1.5;
-      if (e.id === s.ai.assignedId) curScore = sc;
-      if (sc > bestScore) { bestScore = sc; best = e; }
+      if (e.id === s.ai.assignedId) { curScore = sc; curSat = sat; }
+      if (!sat) { if (sc > bestScore) { bestScore = sc; best = e; } }
+      else if (sc > bestSatScore) { bestSatScore = sc; bestSat = e; }
     }
+    if (!best) { best = bestSat; bestScore = bestSatScore; }
     if (!best) { s.ai.assignedId = 0; continue; }
-    if (curScore >= 0 && bestScore < curScore * 1.3) best = ships[s.ai.assignedId - 1];
+    if (curScore >= 0 && !curSat && bestScore < curScore * 1.3) best = ships[s.ai.assignedId - 1];
     s.ai.assignedId = best.id;
     best.allocDps += TB.shipDps[s.clsIdx][best.clsIdx];
   }
-  // protectees for escorts/supports: highest-cost ally within 500, else the anchor
+  // protectees: escorts guard the most valuable ally within 500 u; supports follow the fighting line (SPEC §3.3)
   for (let i = 0; i < ours.length; i++) {
     const s = ships[ours[i] - 1];
     if (s.role !== 'escort' && s.role !== 'support') continue;
-    alliesWithin(state, s, 500, qbuf);
     let best = null;
-    for (let k = 0; k < qbuf.length; k++) {
-      const a = qbuf[k];
-      if (s.role === 'support' && (a.role === 'anchor' || a.role === 'carrier') && qbuf.length > 1) continue; // supports follow the fighting line
-      if (!best || a.cost > best.cost) best = a;
-      else if (a.cost === best.cost) { // ties: nearest (grid order is x-sorted and would favour one side)
-        const da = (a.x - s.x) * (a.x - s.x) + (a.y - s.y) * (a.y - s.y), db = (best.x - s.x) * (best.x - s.x) + (best.y - s.y) * (best.y - s.y);
-        if (da < db) best = a;
-      }
+    if (s.role === 'support') best = lineProtectee(ships, ours, s, T);
+    if (!best) {
+      alliesWithin(state, s, 500, qbuf);
+      best = pickProtectee(s, qbuf);
     }
-    if (!best && qbuf.length > 0) best = qbuf[0];
     s.ai.protecteeId = best ? best.id : (T.anchorId && T.anchorId !== s.id ? T.anchorId : 0);
   }
+}
+
+const LINE_ROLES = { brawler: true, kiter: true, escort: true, striker: true };
+
+/**
+ * The medium+ ship of the fighting line (brawler/kiter/escort/striker) closest to the line centroid, searched over
+ * the whole team: a support parks behind the middle of the line, where its auras reach the most hulls, instead of
+ * chaining on another support (two Véus escorting each other drift away from the battle). Null without such a ship.
+ */
+function lineProtectee(ships, ours, s, T) {
+  let best = null, bd = Infinity, bc = -1;
+  for (let k = 0; k < ours.length; k++) {
+    const a = ships[ours[k] - 1];
+    if (a === s || a.sizeIdx < 2 || !LINE_ROLES[a.role]) continue;
+    const d = (a.x - T.lineCx) * (a.x - T.lineCx) + (a.y - T.lineCy) * (a.y - T.lineCy);
+    if (d < bd || (d === bd && a.cost > bc)) { best = a; bd = d; bc = a.cost; }
+  }
+  return best;
+}
+
+/** Worth of ally `a` as a protectee of `s`: the most valuable ally; a support never takes another support nor a tiny. */
+function protecteeWorth(s, a) {
+  if (a === s) return -1;
+  if (s.role === 'support' && (a.role === 'support' || a.sizeIdx === 0)) return -1;
+  return a.cost;
+}
+
+/** Best protectee of `s` among `list` (ties: nearest, as the grid order is x-sorted and would favour one side). */
+function pickProtectee(s, list) {
+  let best = null, bw = -1, bd = Infinity;
+  for (let k = 0; k < list.length; k++) {
+    const a = list[k];
+    const w = protecteeWorth(s, a);
+    if (w < 0) continue;
+    const d = (a.x - s.x) * (a.x - s.x) + (a.y - s.y) * (a.y - s.y);
+    if (w > bw || (w === bw && d < bd)) { best = a; bw = w; bd = d; }
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +439,13 @@ export function decide(state, s) {
   const T = state.teams[s.team];
   const W = ROLE_WEIGHTS[s.role] || ROLE_WEIGHTS.brawler;
   s.ai.nextThink = tick + P.thinkInterval;
+  if (s.kamikaze) { // a diving larva only ever wants the nearest enemy
+    const prey = nearestEnemy(state, s, 600) || nearestEnemyGlobal(state, s, true);
+    if (prey && prey.id !== s.ai.targetId) { s.ai.targetId = prey.id; s.ai.targetSince = tick; }
+    s.ai.retreating = false;
+    s.ai.mode = 'kamikaze';
+    return;
+  }
   const list = gatherCandidates(state, s);
   // ---- target selection ----
   let cur = s.ai.targetId > 0 ? ships[s.ai.targetId - 1] : null;
@@ -372,25 +470,38 @@ export function decide(state, s) {
   const t = s.ai.targetId > 0 ? ships[s.ai.targetId - 1] : null;
   // ---- retreat (hysteresis) ----
   // A retreat is a temporary pull-back (SPEC §3.1): it ends when the hull recovered (+0.2), when the ship is alone,
-  // or by the time cap, after which a cooldown blocks the next one so a ship that cannot heal does not flee for the
-  // rest of the battle in back-to-back episodes. Hulls without regeneration (Lúmen, shielded Terran capitals) can
-  // only recover shields, so for them a recovered shield (≥ 60% of cap) is the exit criterion instead.
-  const canRetreat = P.retreat && s.role !== 'anchor' && !state.suddenDeath && !s.kamikaze && !s.latch && (s.regen > 0 || s.shieldMax > 0);
+  // or by the 10 s cap; EVERY exit starts a cooldown (no new retreat for 15 s), otherwise a ship whose exit criterion
+  // is already true on the next think (full shield, hull still low) would flip in and out of retreat at 5 Hz.
+  // Hulls without regeneration (Lúmen, shielded Terran capitals) can only recover shields, so for them a lost shield
+  // (< 30% of cap) is the entry condition and a recovered one (≥ 60%) the exit. Spawned units (cost 0) and cheap tiny
+  // ships are expendable and never retreat; larvae dive instead (below).
+  const expendable = !s.purchased || (s.sizeIdx === 0 && s.cost < TINY_RETREAT_MIN_COST);
+  const canRetreat = P.retreat && s.role !== 'anchor' && !state.suddenDeath && !s.latch && !expendable && (s.regen > 0 || s.shieldMax > 0);
   if (canRetreat) {
     const frac = s.hp / s.hpMax, th = RETREAT_AT[s.role] || 0.3;
-    if (!s.ai.retreating && frac < th && tick >= s.ai.retreatBlockedUntil) {
-      if (alliesWithin(state, s, 600, qbuf).length > 0) { s.ai.retreating = true; s.ai.retreatSince = tick; } // alone = fight
-    } else if (s.ai.retreating) {
-      const recovered = s.regen > 0 || s.hot ? frac > th + 0.2 : s.shield >= RETREAT_SHIELD_EXIT * s.shieldMax;
-      if (tick - s.ai.retreatSince > MAX_RETREAT_TICKS) { s.ai.retreating = false; s.ai.retreatBlockedUntil = tick + RETREAT_COOLDOWN_TICKS; }
-      else if (recovered) s.ai.retreating = false;
-      else if (alliesWithin(state, s, 600, qbuf).length === 0) s.ai.retreating = false;
+    const canHeal = s.regen > 0 || !!s.hot;
+    if (!s.ai.retreating) {
+      if (frac < th && tick >= s.ai.retreatBlockedUntil && (canHeal || s.shield < RETREAT_SHIELD_ENTRY * s.shieldMax)
+        && alliesWithin(state, s, 600, qbuf).length > 0) { s.ai.retreating = true; s.ai.retreatSince = tick; } // alone = fight
+    } else {
+      const recovered = canHeal ? frac > th + 0.2 : s.shield >= RETREAT_SHIELD_EXIT * s.shieldMax;
+      if (tick - s.ai.retreatSince > MAX_RETREAT_TICKS || recovered || alliesWithin(state, s, 600, qbuf).length === 0) {
+        s.ai.retreating = false;
+        s.ai.retreatBlockedUntil = tick + RETREAT_COOLDOWN_TICKS;
+      }
     }
   } else s.ai.retreating = false;
-  // ---- bile burst dive (larva passive) ----
-  if (s.ability.id === 'bile_burst' && !s.kamikaze && s.hp < 0.2 * s.hpMax && t) {
-    s.kamikaze = true;
-    state.kamikazes.push(s.id);
+  // ---- bile burst dive (larva passive): a hurt larva with an enemy close by rams it instead of fleeing ----
+  if (s.ability.id === 'bile_burst' && s.hp < BILE_DIVE_HP * s.hpMax) {
+    const prey = nearestEnemy(state, s, BILE_DIVE_RANGE);
+    if (prey) {
+      s.kamikaze = true;
+      s.ai.targetId = prey.id; s.ai.targetSince = tick;
+      s.ai.retreating = false;
+      s.ai.mode = 'kamikaze';
+      state.kamikazes.push(s.id);
+      return;
+    }
   }
   // ---- movement mode ----
   const ai = s.ai;
@@ -435,6 +546,16 @@ export function decide(state, s) {
 /** Distance the main weapon measures its range against: edge to edge for contact weapons, else centre to centre. */
 function gunDistance(s, t, d) {
   return s.weapons[0].def.contact ? d - s.radius - t.radius : d;
+}
+
+/** Longest current range among the ship's guns that shoot ships (point defense excluded); 0 for a PD-only hull. */
+function gunRange(s) {
+  let R = 0;
+  for (let i = 0; i < s.weapons.length; i++) {
+    const w = s.weapons[i];
+    if (!w.def.pd) R = Math.max(R, weaponRange(s, w));
+  }
+  return R;
 }
 
 function protecteeAlive(state, s) {
@@ -486,6 +607,39 @@ export function executePendingCasts(state) {
 // ---------------------------------------------------------------------------
 
 /**
+ * A ship with a fixed-arc main gun that is ready while an enemy is within its reach turns to face that enemy for
+ * the shot (the weapons phase of this tick fires once the arc is met), provided the turn costs at most half the
+ * gun's cooldown (a 60° laser firing every second is not worth a 150° about-face while fleeing). Writes the
+ * direction to `out.dx/dy` and returns true; false when the gun is a turret, not ready, nothing is in reach, or
+ * the enemy is already inside the arc (the gun fires this tick anyway, the ship can keep moving).
+ */
+function faceForShot(state, s, t, tick, out) {
+  const w0 = s.weapons[0];
+  if (w0.arcRad >= Math.PI || w0.charging || w0.readyAt > tick) return false;
+  let foe = t && t.alive && isTargetable(t, tick) && t.sizeIdx >= w0.minTargetIdx
+    && (t.x - s.x) * (t.x - s.x) + (t.y - s.y) * (t.y - s.y) <= reachRange(s, w0, t) ** 2 ? t : null;
+  if (!foe) foe = nearestEnemy(state, s, weaponRange(s, w0));
+  if (!foe) return false;
+  const dx = foe.x - s.x, dy = foe.y - s.y;
+  const off = Math.abs(angleDiff(Math.atan2(dy, dx), s.heading)) - w0.arcRad;
+  if (off <= 0) return false;
+  if (off / (s.turnRate * s.mod.turnMul) > FACE_TURN_MAX * w0.cdTicks / TICK_RATE) return false;
+  out.dx = dx; out.dy = dy;
+  return true;
+}
+
+/**
+ * Can a kiter with a fixed gun afford to run from `t`? Only when the ground it gains over one cooldown beats what
+ * the threat recovers while the kiter turns around to shoot and back (turret kiters always can).
+ */
+function canBackOff(s, t) {
+  const w0 = s.weapons[0];
+  if (w0.arcRad >= Math.PI) return true;
+  const turnSec = 2 * (Math.PI - w0.arcRad) / (s.turnRate * s.mod.turnMul);
+  return (s.speed - t.speed) * (w0.cdTicks / TICK_RATE) > t.speed * turnSec;
+}
+
+/**
  * Translate the ship's intent into a desired direction and speed for this tick.
  * @param {object} state
  * @param {object} s
@@ -509,15 +663,32 @@ export function computeDesired(state, s, out) {
     case 'hold': {
       dx = t.x - s.x; dy = t.y - s.y;
       const d = Math.sqrt(dx * dx + dy * dy);
+      if (s.role === 'anchor') {
+        // motherships hold at 0.85× their main weapon's range (not the dps-weighted engage range, which the short
+        // secondary guns pull in) and advance slowly toward the enemy mass only while the fighting line is ahead
+        // (with no line left the mothership is the line and advances on its own)
+        let holdAt = Math.max(0.7 * R, ANCHOR_HOLD_FRAC * weaponRange(s, s.weapons[0]));
+        // an ability asked to close in (EMP storm on a cluster just out of reach): that is a deliberate
+        // push, so it overrides both the stand-off and the "stay behind the front" rule
+        const closingIn = ai.holdOverride > 0 && ai.holdOverride < holdAt;
+        if (closingIn) holdAt = ai.holdOverride;
+        const ex = T.enemyCx - s.x, ey = T.enemyCy - s.y;
+        const ed = Math.sqrt(ex * ex + ey * ey);
+        const behindFront = T.frontDist === Infinity || ed > T.frontDist + ANCHOR_BEHIND_FRONT;
+        if (d > holdAt && ed > 200 && (behindFront || closingIn)) { dx = closingIn ? dx : ex; dy = closingIn ? dy : ey; speed = cap * 0.6; }
+        else speed = 0;
+        break;
+      }
       let holdAt = AREA_HOLD[s.cls] !== undefined ? Math.min(0.7 * R, AREA_HOLD[s.cls]) : 0.7 * R;
       if (ai.holdOverride > 0 && ai.holdOverride < holdAt) holdAt = ai.holdOverride; // e.g. closing in for an EMP storm
-      if (d > holdAt) {
-        speed = cap;
-        if (s.role === 'anchor') { // anchors advance with the team toward the enemy mass, slowly
-          speed = cap * 0.6;
-          const ex = T.enemyCx - s.x, ey = T.enemyCy - s.y;
-          if (ex * ex + ey * ey > 200 * 200) { dx = ex; dy = ey; }
-        }
+      if (d > holdAt) { speed = cap; break; }
+      // turret brawlers keep a stand-off instead of driving through their target (and each other): back off below
+      // 0.45·R until past 0.6·R (scaled with a tighter area hold), the heading being the memory of the run;
+      // fixed-gun brawlers would lose their shot, so they only stop
+      const backIn = holdAt * (HOLD_BACK_IN / 0.7), backOut = holdAt * (HOLD_BACK_OUT / 0.7);
+      if (s.weapons[0].arcRad >= Math.PI && ai.holdOverride <= 0 && !state.suddenDeath
+        && (d < backIn || (d < backOut && Math.abs(angleDiff(Math.atan2(dy, dx), s.heading)) > KITE_AWAY_ANGLE))) {
+        dx = -dx; dy = -dy; speed = cap * 0.6;
       } else speed = 0;
       break;
     }
@@ -526,13 +697,25 @@ export function computeDesired(state, s, out) {
       const d = Math.sqrt(tx * tx + ty * ty) || 1;
       const nx = tx / d, ny = ty / d;
       const px = -ny * ai.orbitSign, py = nx * ai.orbitSign;
-      // narrow-arc guns must face the target to fire: such kiters stand in the band and only
-      // back away from threats they can actually outrun
-      const narrow = s.weapons[0].arcRad < Math.PI / 2;
-      if (d < 0.75 * R && (!narrow || t.speed < s.speed * 0.95)) { dx = -nx + px * 0.6; dy = -ny + py * 0.6; speed = cap; }
-      else if (d > 0.95 * R) { dx = nx; dy = ny; speed = cap; }
-      else if (narrow) { dx = nx; dy = ny; speed = 0; }
-      else { dx = px; dy = py; speed = cap * 0.6; }
+      const w0 = s.weapons[0];
+      // a fixed gun (arc < 180°) must face the target to fire: such a kiter runs only from a threat it outruns by
+      // enough to pay for turning around to shoot (canBackOff), and turns for the shot whenever the gun is ready
+      // with an enemy in reach; the back-off has a dead band (0.75·R → 0.85·R) with the heading as its memory
+      const backing = (d < KITE_BACK_IN * R
+        || (d < KITE_BACK_OUT * R && Math.abs(angleDiff(Math.atan2(ty, tx), s.heading)) > KITE_AWAY_ANGLE)) && canBackOff(s, t);
+      if (faceForShot(state, s, t, tick, out)) { dx = out.dx; dy = out.dy; speed = 0; }
+      else if (backing) { dx = -nx + px * 0.6; dy = -ny + py * 0.6; speed = cap; }
+      else if (d > KITE_FAR * R) { dx = nx; dy = ny; speed = cap; }
+      else {
+        // in the band: strafe for evasion with the target kept inside the gun arc (pure tangent for turrets, a
+        // spiral 10° inside the arc for fixed guns); a gun too narrow for a near-tangential strafe would be driven
+        // straight at the target, so its ship stands and faces it instead
+        const a = w0.arcRad >= Math.PI ? Math.PI / 2 : w0.arcRad - KITE_ARC_MARGIN;
+        if (a >= KITE_STRAFE_MIN) {
+          const ca = Math.cos(a), sa = Math.sin(a) * ai.orbitSign;
+          dx = nx * ca - ny * sa; dy = ny * ca + nx * sa; speed = cap * 0.6;
+        } else { dx = nx; dy = ny; speed = 0; }
+      }
       break;
     }
     case 'orbit': {
@@ -569,18 +752,36 @@ export function computeDesired(state, s, out) {
       const d = Math.sqrt(dx * dx + dy * dy);
       speed = Math.min(cap, d * 2);
       if (d < 6 && t) { dx = t.x - s.x; dy = t.y - s.y; speed = 0; }
+      else if (d < 80 && faceForShot(state, s, t, tick, out)) { dx = out.dx; dy = out.dy; speed = 0; } // near the slot: take the shot, then catch up
       break;
     }
     case 'backline': {
       const th = nearestEnemy(state, s, 200);
       if (th) { dx = s.x - th.x; dy = s.y - th.y; speed = cap; break; }
-      let ex = T.enemyCx - T.lineCx, ey = T.enemyCy - T.lineCy;
-      const ed = Math.sqrt(ex * ex + ey * ey) || 1;
-      const px = T.lineCx - (ex / ed) * 250, py = T.lineCy - (ey / ed) * 250; // 250 u behind the fighting line (SPEC §3.1)
+      // the backline point lies on the enemy-centroid → line-centroid axis, CARRIER_STANDOFF behind the front of
+      // the line (SPEC §3.1); when that leaves the nearest enemy beyond 0.9× the carrier's gun range AND the carrier
+      // outranges that enemy, the point is pulled toward it (so the guns fire from safety) by at most
+      // CARRIER_PULL_MAX, i.e. always well behind the front; a carrier a line ship outguns (a Matriz's 300 u spores
+      // against 450 u autocannons) or one with point defense only stays put, its worth being what it launches; a
+      // dead band keeps the carrier from chasing every wobble of the point
+      let ux = T.lineCx - T.enemyCx, uy = T.lineCy - T.enemyCy;
+      const ud = Math.sqrt(ux * ux + uy * uy);
+      if (ud < 1) { ux = s.team === 0 ? -1 : 1; uy = 0; } else { ux /= ud; uy /= ud; }
+      const front = T.frontDist < Infinity ? T.frontDist : ud;
+      let px = T.enemyCx + ux * (front + CARRIER_STANDOFF), py = T.enemyCy + uy * (front + CARRIER_STANDOFF);
+      const Rw = CARRIER_RANGE_CAP * gunRange(s);
+      const e = Rw > 0 ? nearestEnemy(state, s, 3 * Rw) : null;
+      if (e && e.maxRange * e.mod.rangeMul < Rw) {
+        const ex = e.x - px, ey = e.y - py;
+        const de = Math.sqrt(ex * ex + ey * ey) || 1;
+        const pull = Math.min(de - Rw, CARRIER_PULL_MAX);
+        if (pull > 0) { px += (ex / de) * pull; py += (ey / de) * pull; }
+      }
       dx = px - s.x; dy = py - s.y;
       const d = Math.sqrt(dx * dx + dy * dy);
-      speed = Math.min(cap, d * 2);
-      if (d < 6 && t) { dx = t.x - s.x; dy = t.y - s.y; speed = 0; }
+      const moving = s.vx * s.vx + s.vy * s.vy > 15 * 15;
+      if (d > CARRIER_DEAD_BAND || (moving && d > 10)) speed = Math.min(cap, d * 1.5);
+      else { speed = 0; if (t) { dx = t.x - s.x; dy = t.y - s.y; } }
       break;
     }
     case 'retreat': {
@@ -588,6 +789,7 @@ export function computeDesired(state, s, out) {
       const d = Math.sqrt(dx * dx + dy * dy);
       speed = d > 40 ? cap : 0;
       if (speed === 0 && t) { dx = t.x - s.x; dy = t.y - s.y; }
+      else if (faceForShot(state, s, t, tick, out)) { dx = out.dx; dy = out.dy; speed = 0; } // a retreating ship keeps shooting (design battle-ai §2.4)
       break;
     }
     case 'formation': {

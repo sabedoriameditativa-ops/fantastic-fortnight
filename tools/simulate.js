@@ -5,6 +5,7 @@
 //   node tools/simulate.js --matrix --seeds 20          all presets × all presets
 //   node tools/simulate.js --factions --seeds 20        faction × faction pooled over presets
 //   node tools/simulate.js --difficulty --seeds 30      each difficulty vs a normal preset fleet
+//   node tools/simulate.js --ladder normal --seeds 2    single-player ladder: every preset (player) vs each level's enemy
 //   node tools/simulate.js --a ... --b ... --dump 7     write the events of seed 7 as JSONL (--out <dir>)
 //
 // Fleets of both sides are bots with the --ai difficulty (default especialista),
@@ -15,8 +16,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runBattle, summarize, scalePreset, fleetFromSpec } from '../shared/sim/harness.js';
 import { PRESETS, PRESET_LIST, FACTION_IDS, FACTIONS } from '../shared/catalog.js';
-import { DEFAULT_BUDGET, TICK_RATE, MAX_TICKS, DIFFICULTIES } from '../shared/constants.js';
+import { DEFAULT_BUDGET, TICK_RATE, MAX_TICKS, SUDDEN_DEATH_TICK, DIFFICULTIES } from '../shared/constants.js';
 import { AI_PROFILES } from '../shared/aiProfiles.js';
+import { buildBotFleet } from '../shared/botFleet.js';
+import { fleetCost, fleetShipCount } from '../shared/fleet.js';
+import {
+  levelInfo, enemyBudget, levelBuilder, levelPreset, levelEnemyAi, levelEnemyFaction, levelMustInclude, LAST_AUTHORED_LEVEL,
+} from '../shared/levels.js';
+import { createRng } from '../shared/rng.js';
 
 // ---------------------------------------------------------------------------
 // Args
@@ -55,6 +62,17 @@ function parseArgs(argv) {
       case '--matrix': o.matrix = true; break;
       case '--factions': o.factions = true; break;
       case '--difficulty': o.difficulty = true; break;
+      case '--ladder': {
+        const v = next();
+        if (v !== 'all' && !DIFFICULTIES.includes(v)) throw new UsageError(`--ladder must be one of ${DIFFICULTIES.join(', ')} or all, got "${v}"`);
+        o.ladder = v; break;
+      }
+      case '--levels': {
+        const v = next();
+        const m = /^(\d+)-(\d+)$/.exec(v);
+        if (!m || parseInt(m[1], 10) < 1 || parseInt(m[2], 10) < parseInt(m[1], 10)) throw new UsageError(`--levels must be a range like 1-15, got "${v}"`);
+        o.levels = [parseInt(m[1], 10), parseInt(m[2], 10)]; break;
+      }
       case '--dump': o.dump = next(); break;
       case '--out': o.out = next(); break;
       case '--maxTicks': o.maxTicks = posInt(); break;
@@ -211,6 +229,70 @@ function modeDifficulty(o) {
   printPace(all);
 }
 
+/**
+ * Single-player ladder as the game plays it (client/util/spConfig.js): every
+ * preset at --budget, driven by the 'especialista' AI like a human fleet, vs
+ * the level's enemy (level budget, builder/preset, boss and AI tier) for each
+ * of --seeds seeds; the player always deploys on team 0, as in the game.
+ */
+function ladderLevel(difficulty, n, o) {
+  const level = levelInfo(n);
+  const eb = enemyBudget(level, difficulty, o.budget);
+  const builder = levelBuilder(level, difficulty);
+  const ai = levelEnemyAi(level, difficulty);
+  const byPreset = {};
+  const runs = [];
+  let spent = 0, ships = 0, suddenDeath = 0;
+  for (const p of PRESET_LIST) {
+    const fleet = presetFleet(p.id, o.budget);
+    byPreset[p.id] = 0;
+    for (let s = 0; s < o.seeds; s++) {
+      const rng = createRng(`${n}-${difficulty}-${p.id}-${s}:setup`);
+      const faction = levelEnemyFaction(level, rng);
+      const enemy = buildBotFleet({
+        budget: eb, difficulty, rng, faction, builder, presetId: levelPreset(level, faction),
+        enemyFleets: [fleet], mustInclude: levelMustInclude(level, faction),
+      });
+      spent += fleetCost(enemy); ships += fleetShipCount(enemy);
+      const r = runBattle(fleet, enemy, s, { aiA: 'especialista', aiB: ai, swapSides: false, maxTicks: o.maxTicks });
+      if (r.aWon) byPreset[p.id]++;
+      if (r.ticks >= SUDDEN_DEATH_TICK) suddenDeath++;
+      runs.push(r);
+    }
+  }
+  const s = summarize(runs);
+  const losers = Object.keys(byPreset).filter((id) => byPreset[id] === 0);
+  return {
+    level: n, name: level.name, difficulty, enemyBudget: eb, builder, enemyAi: ai,
+    enemySpent: Math.round(spent / runs.length), enemyShips: Math.round((ships / runs.length) * 10) / 10,
+    n: s.n, winRate: s.winRateA, wins: s.winsA, suddenDeath, timeouts: s.timeouts, medianSec: s.medianSec,
+    byPreset, presetsAtZero: losers,
+  };
+}
+
+function modeLadder(o) {
+  const diffs = o.ladder === 'all' ? DIFFICULTIES : [o.ladder];
+  const [from, to] = o.levels || [1, LAST_AUTHORED_LEVEL];
+  const out = {};
+  let done = 0;
+  for (const d of diffs) {
+    out[d] = {};
+    for (let n = from; n <= to; n++) {
+      out[d][n] = ladderLevel(d, n, o);
+      progress('ladder', ++done, diffs.length * (to - from + 1));
+    }
+  }
+  if (o.json) { console.log(JSON.stringify(out, null, 1)); return; }
+  console.log(`\nSingle-player ladder (${PRESET_LIST.length} presets × ${o.seeds} seeds per level, player AI especialista, budget ${o.budget})`);
+  for (const d of diffs) {
+    console.log(`\n${d}: level  budget (builder/ai)       spent  ships  player win  median   SD  TO  presets at 0 wins`);
+    for (let n = from; n <= to; n++) {
+      const r = out[d][n];
+      console.log(`  L${String(n).padEnd(3)} ${String(r.enemyBudget).padStart(6)} (${r.builder.padEnd(7)}/${r.enemyAi.padEnd(12)}) ${String(r.enemySpent).padStart(5)}  ${String(r.enemyShips).padStart(5)}  ${pct(r.winRate).padStart(8)}  ${r.medianSec.toFixed(0).padStart(5)} s  ${String(r.suddenDeath).padStart(2)}  ${String(r.timeouts).padStart(2)}  ${r.presetsAtZero.join(',')}`);
+    }
+  }
+}
+
 function printPace(runs) {
   const s = summarize(runs);
   console.log(`\nPace over ${s.n} battles: median ${s.medianSec.toFixed(1)} s, p95 ${s.p95Sec.toFixed(1)} s, draws ${s.draws} (${pct(s.draws / Math.max(1, s.n))}), timeouts ${s.timeouts} (${pct(s.timeouts / Math.max(1, s.n))}), max ${MAX_TICKS / TICK_RATE} s`);
@@ -224,6 +306,7 @@ function usage() {
   node tools/simulate.js --matrix --seeds N
   node tools/simulate.js --factions --seeds N
   node tools/simulate.js --difficulty --seeds N
+  node tools/simulate.js --ladder <${DIFFICULTIES.join('|')}|all> [--levels 1-15] [--seeds N]
   node tools/simulate.js --a ... --b ... --dump <seed> [--out <dir>]
   (--seeds, --budget and --maxTicks are positive integers; --dump needs the seed)
 Presets: ${PRESET_LIST.map((p) => p.id).join(', ')}`;
@@ -238,12 +321,13 @@ function fail(message) {
 let o;
 try { o = parseArgs(process.argv.slice(2)); } catch (e) { fail(e.message); }
 if (o.help) { console.log(usage()); process.exit(0); }
-if (!o.matrix && !o.factions && !o.difficulty && !(o.a && o.b)) fail('choose a mode: --a/--b, --matrix, --factions or --difficulty');
+if (!o.matrix && !o.factions && !o.difficulty && !o.ladder && !(o.a && o.b)) fail('choose a mode: --a/--b, --matrix, --factions, --difficulty or --ladder');
 const t0 = performance.now();
 try {
   if (o.matrix) modeMatrix(o);
   else if (o.factions) modeFactions(o);
   else if (o.difficulty) modeDifficulty(o);
+  else if (o.ladder) modeLadder(o);
   else modeSingle(o);
 } catch (e) {
   // fleet parsing problems (unknown preset/class, mixed factions, bad count) are input errors, not crashes
