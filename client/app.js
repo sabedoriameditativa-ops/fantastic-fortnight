@@ -6,12 +6,15 @@ import { h, clear } from './util/dom.js';
 import {
   loadName, saveName, loadSettings, saveSettings, loadProgress, saveProgress, withLevelCleared,
   loadLastFleet, saveLastFleet, loadSpSetup, saveSpSetup,
+  normalizeProgress, loadProgressOpts, saveProgressOpts, withLevelRecord, withSkirmishResult, levelRecord, skirmishRecord,
 } from './util/storage.js';
+import { rateBattle, isCampaignFormat, formatOf } from './util/progress.js';
+import { createUnlocks, newUnlocks } from './util/unlocks.js';
 import { parseParams, defaultWsUrl, randomSeed } from './util/url.js';
 import { sessionStore, readString, KEYS as STORAGE_KEYS } from './util/storage.js';
 import { createAmbient } from './util/ambient.js';
 import { setShipAnimations } from './util/shipCanvas.js';
-import { buildSpConfig, autotestSetup, normalizeSpSetup } from './util/spConfig.js';
+import { buildSpConfig, autotestSetup, normalizeSpSetup, spBudgetPoints } from './util/spConfig.js';
 import { audio } from './audio/index.js';
 import { createNetClient } from './battle/netClient.js';
 import { validateName } from '/shared/protocol.js';
@@ -39,10 +42,12 @@ const params = parseParams(location.search);
 // App state
 // ---------------------------------------------------------------------------
 
+const progress0 = normalizeProgress(loadProgress()); // v1 → v2 migration (stars / records / skirmish)
 const state = {
   playerName: loadName(),
   settings: loadSettings(),
-  progress: loadProgress(),
+  progress: progress0,
+  progressOpts: loadProgressOpts(progress0), // { gating, fullArsenal }
   lastFleet: loadLastFleet(),
   spSetup: normalizeSpSetup(loadSpSetup()),
   params,
@@ -197,13 +202,47 @@ const ctx = {
     state.progress = withLevelCleared(state.progress, difficulty, level);
     saveProgress(state.progress);
   },
-  resetProgress() { state.progress = {}; saveProgress(state.progress); },
-  /** Start a single-player battle from a setup + fleet. */
+  resetProgress() { state.progress = normalizeProgress({}); saveProgress(state.progress); },
+  /** Progress options ('Explorar livremente' = !gating, 'Arsenal completo' = fullArsenal). */
+  saveProgressOpts(o) { state.progressOpts = { ...state.progressOpts, ...o }; saveProgressOpts(state.progressOpts); },
+  /** Unlock ladder for the current progress/options: ctx.unlocks().isFactionUnlocked(id) / .isShipUnlocked(cls) / .isFleetUnlocked(fleet). */
+  unlocks() { return createUnlocks(state.progress, state.progressOpts); },
+  /**
+   * Record a finished single-player battle (results screen): campaign stars/score per (difficulty, level)
+   * in 1v1, skirmish records (best score per format) in team formats. Persists the progress.
+   * @returns {{ rating: object, campaign: boolean, newStars: boolean, newScore: boolean, prev: object|null,
+   *   unlocked: { factions: string[], ships: string[] }, skirmish: { newRecord: boolean, record: object }|null }|null}
+   */
+  recordResult({ result, start, meta, myPlayerId }) {
+    const rating = rateBattle({ result, start, myPlayerId });
+    if (!rating || !meta || !meta.setup) return null;
+    const { difficulty, level, teamSize } = meta.setup;
+    // the battle screen already marked the level cleared when the result arrived: diff records and
+    // unlocks against the snapshot taken when the battle started (team formats never touch the campaign)
+    const before = state.progressBefore || state.progress;
+    state.progressBefore = null;
+    const out = { rating, campaign: isCampaignFormat(teamSize), newStars: false, newScore: false, prev: levelRecord(before, difficulty, level), unlocked: { factions: [], ships: [] }, skirmish: null };
+    if (out.campaign) {
+      if (rating.won && rating.stars > 0) {
+        const r = withLevelRecord(before, difficulty, level, { stars: rating.stars, score: rating.score, ticks: result.ticks, at: Date.now() });
+        state.progress = r.progress; out.newStars = r.newStars; out.newScore = r.newScore; out.prev = r.prev;
+        out.unlocked = newUnlocks(before, state.progress);
+      }
+    } else {
+      const format = formatOf(teamSize);
+      const r = withSkirmishResult(before, format, { won: rating.won, score: rating.score });
+      state.progress = r.progress;
+      out.skirmish = { newRecord: r.newRecord, prev: r.prev, record: skirmishRecord(state.progress, format), format };
+    }
+    saveProgress(state.progress);
+    return out;
+  },
+  /** Start a single-player battle from a setup + fleet (the player's budget comes from the setup's budget preset). */
   startSinglePlayer(setup, fleet, { seed, speed } = {}) {
     const s = seed ?? params.seed ?? randomSeed();
     let built;
     try {
-      built = buildSpConfig({ setup, playerFleet: fleet, playerName: state.playerName || 'Comandante', seed: s, budget: DEFAULT_BUDGET });
+      built = buildSpConfig({ setup, playerFleet: fleet, playerName: state.playerName || 'Comandante', seed: s, budget: spBudgetPoints(normalizeSpSetup(setup)) });
     } catch (e) {
       reportError(e);
       toast(errorMessage(e.code || 'UNKNOWN', e.detail), 'error');
@@ -211,6 +250,7 @@ const ctx = {
     }
     ctx.saveLastFleet(fleet);
     ctx.saveSpSetup(setup);
+    state.progressBefore = state.progress; // for recordResult (records / unlock announcements)
     go('battle', { mode: 'sp', config: built.config, meta: built.meta, speed: speed ?? state.settings.speed });
     return true;
   },

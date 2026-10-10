@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 register('./_sharedHook.mjs', import.meta.url);
-const { buildSpConfig, autotestSetup, normalizeSpSetup, spLevelInfo, DEFAULT_SP_SETUP } = await import('../../client/util/spConfig.js');
+const { buildSpConfig, autotestSetup, normalizeSpSetup, spLevelInfo, DEFAULT_SP_SETUP, spBudgetPoints, SP_BUDGET_IDS } = await import('../../client/util/spConfig.js');
 const { presetFleet, validateFleet, fleetCost } = await import('../../shared/fleet.js');
 const { enemyBudget, levelInfo, levelEnemyAi } = await import('../../shared/levels.js');
 const { createBattle } = await import('../../shared/sim/battle.js');
@@ -13,7 +13,7 @@ const fleet = presetFleet('ter_linha', 1500);
 describe('normalizeSpSetup', () => {
   test('clamps everything to valid values', () => {
     assert.deepEqual(normalizeSpSetup(null), { ...DEFAULT_SP_SETUP });
-    assert.deepEqual(normalizeSpSetup({ level: 0, difficulty: 'x', teamSize: 9, allyDifficulty: 'facil' }), { level: 1, difficulty: 'normal', teamSize: 1, allyDifficulty: 'facil' });
+    assert.deepEqual(normalizeSpSetup({ level: 0, difficulty: 'x', teamSize: 9, allyDifficulty: 'facil', budget: 'nope' }), { level: 1, difficulty: 'normal', teamSize: 1, allyDifficulty: 'facil', budget: 'padrao' });
     assert.equal(normalizeSpSetup({ level: 42.7 }).level, 42);
   });
 });
@@ -110,14 +110,49 @@ describe('autotestSetup', () => {
   test('defaults to level 1 normal, first preset of the faction', () => {
     const r = autotestSetup({});
     assert.equal(r.presetId, 'ter_linha');
-    assert.deepEqual(r.setup, { level: 1, difficulty: 'normal', teamSize: 1, allyDifficulty: 'normal' });
+    assert.deepEqual(r.setup, { level: 1, difficulty: 'normal', teamSize: 1, allyDifficulty: 'normal', budget: 'padrao' });
     assert.ok(validateFleet(r.fleet, 1500).ok);
   });
   test('honors faction/preset/level/difficulty/team and ignores a preset of another faction', () => {
     const r = autotestSetup({ faction: 'vorrax', preset: 'vor_garras', level: 6, difficulty: 'facil', team: 2, ally: 'dificil' });
     assert.equal(r.presetId, 'vor_garras');
     assert.equal(r.fleet.faction, 'vorrax');
-    assert.deepEqual(r.setup, { level: 6, difficulty: 'facil', teamSize: 2, allyDifficulty: 'dificil' });
+    assert.deepEqual(r.setup, { level: 6, difficulty: 'facil', teamSize: 2, allyDifficulty: 'dificil', budget: 'padrao' });
     assert.equal(autotestSetup({ faction: 'lumen', preset: 'ter_linha' }).presetId, Object.values(PRESETS).find((p) => p.faction === 'lumen').id);
+  });
+});
+
+describe('budget presets (Escaramuça / Padrão / Guerra Total)', () => {
+  test('spBudgetPoints maps the setup budget to points and the enemy budget scales with it', () => {
+    assert.equal(spBudgetPoints({ budget: 'escaramuca' }), 800);
+    assert.equal(spBudgetPoints({ budget: 'padrao' }), 1500);
+    assert.equal(spBudgetPoints({ budget: 'guerra_total' }), 2500);
+    assert.equal(spBudgetPoints({}), 1500);
+    assert.equal(spBudgetPoints(null), 1500);
+    assert.deepEqual([...SP_BUDGET_IDS], ['escaramuca', 'padrao', 'guerra_total']);
+    const small = spLevelInfo({ level: 8, difficulty: 'normal', budget: 'escaramuca' });
+    assert.equal(small.enemyBudget, enemyBudget(8, 'normal', 800));
+    assert.equal(small.enemyBudget, 800);
+    const big = spLevelInfo({ level: 8, difficulty: 'especialista', budget: 'guerra_total' });
+    assert.equal(big.enemyBudget, enemyBudget(8, 'especialista', 2500));
+    assert.ok(big.enemyBudget > 2500);
+  });
+  test('buildSpConfig validates the player fleet against the setup budget and gives the enemy a scaled budget', () => {
+    const f800 = presetFleet('ter_linha', 800);
+    const { config, meta } = buildSpConfig({ setup: { level: 4, difficulty: 'normal', teamSize: 1, budget: 'escaramuca' }, playerFleet: f800, playerName: 'Ana', seed: 's' });
+    assert.equal(meta.budget, 800);
+    assert.equal(meta.setup.budget, 'escaramuca');
+    assert.equal(meta.enemyBudget, enemyBudget(4, 'normal', 800));
+    assert.ok(validateFleet(config.players[1].fleet, meta.enemyBudget).ok);
+    // a 1500-point fleet does not fit the Escaramuça budget
+    assert.throws(() => buildSpConfig({ setup: { level: 4, difficulty: 'normal', teamSize: 1, budget: 'escaramuca' }, playerFleet: fleet, playerName: 'Ana', seed: 's' }), /FLEET_OVER_BUDGET/);
+    // Guerra Total: 2500 for the player and for the enemy base
+    const f2500 = presetFleet('ter_linha', 2500);
+    const gt = buildSpConfig({ setup: { level: 1, difficulty: 'normal', teamSize: 2, budget: 'guerra_total' }, playerFleet: f2500, playerName: 'Ana', seed: 's' });
+    assert.equal(gt.meta.budget, 2500);
+    assert.equal(gt.meta.enemyBudget, enemyBudget(1, 'normal', 2500));
+    assert.ok(fleetCost(gt.config.players[1].fleet) > 1500, 'ally bots use the same budget');
+    // an explicit budget still wins (autotest / tools)
+    assert.equal(buildSpConfig({ setup: { level: 1, budget: 'escaramuca' }, playerFleet: fleet, playerName: 'A', seed: 1, budget: 1500 }).meta.budget, 1500);
   });
 });

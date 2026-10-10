@@ -1,9 +1,11 @@
 // Single-player battle configuration: the player's fleet (AI 'especialista'),
 // ally bots (chosen difficulty, random factions) and enemy bots per level and
 // difficulty (levels.js: enemyBudget, the level's builder/preset, boss
-// mustInclude, enemy AI tier). Deterministic given the seed. Pure (no DOM).
+// mustInclude, enemy AI tier). The setup's budget preset (Escaramuça / Padrão /
+// Guerra Total) is the player's budget and the base of the enemy's.
+// Deterministic given the seed. Pure (no DOM).
 
-import { DEFAULT_BUDGET, TEAM_SIZES, DIFFICULTIES } from '/shared/constants.js';
+import { DEFAULT_BUDGET, BUDGETS, TEAM_SIZES, DIFFICULTIES } from '/shared/constants.js';
 import { FACTION_IDS, presetsOfFaction, PRESETS } from '/shared/catalog.js';
 import { createRng } from '/shared/rng.js';
 import { presetFleet, validateFleet, fleetCost } from '/shared/fleet.js';
@@ -17,7 +19,11 @@ export const BOT_NAMES = [
   'Zéfiro', 'Dra. Mirren', 'Sargento Tolk', 'Oráculo-3', 'Capitão Deren', 'Selene', 'Krast', 'Comandante Vale',
 ];
 
-export const DEFAULT_SP_SETUP = Object.freeze({ level: 1, difficulty: 'normal', teamSize: 1, allyDifficulty: 'normal' });
+/** Budget presets of the single-player setup (shared BUDGETS: Escaramuça 800 / Padrão 1500 / Guerra Total 2500). */
+export const SP_BUDGET_IDS = Object.freeze(Object.keys(BUDGETS));
+export const DEFAULT_SP_BUDGET = 'padrao';
+
+export const DEFAULT_SP_SETUP = Object.freeze({ level: 1, difficulty: 'normal', teamSize: 1, allyDifficulty: 'normal', budget: DEFAULT_SP_BUDGET });
 
 /** Clamp/normalize a single-player setup object. */
 export function normalizeSpSetup(raw) {
@@ -29,8 +35,15 @@ export function normalizeSpSetup(raw) {
     const ts = Math.floor(Number(raw.teamSize));
     if (TEAM_SIZES.includes(ts)) s.teamSize = ts;
     if (DIFFICULTIES.includes(raw.allyDifficulty)) s.allyDifficulty = raw.allyDifficulty;
+    if (SP_BUDGET_IDS.includes(raw.budget)) s.budget = raw.budget;
   }
   return s;
+}
+
+/** Player budget (points) of a setup; the enemy budget scales with it (levels.js enemyBudget). */
+export function spBudgetPoints(setup) {
+  const id = setup && SP_BUDGET_IDS.includes(setup.budget) ? setup.budget : DEFAULT_SP_BUDGET;
+  return BUDGETS[id].points;
 }
 
 /**
@@ -40,10 +53,11 @@ export function normalizeSpSetup(raw) {
  * @param {{ level:number, difficulty:string }} setup
  * @param {number} [budget]
  */
-export function spLevelInfo(setup, budget = DEFAULT_BUDGET) {
+export function spLevelInfo(setup, budget) {
   const s = normalizeSpSetup(setup);
   const level = levelInfo(s.level);
-  const info = enemyBudgetInfo(level, s.difficulty, budget);
+  const base = Number.isFinite(budget) && budget > 0 ? budget : spBudgetPoints(s);
+  const info = enemyBudgetInfo(level, s.difficulty, base);
   return {
     level, difficulty: s.difficulty,
     enemyBudget: info.budget, enemySpendable: info.spendable, budgetCapped: info.capped, budgetMul: info.mul,
@@ -66,7 +80,7 @@ export function spLevelInfo(setup, budget = DEFAULT_BUDGET) {
  */
 export function buildSpConfig(o) {
   const setup = normalizeSpSetup(o.setup);
-  const budget = Number.isFinite(o.budget) && o.budget > 0 ? o.budget : DEFAULT_BUDGET;
+  const budget = Number.isFinite(o.budget) && o.budget > 0 ? o.budget : spBudgetPoints(setup);
   const v = validateFleet(o.playerFleet, budget);
   if (!v.ok) throw Object.assign(new Error(`invalid player fleet: ${v.code}`), { code: v.code, detail: v.detail });
   const playerFleet = v.fleet;
@@ -120,6 +134,7 @@ export function autotestSetup(p, budget = DEFAULT_BUDGET) {
   let presetId = p.preset && PRESETS[p.preset] && PRESETS[p.preset].faction === faction ? p.preset : null;
   if (!presetId) presetId = presetsOfFaction(faction)[0].id;
   const fleet = presetFleet(presetId, budget);
-  const setup = normalizeSpSetup({ level: p.level ?? 1, difficulty: p.difficulty ?? 'normal', teamSize: p.team ?? 1, allyDifficulty: p.ally ?? 'normal' });
+  const budgetId = SP_BUDGET_IDS.find((id) => BUDGETS[id].points === budget) || DEFAULT_SP_BUDGET;
+  const setup = normalizeSpSetup({ level: p.level ?? 1, difficulty: p.difficulty ?? 'normal', teamSize: p.team ?? 1, allyDifficulty: p.ally ?? 'normal', budget: budgetId });
   return { setup, fleet, presetId };
 }

@@ -241,8 +241,10 @@ Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
 - Setup: level (1–15, endless after), difficulty, team size (1v1..6v6). Allies are bots of
   the player's chosen ally difficulty (default normal) with random factions and preset
   fleets; enemies follow the level.
-- Enemy budget = `round(1500 × min(level.enemyBudgetMul × profile.budgetMul, profile.budgetCap))`
-  (`levels.js effectiveBudgetMul`); the player always has 1500. The ladder ramps through
+- Enemy budget = `round(base × min(level.enemyBudgetMul × profile.budgetMul, profile.budgetCap))`
+  (`levels.js effectiveBudgetMul`), where `base` is the setup's budget preset (`setup.budget`:
+  escaramuca 800 / padrao 1500 (default) / guerra_total 2500, `spConfig.js spBudgetPoints`) —
+  the player's own budget, so the enemy scales with it. The ladder ramps through
   composition (every authored level names its builder and preset, so its description holds
   on every difficulty), bosses and AI quality (`aiTier` shifts the enemy AI profile one step
   up or down from the chosen difficulty, clamped) — not through points: the effective enemy
@@ -277,14 +279,51 @@ Noise is `σ·(u1+u2+u3−1.5)·2` from the sim RNG (deterministic).
   the roster: the preset's upgrade pass then trades the cheapest hulls up through the whole
   faction roster (`fleet.js rosterUpgradePass`), and `levels.js enemyBudgetInfo` /
   `spConfig.js spLevelInfo` report the value that can really be bought (`spendable`) and the
-  value actually spent (`meta.enemySpent`) for the setup panel. Progress (max level cleared
-  per difficulty) in `localStorage`.
+  value actually spent (`meta.enemySpent`) for the setup panel.
 - Ladder band (measured with `node tools/simulate.js --ladder normal --seeds 2`: every
   preset at 1500, driven by the `especialista` AI as a human fleet is, vs the level's enemy):
   pooled preset win rate on Normal ≈ 85–100% at L1, 35–80% at L8, ≥ 25% at L13–15 and no
   level where every preset loses; Difícil a little lower, Especialista lower still but L15
   winnable by the best fleets; Fácil wins most levels but not all of L13–15.
-- Results screen offers: play again (same fleet, new seed), next level, edit fleet, menu.
+- Results screen offers: play again (same fleet, new seed), next level (labelled with the next
+  level's name and enemy faction), edit fleet, menu.
+
+### 4.1 Progression (stars, score, records, gating, unlocks, debrief)
+- Stars per (difficulty, level), campaign = 1v1 only (`client/util/progress.js rateBattle`):
+  1 = win; +1 when ≥ 50% of the player's fleet value remains (`valueAlive / fleetCost`);
+  +1 when the battle lasted < 60 s of battle time **or** the fleet brought a capital/mothership
+  and lost none (a fleet without capitals can only earn it by speed). The conditions are
+  additive, so 2/3 is either one. Score = `valueAlive + damageDealt − 4 × seconds`, floored
+  at 0. Best stars and best score per (difficulty, level) are kept independently; the
+  results screen shows `★★☆ 2/3 estrelas — novo recorde!` plus what the next star needs.
+- Storage (`client/util/storage.js`, key `fe.progress`, schema v2):
+  `{ v: 2, [difficulty]: { max, cleared[] }, records: { [difficulty]: { [level]: { stars, score, ticks, at } } },
+  skirmish: { [format]: { best, wins, played } } }`. The v1 shape (`{ [difficulty]: { max, cleared } }`)
+  migrates on load (`normalizeProgress`): every cleared level becomes a 1-star record with
+  score 0; `isLevelCleared` / `maxLevelCleared` / `withLevelCleared` keep working on the v1 keys.
+- Team formats (2v2…6v6) never touch the campaign: a win/loss is a skirmish record per
+  format (best score on wins, wins, played) and the results screen shows the player's share of
+  the team's damage ('Você causou 38 % do dano do time').
+- Level gating (progress option `gating`, default on; 'Explorar livremente' in Opções turns it
+  off): level n is playable when n ≤ (highest level cleared on that difficulty) + 1; endless
+  (16+) after L15. Locked levels are shown with 'Bloqueado' and explain the lock when clicked.
+  `?autotest=` battles bypass gating.
+- Unlock ladder (`client/util/unlocks.js`; progress option `fullArsenal` = 'Arsenal completo',
+  default on for profiles that already had progress when the ladder appeared, off for new
+  profiles): Terran from the start; Vorrax after clearing L3, Lúmen after L6, Ferrix after L9
+  (any difficulty); the capital class of a faction after 6 stars and its mothership after
+  9 stars earned on that faction's own levels (Terran 1–3, Vorrax 4–6, Lúmen 7–9, Ferrix
+  10–12), summed over all difficulties. `isFactionUnlocked / isShipUnlocked / isFleetUnlocked`
+  drive the fleet builder and quick play; the results screen announces new unlocks
+  ('Facção desbloqueada: Enxame Vorrax', 'Classe desbloqueada: Capital (Terrana)').
+- Debrief on the results screen from the result's extra fields (`shared/sim/stats.js`):
+  `players[id].damageByType` (damage per weapon type, rounded), `players[id].lost` (purchased
+  ships destroyed per class) and `result.killers` (top killer ship per team: most kills,
+  damage as tiebreak). The screen shows, per player, ships lost by class, damage by weapon type
+  with its DAMAGE_MULT multiplier against the enemy hull, the top killer of each side, one or
+  two generated tips (`client/util/debrief.js buildTips`: weak weapon type ≥ 25% of the damage,
+  enemy ship with ≥ 3 kills, lost capital, next-star hint, timeout/defeat) and a 'Ver frotas'
+  expander with both fleets as the pre-battle reveal.
 
 ## 5. Multiplayer
 - Rooms with 4-letter codes; host picks team size, budget and default bot difficulty; players

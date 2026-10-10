@@ -76,5 +76,10 @@ test('stats are consistent with events', () => {
   assert.equal(r.players.p1.shipsTotal, state.ships.filter((s) => s.purchased && s.owner === 'p1').length);
   assert.equal(r.players.p1.shipsAlive, state.ships.filter((s) => s.purchased && s.owner === 'p1' && s.alive).length);
   assert.ok(r.mvp && r.mvp.damageDealt > 0);
-  for (const pid of ['p1', 'p2']) for (const k of Object.keys(r.players[pid])) assert.ok(Number.isFinite(r.players[pid][k]));
+  // scalar fields are finite numbers; damageByType / lost are per-type / per-class maps (debrief data)
+  for (const pid of ['p1', 'p2']) for (const k of Object.keys(r.players[pid])) {
+    const v = r.players[pid][k];
+    if (k === 'damageByType' || k === 'lost') assert.ok(v && typeof v === 'object');
+    else assert.ok(Number.isFinite(v), `${pid}.${k}`);
+  }
 });

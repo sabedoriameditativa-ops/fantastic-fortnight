@@ -228,7 +228,7 @@ Budgets are *base*; the difficulty multiplier (§4.2) scales the **enemy** budge
 | 15 | **Chefe: Nave-Mãe Suprema** | 200 | 250 | — | 1 MS + optimizer for the rest | enemy MS +30 % EHP, EMP cd 30 s |
 | ∞ | Modo Infinito (after 15) | 200 | 200 + 10·(n−15) | all | optimizer | endless, leaderboard by level |
 
-Enemy "builder" per level is a hand-authored list for 1–10 (fixed, so levels feel designed) and algorithmic from 11 on. Three stars per level: win / win with ≥ 50 % value remaining / win in under 90 s.
+Enemy "builder" per level is a hand-authored list for 1–10 (fixed, so levels feel designed) and algorithmic from 11 on. Three stars per level: win / win with ≥ 50 % value remaining / win in under 60 s or without losing a capital or mothership (as shipped: SPEC §4.1, `client/util/progress.js`).
 
 ### 4.2 Difficulty selector — exact knobs
 

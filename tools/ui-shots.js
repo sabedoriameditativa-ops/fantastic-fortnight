@@ -146,7 +146,9 @@ async function main() {
     await page.press('[data-test="name"]', 'Tab');
 
     // options / howto / codex
-    await click('menu-options'); await sleep(300); await shot('options'); await click('back');
+    await click('menu-options'); await sleep(300); await shot('options');
+    // fresh profile: unlock free exploration so the walker can pick level 3 below
+    await click('opt-free-explore'); await click('back');
     await click('menu-howto'); await sleep(500); await shot('howto'); await click('back');
     await click('menu-codex'); await sleep(900); await shot('codex');
     await click('codex-lum_catedral'); await sleep(600); await shot('codex-detail'); await click('codex-back'); await click('back');

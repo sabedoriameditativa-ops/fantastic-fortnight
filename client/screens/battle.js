@@ -236,7 +236,8 @@ export function mount(root, props, ctx) {
   function onEnd(r) {
     if (disposed || !r) return;
     result = r;
-    if (isLocal && props.meta && r.winner === 0 && contributed(r)) {
+    // campaign progress is a 1v1 record; team formats are skirmishes (results screen shows the share)
+    if (isLocal && props.meta && r.winner === 0 && props.meta.setup.teamSize === 1 && contributed(r)) {
       ctx.markLevelCleared(props.meta.setup.difficulty, props.meta.setup.level);
       clearedLevel = true;
     }

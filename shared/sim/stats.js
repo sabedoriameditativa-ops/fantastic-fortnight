@@ -4,7 +4,7 @@
 export function makeStats(players) {
   const stats = {};
   for (const p of players) {
-    stats[p.id] = { damageDealt: 0, damageTaken: 0, healing: 0, kills: 0, losses: 0, shipsTotal: 0, shipsAlive: 0, valueAlive: 0 };
+    stats[p.id] = { damageDealt: 0, damageTaken: 0, healing: 0, kills: 0, losses: 0, shipsTotal: 0, shipsAlive: 0, valueAlive: 0, damageByType: {} };
   }
   return stats;
 }
@@ -45,24 +45,37 @@ export function buildResult(state, reason, winner) {
   for (const p of state.config.players) {
     const st = state.stats[p.id];
     let valueAlive = 0, shipsAlive = 0;
+    const lost = {};
     for (let i = 0; i < ships.length; i++) {
       const s = ships[i];
-      if (s.alive && s.purchased && s.owner === p.id) { valueAlive += shipValue(s); shipsAlive++; }
+      if (!s.purchased || s.owner !== p.id) continue;
+      if (s.alive) { valueAlive += shipValue(s); shipsAlive++; }
+      else lost[s.cls] = (lost[s.cls] || 0) + 1;
     }
+    // debrief data: damage per weapon type (rounded, zero types dropped) and purchased ships lost per class
+    const damageByType = {};
+    const byType = st.damageByType || {};
+    for (const t in byType) { const v = Math.round(byType[t]); if (v > 0) damageByType[t] = v; }
     players[p.id] = {
       damageDealt: Math.round(st.damageDealt), damageTaken: Math.round(st.damageTaken), healing: Math.round(st.healing),
       kills: st.kills, losses: st.losses, shipsTotal: st.shipsTotal, shipsAlive, valueAlive: Math.round(valueAlive),
+      damageByType, lost,
     };
   }
   let mvp = null;
+  const killers = [null, null]; // top killer ship per team (most kills, damage as tiebreak)
   for (let i = 0; i < ships.length; i++) {
     const s = ships[i];
     if (s.damageDealt > 0 && (!mvp || s.damageDealt > mvp.damageDealt)) mvp = { shipId: s.id, cls: s.cls, owner: s.owner, damageDealt: Math.round(s.damageDealt) };
+    const k = killers[s.team];
+    if (s.kills > 0 && (!k || s.kills > k.kills || (s.kills === k.kills && s.damageDealt > k.damageDealt))) {
+      killers[s.team] = { shipId: s.id, cls: s.cls, owner: s.owner, kills: s.kills, damageDealt: Math.round(s.damageDealt) };
+    }
   }
   return {
     winner, reason, ticks: state.tick,
     remainingValue: [Math.round(remainingValue(state, 0)), Math.round(remainingValue(state, 1))],
-    players, mvp,
+    players, mvp, killers,
   };
 }
 

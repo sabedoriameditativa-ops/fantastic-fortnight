@@ -50,6 +50,12 @@ client/
   app.js                     screen router + app state
   i18n.js                    pt-BR strings (object T)
   screens/                   menu.js, howto.js, spSetup.js, fleetBuilder.js, lobby.js, battle.js, results.js, codex.js, options.js
+  util/
+    storage.js               localStorage records: settings, progress (v2: stars/score records, skirmish), progress options
+    spConfig.js              single-player BattleConfig (level, difficulty, budget preset, allies, enemies)
+    progress.js              star rules, score and team contribution of a finished battle (SPEC §4.1)
+    unlocks.js               unlock ladder (factions by level, capital classes by stars) + level gating
+    debrief.js               results debrief: losses by class, damage by weapon type vs hull, top killers, tips
   battle/
     feed.js                  BattleFeed interface + emitter helper
     localRunner.js           runs shared/sim in the browser (Worker or main thread) → BattleFeed
@@ -207,6 +213,7 @@ export const AI_PROFILES  // re-export from levels.js for convenience
  * @property {number[]} remainingValue   [team0, team1]  Σ cost × (hp+shield)/(maxHp+maxShield) over surviving purchased ships
  * @property {Record<string, PlayerStats>} players
  * @property {{ shipId:number, cls:string, owner:string, damageDealt:number }|null} mvp
+ * @property {({ shipId:number, cls:string, owner:string, kills:number, damageDealt:number }|null)[]} killers  top killer ship per team (most kills, damage as tiebreak)
  *
  * @typedef {Object} PlayerStats
  * @property {number} damageDealt
@@ -217,6 +224,8 @@ export const AI_PROFILES  // re-export from levels.js for convenience
  * @property {number} shipsTotal      purchased ships
  * @property {number} shipsAlive
  * @property {number} valueAlive
+ * @property {Record<string, number>} damageByType   damage dealt per weapon type ('true' = direct), rounded, zero types omitted (debrief)
+ * @property {Record<string, number>} lost           purchased ships destroyed per class id (debrief / star rules)
  */
 ```
 

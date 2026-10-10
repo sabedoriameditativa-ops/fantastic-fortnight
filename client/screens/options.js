@@ -1,9 +1,22 @@
 // Options: audio volumes (master/music/sfx/ui) + mute through the audio API,
-// reduced motion, effects quality, HUD defaults, player name, progress reset.
+// reduced motion, effects quality, HUD defaults, player name, progression
+// (level gating 'Explorar livremente', unlock ladder 'Arsenal completo',
+// stars summary) and progress reset.
 
-import { T } from '../i18n.js';
+import { T, fmt, difficultyName } from '../i18n.js';
 import { h, button, segmented, confirmDialog } from '../util/dom.js';
+import { bestStars } from '../util/storage.js';
+import { createUnlocks } from '../util/unlocks.js';
 import { MAX_NAME_LENGTH } from '/shared/constants.js';
+import { LAST_AUTHORED_LEVEL } from '/shared/levels.js';
+
+/** "Estrelas: 12/45 em Normal · facções: 2/4" (ladder factions, regardless of the 'Arsenal completo' option). */
+export function progressSummary(progress) {
+  const best = bestStars(progress, LAST_AUTHORED_LEVEL);
+  if (!best) return T.progress.summaryNone;
+  const factions = createUnlocks(progress, { fullArsenal: false }).snapshot().factions.length;
+  return fmt(T.progress.summary, { stars: best.stars, total: best.total, difficulty: difficultyName(best.difficulty), factions });
+}
 
 export function mount(root, props, ctx) {
   const { state } = ctx;
@@ -16,6 +29,7 @@ export function mount(root, props, ctx) {
     return h('div.opt-row', h('span', { text: label }), input, val);
   }
 
+  const summaryEl = h('div.small.muted', { test: 'opt-progress-summary', text: progressSummary(state.progress) });
   const el = h('div.screen',
     h('div.screen-head', h('div.titles', h('h1', { text: T.options.title })), h('div.actions', button(T.app.back, { test: 'back', onClick: () => ctx.go('menu') }))),
     h('div.opt-grid',
@@ -36,8 +50,15 @@ export function mount(root, props, ctx) {
       h('div.panel.stack', h('h3', { text: T.options.gameplay }),
         h('label.field', h('span.lbl', { text: T.options.name }),
           h('input.input', { type: 'text', test: 'opt-name', value: state.playerName, maxlength: MAX_NAME_LENGTH, placeholder: T.menu.namePlaceholder, onChange: (e) => { e.target.value = ctx.setPlayerName(e.target.value); } })),
+        h('div.stack.opt-progress',
+          h('label.check', h('input', { type: 'checkbox', test: 'opt-free-explore', checked: !state.progressOpts.gating, onChange: (e) => { ctx.saveProgressOpts({ gating: !e.target.checked }); } }), T.progress.freeExplore),
+          h('div.tiny.muted', { text: T.progress.freeExploreDesc }),
+          h('label.check', h('input', { type: 'checkbox', test: 'opt-full-arsenal', checked: state.progressOpts.fullArsenal, onChange: (e) => { ctx.saveProgressOpts({ fullArsenal: e.target.checked }); } }), T.progress.fullArsenal),
+          h('div.tiny.muted', { text: T.progress.fullArsenalDesc }),
+          summaryEl,
+        ),
         button(T.options.resetProgress, { test: 'reset-progress', class: 'btn-danger', onClick: async () => {
-          if (await confirmDialog(T.options.resetConfirm, { ok: T.options.resetProgress, cancel: T.app.cancel, test: 'reset' })) { ctx.resetProgress(); ctx.toast(T.options.resetDone, 'ok'); }
+          if (await confirmDialog(T.options.resetConfirm, { ok: T.options.resetProgress, cancel: T.app.cancel, test: 'reset' })) { ctx.resetProgress(); summaryEl.textContent = progressSummary(state.progress); ctx.toast(T.options.resetDone, 'ok'); }
         } }),
       ),
     ),

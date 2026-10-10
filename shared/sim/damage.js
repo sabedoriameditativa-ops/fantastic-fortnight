@@ -100,7 +100,7 @@ export function applyDamage(state, srcId, dstId, raw, type, o) {
   const ds = state.stats[dst.owner]; if (ds) ds.damageTaken += total;
   if (src) {
     src.damageDealt += total;
-    const ss = state.stats[src.owner]; if (ss) ss.damageDealt += total;
+    const ss = state.stats[src.owner]; if (ss) { ss.damageDealt += total; ss.damageByType[type] = (ss.damageByType[type] || 0) + total; }
   }
   if (dst.hp <= 0 && dst.killerId === 0) { dst.hp = 0; dst.killerId = srcId; }
   else if (dst.hp <= 0) dst.hp = 0;

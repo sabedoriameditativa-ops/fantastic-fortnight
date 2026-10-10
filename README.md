@@ -128,14 +128,20 @@ Variáveis de ambiente úteis:
 ### Um jogador
 
 1. Digite seu nome no menu e escolha **Um jogador**.
-2. Escolha o **nível**, a **dificuldade do inimigo** e o **formato** (1v1 a 6v6). Em
-   formatos maiores seus aliados são bots com a dificuldade que você escolher.
+2. Escolha o **nível**, a **dificuldade do inimigo**, o **orçamento** (Escaramuça 800 /
+   Padrão 1.500 / Guerra Total 2.500 — o do inimigo acompanha o seu) e o **formato**
+   (1v1 a 6v6). Em formatos maiores seus aliados são bots com a dificuldade que você
+   escolher; vitórias em equipe contam como escaramuças (recorde por formato), não como
+   progresso da campanha.
 3. **Monte a frota**: escolha a facção, clique nos cartões para comprar naves (ou use
-   uma predefinição e *Autocompletar*). O orçamento é sempre **1.500 pontos**;
+   uma predefinição e *Autocompletar*). O orçamento padrão é **1.500 pontos**;
    há limites por classe de tamanho (1 nave-mãe, 2 capitais, 4 grandes, 12 médias,
    24 pequenas, 24 minúsculas — 32 para Vorrax) e no máximo 40 naves.
-4. **Confirmar e lutar**. A tela de resultados oferece *Jogar de novo* (mesma frota,
-   nova semente), *Próximo nível*, *Editar frota* e *Menu*.
+4. **Confirmar e lutar**. A tela de resultados mostra as **estrelas** e a **pontuação**
+   da batalha (com o que faltou para a próxima estrela), um **relatório** (naves perdidas
+   por classe, dano por tipo de arma contra o casco inimigo, maior caçadora de cada lado,
+   dicas e *Ver frotas*) e oferece *Jogar de novo* (mesma frota, nova semente), *Próximo
+   nível* (com o nome e a facção do nível seguinte), *Editar frota* e *Menu*.
 
 Você também pode abrir uma batalha direta pela URL:
 `?autotest=1&level=3&difficulty=dificil&faction=vorrax&speed=4&seed=42`
@@ -189,6 +195,17 @@ escolhida e orçamento igual ao seu (uma nave-capital garantida no 14, uma nave-
 A partir do 16 os níveis são infinitos: o orçamento inimigo cresce 5% por onda e, acima de
 40 naves, o bot troca os cascos mais baratos pelos mais caros.
 
+**Estrelas, recordes e desbloqueios.** Cada nível vale até 3 estrelas por dificuldade (em
+1v1): vencer; vencer com pelo menos 50% do valor da frota restante; vencer em menos de 60 s
+ou sem perder uma nave-capital/nave-mãe. A pontuação (valor restante + dano causado −
+4 × segundos) e as estrelas ficam guardadas por nível e dificuldade e aparecem na grade de
+níveis, nos resultados e no menu (`12/45 estrelas em Normal`). Por padrão o nível seguinte
+abre ao concluir o anterior na mesma dificuldade (*Explorar livremente*, nas Opções, abre
+todos) e o arsenal cresce jogando: só os Terranos no início, Vorrax ao concluir o nível 3,
+Lúmen o 6, Ferrix o 9; a nave-capital de uma facção com 6 estrelas e a nave-mãe com 9
+estrelas nos níveis dessa facção (*Arsenal completo*, nas Opções, libera tudo — é o padrão
+para quem já tinha progresso). Tudo fica no `localStorage` do navegador.
+
 ### Regras da batalha
 
 - Vence quem destruir todas as naves **compradas** do inimigo (unidades geradas por
@@ -213,7 +230,9 @@ A partir do 16 os níveis são infinitos: o orçamento inimigo cresce 5% por ond
 | clique numa nave | seguir a nave; clique de novo ou duplo clique para voltar à câmera automática |
 
 Em **Opções** você ajusta volumes (geral, música, efeitos, interface), mudo, movimento
-reduzido, qualidade dos efeitos, nomes e grade padrão, seu nome, e pode zerar o progresso.
+reduzido, qualidade dos efeitos, nomes e grade padrão, seu nome, *Explorar livremente*
+(todos os níveis abertos), *Arsenal completo* (todas as facções e naves) e pode zerar o
+progresso.
 
 ## Testes, simulações e ferramentas de balanceamento
 
