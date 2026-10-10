@@ -28,7 +28,7 @@ export function mount(root, props, ctx) {
   const titleText = r.winner === -1 ? T.results.draw : fmt(T.results.winner, { team: T.app.team[r.winner] });
   const titleCls = r.winner === -1 ? 'muted' : r.winner === 0 ? 'team-a' : 'team-b';
   let reason = T.results.reasonDraw;
-  if (r.reason === 'elimination') reason = T.results.reasonElim;
+  if (r.reason === 'elimination') reason = won ? T.results.reasonElim : (myTeam === -1 || myTeam == null) ? T.results.reasonElimNeutral : T.results.reasonElimLost;
   else if (r.reason === 'timeout') {
     const rv = r.remainingValue || [0, 0];
     const hi = Math.max(rv[0], rv[1]);

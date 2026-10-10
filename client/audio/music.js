@@ -19,7 +19,7 @@ export const TICK_MS = 25;
 export const STEPS_PER_BAR = 16;
 
 /** Layer thresholds (intensity ≥ on; off when < on − HYSTERESIS). */
-export const LAYER_ON = [0, 0.1, 0.25, 0.45, 0.65, 0.85];
+export const LAYER_ON = [0, 0.1, 0.2, 0.35, 0.5, 0.68];
 export const HYSTERESIS = 0.15;
 export const PROG_B_LAYER = 4;
 
@@ -70,8 +70,9 @@ export function computeIntensity(s) {
   const minAlive = Math.min(a[0] ?? 1, a[1] ?? 1);
   const destroyed = Math.max(0, Math.min(1, Number(s.destroyedFrac) || 0));
   const elapsed = Math.max(0, Number(s.elapsedSec ?? s.elapsed) || 0);
-  const x = 0.35 * destroyed + 0.25 * Math.min(1, elapsed / 90) + 0.4 * (1 - Math.max(0, Math.min(1, minAlive)));
-  return Math.max(0, Math.min(1, x));
+  const density = Math.max(0, Math.min(1, Number(s.density) || 0));
+  const x = 0.45 * destroyed + 0.2 * Math.min(1, elapsed / 60) + 0.35 * (1 - Math.max(0, Math.min(1, minAlive)));
+  return Math.max(0, Math.min(1, Math.max(x, density)));
 }
 
 /**

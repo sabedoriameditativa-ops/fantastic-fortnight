@@ -238,6 +238,9 @@ export const T = {
     names: 'Nomes',
     grid: 'Grade',
     cameraAuto: 'Câmera auto',
+    cameraFree: 'Câmera livre',
+    autoStart: 'Começa automaticamente em {n} s',
+    counterHint: 'Eficaz contra este casco',
     sound: 'Som',
     quit: 'Sair',
     quitConfirm: 'Abandonar a batalha?',
@@ -271,6 +274,8 @@ export const T = {
     youWon: 'Você venceu!',
     youLost: 'Você perdeu.',
     reasonElim: 'Todas as naves inimigas foram destruídas.',
+    reasonElimLost: 'Todas as suas naves foram destruídas.',
+    reasonElimNeutral: 'Um dos lados foi completamente destruído.',
     reasonTimeout: 'Tempo esgotado — vence quem manteve mais valor de frota.',
     reasonTimeoutDmg: 'Tempo esgotado — desempate por dano causado.',
     reasonDraw: 'Nenhum dos lados conseguiu se impor.',
@@ -381,6 +386,7 @@ export const T = {
     RATE_LIMITED: 'Calma! Muitas mensagens em pouco tempo.',
     ROOM_NOT_FOUND: 'Sala não encontrada. Confira o código.',
     ROOM_FULL: 'A sala está cheia.',
+    ROOM_ADDRESS_LIMIT: 'Já existem salas demais abertas a partir do seu endereço. Feche uma sala antes de criar outra.',
     ROOM_LIMIT: 'O servidor atingiu o limite de salas. Tente novamente mais tarde.',
     NOT_HOST: 'Somente o anfitrião pode fazer isso.',
     WRONG_PHASE: 'Essa ação não é possível nesta fase da sala.',
@@ -425,6 +431,7 @@ export function errorMessage(code, detail) {
   if (isFleetCode(code)) return fleetErrorMessage(code, detail);
   // the server also answers ROOM_FULL when it cannot create another room (detail 'server' | 'codes')
   if (code === 'ROOM_FULL' && (detail === 'server' || detail === 'codes')) return T.err.ROOM_LIMIT;
+  if (code === 'ROOM_FULL' && detail === 'address') return T.err.ROOM_ADDRESS_LIMIT;
   const s = T.err[code];
   if (!s) return fmt(T.err.UNKNOWN, { code: code || '?' });
   let d = '';

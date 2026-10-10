@@ -118,20 +118,29 @@ window.addEventListener('unhandledrejection', (ev) => { reportError(ev.reason); 
 const ambient = createAmbient(bgCanvas, { reducedMotion });
 
 function initAudioOnGesture() {
-  const once = () => {
-    try { audio.init(); applySettings(); } catch (e) { reportError(e); }
-    document.removeEventListener('pointerdown', once, true);
-    document.removeEventListener('keydown', once, true);
+  // pointerdown is not an activation-triggering input for touch (only pointerup/touchend/click
+  // are), and WebKit may suspend the context again later: keep listening until it is running,
+  // and keep a cheap resume() on later gestures (audio.init() is idempotent).
+  const EVENTS = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'];
+  const unlock = () => {
+    try {
+      audio.init(); applySettings();
+      if (audio.ctx && audio.ctx.state !== 'running' && typeof audio.ctx.resume === 'function') audio.ctx.resume().catch(() => {});
+      if (audio.ctx && audio.ctx.state === 'running') for (const ev of EVENTS) document.removeEventListener(ev, unlock, true);
+    } catch (e) { reportError(e); }
   };
-  document.addEventListener('pointerdown', once, true);
-  document.addEventListener('keydown', once, true);
+  for (const ev of EVENTS) document.addEventListener(ev, unlock, true);
+  // after unlock: a later suspension (iOS tab switch, interruption) is cleared on the next tap
+  document.addEventListener('pointerup', () => {
+    try { if (audio.ctx && audio.ctx.state === 'suspended' && typeof audio.ctx.resume === 'function') audio.ctx.resume().catch(() => {}); } catch { /* ignore */ }
+  }, true);
 }
 initAudioOnGesture();
 
 // UI click sounds (buttons only)
 document.addEventListener('click', (ev) => {
   const b = ev.target && ev.target.closest ? ev.target.closest('button') : null;
-  if (b && !b.disabled) { try { audio.play(b.classList.contains('btn-primary') ? 'ui.confirm' : 'ui.click'); } catch { /* ignore */ } }
+  if (b && !b.disabled && b.dataset.sfx !== 'none') { try { audio.play(b.classList.contains('btn-primary') ? 'ui.confirm' : 'ui.click'); } catch { /* ignore */ } }
 });
 // UI hover ticks (mouse only; one per button entry)
 document.addEventListener('pointerover', (ev) => {
@@ -230,7 +239,9 @@ function go(name, props = {}) {
   if (name !== 'battle' && name !== 'results') setArena('hidden');
   state.screenName = name;
   try {
-    audio.setScene(name === 'battle' ? 'battle' : name === 'fleetBuilder' ? 'builder' : 'menu');
+    // results picks its own ending scene (victory/defeat) after mounting: switching to 'menu'
+    // here would spawn a throwaway theme and make the stinger play twice.
+    if (name !== 'results') audio.setScene(name === 'battle' ? 'battle' : name === 'fleetBuilder' ? 'builder' : 'menu');
   } catch { /* ignore */ }
   try {
     state.screen = mod.mount(root, props, ctx) || { unmount() {} };

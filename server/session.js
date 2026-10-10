@@ -251,10 +251,35 @@ export function createSessionStore({ graceMs = RECONNECT_GRACE_MS, onExpire = ()
  * @param {ReturnType<typeof createAddressLimiter>} [o.limiter]  per-address socket cap
  * @param {number} [o.handshakeMs]     close sockets that never send `hello` after this long (default 10 s)
  */
+export const HEARTBEAT_MS = 15_000;
+export const HEARTBEAT_MISSES = 2;
+
 export function attachConnection(ws, {
   sessions, lobby, clock = defaultClock, log = console, remoteAddress, limiter, handshakeMs = HANDSHAKE_TIMEOUT_MS,
+  heartbeatMs = HEARTBEAT_MS,
 }) {
   let session = null;
+  // Liveness: a client whose network vanished (sleeping phone, cut cable) never sends a
+  // close frame and the kernel buffers absorb a 6v6 frame stream for minutes, so the seat
+  // would stay 'connected' and block start / rematch. Ping every heartbeatMs; after
+  // HEARTBEAT_MISSES unanswered pings the socket is terminated and the grace period starts.
+  let heartbeatTimer = null, missedPongs = 0;
+  function stopHeartbeat() { if (heartbeatTimer !== null) { clock.clearTimeout(heartbeatTimer); heartbeatTimer = null; } }
+  function scheduleHeartbeat() {
+    if (!(heartbeatMs > 0) || typeof ws.ping !== 'function') return;
+    heartbeatTimer = clock.setTimeout(() => {
+      heartbeatTimer = null;
+      if (ws.readyState !== 1) return;
+      if (missedPongs >= HEARTBEAT_MISSES) {
+        try { ws.terminate(); } catch { /* ignore */ }
+        return;
+      }
+      missedPongs++;
+      try { ws.ping(); } catch { /* ignore */ }
+      scheduleHeartbeat();
+    }, heartbeatMs);
+  }
+  if (typeof ws.on === 'function') ws.on('pong', () => { missedPongs = 0; });
   const bucket = createTokenBucket(RATE_LIMIT.perSecond, RATE_LIMIT.burst, clock.now);
   const violations = [];
 
@@ -306,6 +331,7 @@ export function attachConnection(ws, {
     }
     const resumed = msg.token !== undefined ? sessions.resume(msg.token, ws) : null;
     clearHandshakeTimer();
+    scheduleHeartbeat();
     if (resumed) {
       session = resumed;
       session.remoteAddress = remoteAddress;
@@ -323,6 +349,7 @@ export function attachConnection(ws, {
   }
 
   ws.on('message', (data, isBinary) => {
+    missedPongs = 0;
     const now = clock.now();
     if (!bucket.take()) {
       while (violations.length && now - violations[0] > VIOLATION_WINDOW_MS) violations.shift();
@@ -363,6 +390,7 @@ export function attachConnection(ws, {
 
   ws.on('close', () => {
     clearHandshakeTimer();
+    stopHeartbeat();
     if (limiter) limiter.release(remoteAddress);
     if (!session) return;
     if (!sessions.detach(session, ws)) return;

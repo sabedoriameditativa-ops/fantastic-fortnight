@@ -103,8 +103,12 @@ export function createRenderer(canvas, o) {
     const W = Math.round(cw * dpr), H = Math.round(ch * dpr);
     if (canvas.width !== W) canvas.width = W;
     if (canvas.height !== H) canvas.height = H;
-    let w = cw, h = Math.round((cw * 9) / 16);
-    if (h > ch) { h = ch; w = Math.round((ch * 16) / 9); }
+    // The camera frames any aspect: use the whole canvas between 3:4 (portrait phones) and
+    // 21:9 and only letterbox beyond that, instead of forcing 16:9 (a 390x219 strip on phones).
+    const aspect = cw / ch;
+    let w = cw, h = ch;
+    if (aspect > 21 / 9) { w = Math.round(ch * 21 / 9); }
+    else if (aspect < 3 / 4) { h = Math.round(cw * 4 / 3); }
     vp.cw = cw; vp.ch = ch; vp.w = w; vp.h = h; vp.x = Math.round((cw - w) / 2); vp.y = Math.round((ch - h) / 2);
     camera.setViewport(vp.x, vp.y, vp.w, vp.h);
     sprites.setDpr(dpr);
@@ -302,9 +306,13 @@ export function createRenderer(canvas, o) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
+  let uiFontPx = 0, uiFont = '';
   function drawWorldUI(now, zoom) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.font = `${Math.max(10, Math.min(13, 11 * Math.sqrt(zoom)))}px ${UI_FONT}`;
+    // assigning ctx.font is ~100x slower when the string changes: keep an integer size and reuse it
+    const fontPx = Math.round(Math.max(10, Math.min(13, 11 * Math.sqrt(zoom))));
+    if (fontPx !== uiFontPx) { uiFontPx = fontPx; uiFont = `${fontPx}px ${UI_FONT}`; }
+    if (ctx.font !== uiFont) ctx.font = uiFont;
     ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
     const manyShips = interp.ships.size > 150;
     for (const v of order) {
@@ -399,6 +407,7 @@ export function createRenderer(canvas, o) {
     try {
       background.draw(ctx, camera, now, { grid: options.grid, quality: effects.quality.density, reducedMotion: options.reducedMotion });
       tp = lap('bg', tp);
+      effects.setFocus(camera.followId, hoverId);
       effects.drawArea(ctx, camera, dpr, now);
       tp = lap('area', tp);
       effects.drawTrails(ctx, camera, dpr, now);

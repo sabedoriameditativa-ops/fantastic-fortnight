@@ -1,6 +1,6 @@
 // Battle camera: auto fit-to-fleets biased toward the action, exponential
 // smoothing, zoom limits, trauma-based shake, follow(id), free mode (wheel /
-// drag) with automatic return, world <-> screen helpers.
+// drag) that stays until the player returns to auto, world <-> screen helpers.
 //
 // Screen coordinates are CSS pixels inside the 16:9 letterboxed viewport
 // (vx, vy, vw, vh) set by the renderer. Pure module (no DOM).
@@ -25,7 +25,6 @@ export function createCamera(o) {
     vx: 0, vy: 0, vw: 1280, vh: 720,
     shakeX: 0, shakeY: 0, trauma: 0,
     mode: 'auto', followId: 0,
-    freeUntil: 0,
     // action tracking
     action: new Map(),        // id -> weight (recent damage, decays)
     lastDeath: null,          // { x, y, t }
@@ -111,7 +110,6 @@ export function createCamera(o) {
         const f = Math.exp(-dt / 1.5);
         for (const [id, w] of cam.action) { const nw = w * f; if (nw < 0.01) cam.action.delete(id); else cam.action.set(id, nw); }
       }
-      if (cam.mode === 'free' && now > cam.freeUntil) cam.mode = 'auto';
       if (cam.mode === 'follow') {
         const v = ships.get(cam.followId);
         if (v) { cam.tx = v.x; cam.ty = v.y; }
@@ -142,7 +140,6 @@ export function createCamera(o) {
     setMode(m) {
       if (m === 'follow' && !cam.followId) m = 'auto';
       cam.mode = m;
-      if (m === 'free') cam.freeUntil = lastNow + 6000;
       if (m === 'auto') { cam.action.clear(); }
     },
     /** Multiply the zoom (free mode), keeping the point under (px,py) fixed. */
@@ -155,13 +152,12 @@ export function createCamera(o) {
       }
       cam.tzoom = nz;
       if (cam.mode !== 'follow') cam.mode = 'free';
-      cam.freeUntil = lastNow + 6000;
     },
     /** Pan by screen pixels (free mode). */
     pan(dx, dy) {
       cam.tx -= dx / cam.zoom; cam.ty -= dy / cam.zoom;
       cam.x = cam.tx; cam.y = cam.ty;
-      cam.mode = 'free'; cam.freeUntil = lastNow + 6000;
+      cam.mode = 'free';
       applyLimits(); cam.tx = cam.x; cam.ty = cam.y;
     },
     /** Add screen shake (0..1). */

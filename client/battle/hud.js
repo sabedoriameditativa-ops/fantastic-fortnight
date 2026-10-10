@@ -91,9 +91,10 @@ export function createHud(root, o) {
   const logEl = h('div.hud-log', { test: 'hud-log', 'aria-live': 'polite' });
   const btnNames = h('button.btn.btn-sm', { type: 'button', test: 'hud-names', class: o.settings.showNames ? 'on' : '', onClick: () => o.onToggle('names') }, svgIcon('tag', 11), T.battle.names);
   const btnGrid = h('button.btn.btn-sm', { type: 'button', test: 'hud-grid', class: o.settings.grid ? 'on' : '', onClick: () => o.onToggle('grid') }, svgIcon('grid', 11), T.battle.grid);
-  const btnCam = h('button.btn.btn-sm', { type: 'button', test: 'hud-camera', onClick: () => o.onToggle('camera') }, svgIcon('camera', 11), T.battle.cameraAuto);
+  const btnCam = h('button.btn.btn-sm', { type: 'button', test: 'hud-camera', onClick: () => o.onToggle('camera') }, svgIcon('camera', 11), h('span', { text: T.battle.cameraAuto }));
   const btnSound = h('button.btn.btn-sm', { type: 'button', test: 'hud-sound', class: o.settings.muted ? '' : 'on', onClick: () => o.onToggle('sound') }, svgIcon('sound', 11), T.battle.sound);
   const right = h('div.hud-right', btnNames, btnGrid, btnCam, btnSound);
+  let camMode = 'auto';
   const btnQuit = h('button.btn.btn-sm.btn-ghost', { type: 'button', test: 'hud-quit', onClick: () => o.onQuit() }, svgIcon('cross', 10), T.battle.quit);
   const left = h('div.hud-left', btnQuit);
   const playersEl = h('div.hud-players', { test: 'hud-players' });
@@ -245,6 +246,14 @@ export function createHud(root, o) {
       liveEl.classList.toggle('warn', s === 'reconnecting');
       liveEl.classList.toggle('bad', s === 'lost');
       liveEl.querySelector('.lbl').textContent = s === 'ok' ? T.battle.live : s === 'reconnecting' ? T.battle.reconnecting : T.battle.lost;
+    },
+    /** @param {'auto'|'free'|'follow'} m */
+    setCameraMode(m) {
+      if (m === camMode) return;
+      camMode = m;
+      btnCam.classList.toggle('on', m !== 'auto');
+      btnCam.lastChild.textContent = m === 'auto' ? T.battle.cameraAuto : T.battle.cameraFree;
+      btnCam.title = m === 'auto' ? T.battle.cameraAuto : `${T.battle.cameraFree} — ${T.battle.cameraAuto} (C)`;
     },
     setToggles({ showNames, grid, muted }) {
       if (showNames !== undefined) btnNames.classList.toggle('on', !!showNames);

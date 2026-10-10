@@ -588,6 +588,10 @@ export function createEffects(o) {
   // Draw passes
   // ---------------------------------------------------------------------------
 
+  const focus = { followId: 0, hoverId: 0 };
+  /** Ships whose auras are drawn filled (the followed and the hovered ship). */
+  function setFocus(followId, hoverId) { focus.followId = followId | 0; focus.hoverId = hoverId | 0; }
+
   function drawArea(ctx, c, dpr, now) {
     if (!areas.size && !domes.length) return;
     const z = c.zoom;
@@ -624,6 +628,8 @@ export function createEffects(o) {
         ctx.drawImage(getSoft('#ffffff', 0.1), sx - R, sy - R, R * 2, R * 2);
       }
     }
+    let visibleDomes = 0;
+    for (const dm of domes) if (now <= dm.t1 + 300 && c.isVisible(dm.x, dm.y, dm.r)) visibleDomes++;
     for (const dm of domes) {
       if (!c.isVisible(dm.x, dm.y, dm.r)) continue;
       const u0 = clamp((now - dm.t0) / dm.grow, 0, 1);
@@ -631,13 +637,21 @@ export function createEffects(o) {
       const R = dm.r * z * (1 - (1 - u0) * (1 - u0));
       const sx = c.worldToScreenX(dm.x), sy = c.worldToScreenY(dm.y);
       ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = dm.col; ctx.globalAlpha = 0.045 * fade;
-      ctx.beginPath(); ctx.arc(sx, sy, R, 0, TAU); ctx.fill();
-      if (dm.hex && quality.glow && R <= 420) { ctx.globalAlpha = 0.05 * fade; ctx.drawImage(shields.hexMask(R), sx - R, sy - R, R * 2, R * 2); }
-      ctx.strokeStyle = dm.col; ctx.lineWidth = Math.max(1, 1.5 * z); ctx.globalAlpha = (0.32 + 0.18 * Math.sin(now * 0.008)) * fade;
-      if (dm.dash) ctx.setLineDash([dm.dash * z, dm.dash * z]);
+      // Readability: a filled disc per capital aura turns a 6v6 into a tinted soup. Only the
+      // dome of the ship the player follows or hovers is filled; the rest are thin rings that
+      // fade further when many overlap the view.
+      const focused = dm.followId && (dm.followId === focus.followId || dm.followId === focus.hoverId);
+      const crowd = visibleDomes > 3 ? 0.45 : 1;
+      if (focused) {
+        ctx.fillStyle = dm.col; ctx.globalAlpha = 0.05 * fade;
+        ctx.beginPath(); ctx.arc(sx, sy, R, 0, TAU); ctx.fill();
+        if (dm.hex && quality.glow && R <= 420) { ctx.globalAlpha = 0.05 * fade; ctx.drawImage(shields.hexMask(R), sx - R, sy - R, R * 2, R * 2); }
+      }
+      ctx.strokeStyle = dm.col; ctx.lineWidth = Math.max(1, (focused ? 1.5 : 1) * z);
+      ctx.globalAlpha = (focused ? 0.32 + 0.18 * Math.sin(now * 0.008) : 0.22) * fade * crowd;
+      if (dm.dash || !focused) ctx.setLineDash([(dm.dash || 10) * z, (dm.dash || 10) * z]);
       ctx.beginPath(); ctx.arc(sx, sy, R, 0, TAU); ctx.stroke();
-      if (dm.dash) ctx.setLineDash([]);
+      ctx.setLineDash([]);
       if (dm.kind === 'aurora') {
         ctx.lineWidth = Math.max(1, 3 * z);
         for (let k = 0; k < 3; k++) { const a0 = now * 0.0015 * (k % 2 ? -1 : 1) + k * 2; ctx.globalAlpha = 0.3 * fade; ctx.beginPath(); ctx.arc(sx, sy, R * (0.5 + k * 0.17), a0, a0 + 1.2); ctx.stroke(); }
@@ -832,7 +846,7 @@ export function createEffects(o) {
   }
 
   return {
-    handleEvents, update, drawArea, drawTrails, drawProjectiles, drawEffects, drawShipOverlay, shipState,
+    handleEvents, update, drawArea, drawTrails, drawProjectiles, drawEffects, drawShipOverlay, shipState, setFocus,
     quality,
     setQuality(q) { Object.assign(quality, q); },
     get ghosts() { return explosions.ghosts; },

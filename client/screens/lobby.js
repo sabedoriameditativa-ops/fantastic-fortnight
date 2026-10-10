@@ -34,7 +34,7 @@ export function mount(root, props, ctx) {
   function fail(e) { if (!disposed) ctx.toast(errorMessage(e && e.code || 'UNKNOWN', e && e.detail), 'error'); }
 
   async function ensureNet() {
-    if (!state.playerName) { ctx.toast(T.mp.needName, 'warn'); }
+    if (!state.playerName) { ctx.toast(T.mp.needName, 'warn'); renderEntry(T.mp.needName); return null; }
     renderConnecting();
     try {
       net = await ctx.getNet();
@@ -111,7 +111,7 @@ export function mount(root, props, ctx) {
       if (!net || !net.connected) { if (!(await ensureNet())) return; }
       createBtn.disabled = true;
       try { const room = await net.createRoom({ teamSize, budget }); chatMessages.length = 0; renderRoom(room); }
-      catch (e) { fail(e); createBtn.disabled = false; }
+      catch (e) { fail(e); createBtn.disabled = false; if (view !== 'entry') renderEntry(); }
     }
     async function join() {
       const code = normalizeRoomCode(codeInput.value);
@@ -119,7 +119,7 @@ export function mount(root, props, ctx) {
       if (!net || !net.connected) { if (!(await ensureNet())) return; }
       joinBtn.disabled = true;
       try { const room = await net.joinRoom(code); chatMessages.length = 0; renderRoom(room); }
-      catch (e) { fail(e); joinBtn.disabled = false; }
+      catch (e) { fail(e); joinBtn.disabled = false; if (view !== 'entry') renderEntry(); }
     }
     add(container, 
       head(T.mp.title, T.mp.subtitle),

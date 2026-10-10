@@ -657,10 +657,11 @@ export function blitShip(ctx, s, sx, sy, cos, sin, zoom, dpr, alpha = 1, scaleY 
 export function drawLod0(ctx, pal, sx, sy, cos, sin, len, dpr) {
   const l = Math.max(3, len) * dpr;
   ctx.setTransform(cos, sin, -sin, cos, sx * dpr, sy * dpr);
-  ctx.fillStyle = pal.hullLight;
-  ctx.beginPath(); ctx.moveTo(l * 0.6, 0); ctx.lineTo(-l * 0.4, -l * 0.35); ctx.lineTo(-l * 0.4, l * 0.35); ctx.closePath(); ctx.fill();
+  // team colour owns the silhouette at this size; the faction shows as the lighter nose
   ctx.fillStyle = pal.team;
-  ctx.fillRect(-l * 0.45, -1, 2, 2);
+  ctx.beginPath(); ctx.moveTo(l * 0.6, 0); ctx.lineTo(-l * 0.4, -l * 0.35); ctx.lineTo(-l * 0.4, l * 0.35); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = pal.hullLight;
+  ctx.beginPath(); ctx.moveTo(l * 0.6, 0); ctx.lineTo(l * 0.1, -l * 0.18); ctx.lineTo(l * 0.1, l * 0.18); ctx.closePath(); ctx.fill();
 }
 
 const cellPtsCache = new Map();

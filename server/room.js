@@ -327,6 +327,7 @@ export function createRoom(o) {
     cancelDestroyTimer();
     broadcastState();
     if (phase === 'battle' || phase === 'results') sendBattleSync(m);
+    else if (phase === 'countdown') sendCountdown(m);
     syncMatchRunner();
     return ok({ room: toState(m.id) });
   }
@@ -386,6 +387,7 @@ export function createRoom(o) {
       return;
     }
     removeMember(m, 'expired');
+    if (phase === 'results') checkRematch();
   }
 
   /** The session store dropped this session (token no longer resumable). */
@@ -413,8 +415,16 @@ export function createRoom(o) {
     session.roomCode = code;
     broadcastState();
     if (phase === 'battle' || phase === 'results') sendBattleSync(m);
+    else if (phase === 'countdown') sendCountdown(m);
     syncMatchRunner();
     return true;
+  }
+
+  /** The COUNTDOWN message is broadcast once; a member arriving mid-countdown needs its own copy. */
+  function sendCountdown(m) {
+    if (phase !== 'countdown' || !match || !match.startAt) return;
+    const seconds = Math.max(0, (match.startAt - clock.now()) / 1000);
+    sendTo(m, JSON.stringify({ t: S2C.COUNTDOWN, seconds, startAt: match.startAt }));
   }
 
   // ---------------------------------------------------------------------
@@ -651,7 +661,7 @@ export function createRoom(o) {
       return;
     }
     const startAt = clock.now() + countdownMs;
-    match = { seed, runner: null, startInfo: null, dead: new Set(), spawned: new Map(), lastFrame: null, result: null };
+    match = { seed, startAt, runner: null, startInfo: null, dead: new Set(), spawned: new Map(), lastFrame: null, result: null };
     broadcastObj({ t: S2C.COUNTDOWN, seconds: countdownMs / 1000, startAt });
     broadcastState();
     countdownTimer = clock.setTimeout(() => {
@@ -794,7 +804,9 @@ export function createRoom(o) {
 
   function checkRematch() {
     if (phase !== 'results') return;
-    const voters = humansInSlots().filter((hm) => hm.connected);
+    // a seated human whose socket blipped still holds the seat for the grace period: wait for
+    // their vote (or their expiry) instead of jumping to the lobby the moment they drop
+    const voters = humansInSlots().filter((hm) => hm.connected || !hm.expired);
     if (voters.length === 0) return;
     if (voters.every((hm) => rematchVotes.has(hm.id))) backToLobby();
   }
