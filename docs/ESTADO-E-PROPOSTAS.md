@@ -49,8 +49,8 @@ o custo do Falcão e os piores pares de presets, os defeitos de comportamento da
 larvas, flak, portadoras, naves-mãe), a entrada do multijogador, os textos de resultado, o reveal da
 batalha, a ergonomia no celular (toque, barra fixa, alvos de toque, retrato), a cor do time e as auras,
 a câmera livre e automática, o desempenho do fundo, a mixagem e os defeitos do áudio, a reconexão e o
-batimento cardíaco do multijogador, e a dívida de documentação e testes (fixture dourada, CI, teste de
-completude de conteúdo).
+batimento cardíaco do multijogador, e a dívida de documentação e testes (fixture dourada, CI, construtor único do
+`BattleStartInfo`).
 
 ---
 
@@ -177,12 +177,12 @@ e de ergonomia no celular.
 | Média | No toque não dá para ler a habilidade: tocar nela compra uma nave | Tooltip só em `pointerenter`; o clique do card compra | Corrigido nesta rodada (popover de toque) |
 | Média | Barra de orçamento e Confirmar ficam 2,3–3 mil px abaixo da lista no celular | `.fb-side` estático abaixo de 960 px | Corrigido nesta rodada (barra fixa compacta) |
 | Média | Resultado diz "Todas as naves inimigas foram destruídas" quando você perdeu | `reasonElim` usado para qualquer eliminação | Corrigido nesta rodada |
-| Média | Nome padrão aceito online: dois "Comandante" indistinguíveis | Toast avisa mas deixa continuar | Corrigido nesta rodada (nome obrigatório) |
+| Média | Nome padrão aceito online: dois "Comandante" indistinguíveis | Toast avisa mas deixa continuar | Corrigido nesta rodada (nome pedido na própria tela, com "Sortear nome") |
 | Média | Reveal pré-batalha some em 2,6 s, antes de dar para ler a frota inimiga | `INTRO_MS = 2600`; "Pular" existe mas não é usado | Corrigido nesta rodada (espera o "Começar"/8 s, dicas de contra-ataque) |
 | Média | Contagem regressiva ilegível no celular (texto sobre o lobby) | Overlay a 75 % de opacidade | Corrigido nesta rodada |
 | Baixa | Alvos de toque de 21–28 px no HUD e no construtor | Mínimo WCAG 24 px; Android/iOS 44–48 px | Corrigido nesta rodada (≥ 40 px em `pointer: coarse`) |
-| Baixa | Cor de facção sem contraste (Vorrax 3,17:1) e textos truncados | "Confederação Ter…", tabela de resultados sem indicação de rolagem | Corrigido nesta rodada |
-| Baixa | Naves ambiente passam por cima de botões; atalhos de teclado não documentados; `aria-label` vazio | Lúmen sobre "OPÇÕES"; 0 menções a Espaço/1/2/4 | Corrigido nesta rodada (atalhos e rótulos); naves ambiente proposto |
+| Baixa | Cor de facção sem contraste (Vorrax 3,17:1) e textos truncados | "Confederação Ter…", tabela de resultados sem indicação de rolagem | Parcial (cores e quebra de linha corrigidas; indicação de rolagem na tabela proposta) |
+| Baixa | Naves ambiente passam por cima de botões; atalhos de teclado não documentados; `aria-label` vazio | Lúmen sobre "OPÇÕES"; 0 menções a Espaço/1/2/4 | Proposto (atalhos já estão no README; card "Controles" e rótulos ARIA ficam para a próxima rodada) |
 
 ### Propostas
 
@@ -198,7 +198,7 @@ e de ergonomia no celular.
 | Médio | P | **Onboarding de nome** antes do multijogador com "Sortear nome"; servidor sufixa duplicados. |
 | Médio | P | **Links Galeria ↔ construtor**: ícone "Info" nos cards, "Usar em uma frota" na galeria. |
 | Médio | P | **Presets com papel e etiqueta de dificuldade** e até 3 frotas salvas por facção. |
-| Baixo | P | **Card "Controles"** em Como jogar e teclas nos títulos dos botões (feito nesta rodada). |
+| Baixo | P | **Card "Controles"** em Como jogar e teclas nos títulos dos botões (a tabela de atalhos já existe no README). |
 | Baixo | P | **Pular a tela de fim** com toque/Enter e "Assistir de novo" (mesma semente) nos resultados. |
 
 ---
@@ -218,16 +218,16 @@ evitáveis.
 
 | Grav. | Problema | Evidência | Status |
 |---|---|---|---|
-| Alta | Cor do time ilegível abaixo de zoom ~0,7 (casco tem a cor da facção; o time é um ponto de 2 px) | A câmera automática fica em 0,35–0,75 durante todo o 6v6 | Corrigido nesta rodada (cor do time no LOD0 e aro nos buckets baixos) |
+| Alta | Cor do time ilegível abaixo de zoom ~0,7 (casco tem a cor da facção; o time é um ponto de 2 px) | A câmera automática fica em 0,35–0,75 durante todo o 6v6 | Parcial (silhueta LOD0 na cor do time; aro no LOD1 proposto) |
 | Alta | Cúpulas de aura (raio 400–600) preenchidas viram uma sopa em 6v6 | Seis cúpulas sobrepostas aos 37 s | Corrigido nesta rodada (só anel; preenchimento só na nave seguida) |
 | Alta | Celular em pé: arena de 390×219 por letterbox 16:9 fixo; em paisagem os botões cobrem a arena | `resize()` força 9/16 | Corrigido nesta rodada |
 | Média | Qualidade adaptativa só olha o próprio tempo de JS; nunca liga quando o gargalo é a GPU | drawMs 8–12 ms enquanto o quadro levava 80–124 ms | Corrigido nesta rodada (intervalo do rAF) |
-| Média | Trocar de bucket de zoom reconstrói ~90 sprites no mesmo quadro (47–81 ms) | Cache de 400 entradas bate o teto em batalhas longas | Parcial (aquecimento ocioso e fallback) |
-| Média | Explosão de capital vira um disco opaco de fumaça e some em 1,3 s | Fumaça desenhada por cima dos destroços | Corrigido nesta rodada |
-| Média | Estrelas desenhadas uma a uma por quadro: fundo custa 10× mais no zoom longe | 3,07 ms = 26 % do desenho em 6v6 | Corrigido nesta rodada (camadas em tiles) |
+| Média | Trocar de bucket de zoom reconstrói ~90 sprites no mesmo quadro (47–81 ms) | Cache de 400 entradas bate o teto em batalhas longas | Proposto |
+| Média | Explosão de capital vira um disco opaco de fumaça e some em 1,3 s | Fumaça desenhada por cima dos destroços | Proposto |
+| Média | Estrelas desenhadas uma a uma por quadro: fundo custa 10× mais no zoom longe | 3,07 ms = 26 % do desenho em 6v6 | Proposto |
 | Média | Câmera livre volta sozinha para automática após 6 s, sem aviso | `freeUntil = now + 6000` | Corrigido nesta rodada (fica livre até "CÂMERA AUTO"; chip "câmera livre") |
 | Média | Câmera automática não enquadra 6v6 em 720p e um retardatário afasta tudo | 38 de 335 naves fora da tela; zoom caiu de 0,93 a 0,58 com a luta parada | Corrigido nesta rodada (zoom mínimo pelo mundo; bbox só de naves engajadas) |
-| Baixa | Planeta pode ter a cor de uma facção e cobrir metade da arena | Lúmen lutando sobre planeta roxo | Corrigido nesta rodada |
+| Baixa | Planeta pode ter a cor de uma facção e cobrir metade da arena | Lúmen lutando sobre planeta roxo | Proposto |
 | Baixa | Paleta Ferrix some no fundo em zoom médio | L* 12–27 contra #05070c | Corrigido nesta rodada |
 | Baixa | `ctx.font` reatribuído a cada quadro com tamanho fracionário (0,3 ms); flag `quality.glow` morta | Passe de UI 2,38 ms no 6v6 | Corrigido nesta rodada |
 
@@ -269,22 +269,22 @@ falha é o resultado que chega ao jogador.
 | Média | Camada L5 inalcançável; L4 só nos últimos segundos | Limiares [0, .1, .25, .45, .65, .85]; morte súbita trava em 0,66 | Corrigido nesta rodada |
 | Média | 2,7 s de silêncio após o stinger de vitória; pad da derrota só aos 12 s | Render offline: 0,000 de 5,0 a 7,7 s | Corrigido nesta rodada |
 | Média | `cast.area` toca 150 ms de ruído sem envelope e corta seco | Maior salto de amostra em t+0,15 em todas as facções | Corrigido nesta rodada (+ `env()` blindado) |
-| Média | Com ~450 naves a mixagem vira uma parede: 68 % dos pedidos descartados, armas leves nunca soam | Pool preso em 24 vozes; morte 118 s de voz vs autocannon 0,3 s | Corrigido nesta rodada (mixagem por densidade, vagas reservadas) |
+| Média | Com ~450 naves a mixagem vira uma parede: 68 % dos pedidos descartados, armas leves nunca soam | Pool preso em 24 vozes; morte 118 s de voz vs autocannon 0,3 s | Proposto |
 | Média | Toque: contexto criado em `pointerdown` (não conta como ativação no toque) e o ouvinte é removido na primeira vez | Mitigação documentada mas não implementada | Corrigido nesta rodada |
-| Baixa | Impacto ignora a quantidade de dano; `shieldPct` nunca é passado | Tiro de defesa de ponto soa igual a railgun de 120 | Corrigido nesta rodada |
-| Baixa | O gesto de ativação não é testado de verdade (Chromium com autoplay liberado) | `--autoplay-policy=no-user-gesture-required` nos testes | Corrigido nesta rodada |
+| Baixa | Impacto ignora a quantidade de dano; `shieldPct` nunca é passado | Tiro de defesa de ponto soa igual a railgun de 120 | Parcial (volume pelo dano; `shieldPct` proposto) |
+| Baixa | O gesto de ativação não é testado de verdade (Chromium com autoplay liberado) | `--autoplay-policy=no-user-gesture-required` nos testes | Proposto |
 | Baixa | Som duplo no botão "+" do construtor; lacunas (vender, aviso, lobby, início da batalha) | `ui.buy` + `ui.click` simultâneos | Corrigido nesta rodada |
-| Baixa | Mudo/segundo plano mantém o grafo e o agendador rodando (bateria) | — | Corrigido nesta rodada |
-| Baixa | Documento de design descreve o que não existe (motivo do time vencedor, retry de resume) | — | Corrigido nesta rodada |
+| Baixa | Mudo/segundo plano mantém o grafo e o agendador rodando (bateria) | — | Proposto |
+| Baixa | Documento de design descreve o que não existe (motivo do time vencedor, retry de resume) | — | Parcial (fórmula e limiares sincronizados) |
 
 ### Propostas
 
 | Impacto | Esf. | Proposta |
 |---|---|---|
 | Alto | M | **Fanfarra de início e camada "aproximação"** para os 10 s silenciosos antes do contato (hat em semicolcheias, varredura de filtro no pad). |
-| Alto | M | **Remix com ducking em dois sentidos**: SFX cedem até −3 dB quando a trilha está em L3+, −6 dB durante stingers e alarme de morte súbita. Base feita nesta rodada. |
+| Alto | M | **Remix com ducking em dois sentidos**: SFX cedem até −3 dB quando a trilha está em L3+, −6 dB durante stingers e alarme de morte súbita. Volumes padrão remixados nesta rodada; o ducking dinâmico fica para a próxima. |
 | Alto | P | **Intensidade com termo de densidade de ação** (feito nesta rodada). |
-| Alto | M | **Mixagem consciente da densidade em escala**: camada "rugido de batalha", vagas reservadas, variantes de salva, +1,5 dB para as naves do jogador. Base feita nesta rodada. |
+| Alto | M | **Mixagem consciente da densidade em escala**: camada "rugido de batalha", vagas reservadas, variantes de salva, +1,5 dB para as naves do jogador. |
 | Médio | M | **Temas completos de vitória e derrota** com resolução em ré maior usando o motivo da facção; tique de "MVP revelado". |
 | Médio | P | **Impactos por tipo de dano** (clang cinético, chiado de energia, baque explosivo) e variante "crítico". Base feita nesta rodada. |
 | Médio | P | **Motivos de facção como feedback**: motivo do time que está vencendo a cada 4 compassos; variante de perigo abaixo de 40 %; fragmento no lobby ao marcar "pronto". |
@@ -318,15 +318,15 @@ de batimento cardíaco no servidor.
 
 | Grav. | Problema | Evidência | Status |
 |---|---|---|---|
-| Alta | Conexão perdida na batalha é terminal: sem botão de reconectar nem nova tentativa, enquanto o servidor guarda o assento por 60 s | Após 5 tentativas (~11,5 s) o status fica "lost" para sempre; "SAIR" reconecta por acidente | Corrigido nesta rodada (tentativas durante toda a janela, evento `online`, botão "Reconectar") |
+| Alta | Conexão perdida na batalha é terminal: sem botão de reconectar nem nova tentativa, enquanto o servidor guarda o assento por 60 s | Após 5 tentativas (~11,5 s) o status fica "lost" para sempre; "SAIR" reconecta por acidente | Corrigido nesta rodada (tentativas durante toda a janela, evento `online`, botão "Reconectar" no HUD) |
 | Alta | Voltar depois de atualizar a página só funciona com `?sala=` na URL; o anfitrião cai na tela vazia do multijogador | O token continua válido, mas nada o usa | Corrigido nesta rodada (código da sala guardado junto do token; retomada no boot) |
 | Alta | Duas abas com o mesmo token se derrubam a cada 500 ms para sempre | 16 conexões em 8 s; nenhuma aba mostra erro | Corrigido nesta rodada (código de fechamento 4001 tratado como terminal) |
-| Média | Sem batimento cardíaco nem expulsão: jogador sumido ou ausente bloqueia início e revanche | Socket pausado continua "conectado" após 45 s; não há `kick` | Corrigido nesta rodada (ping/pong, expulsar, iniciar com bots no lugar) |
+| Média | Sem batimento cardíaco nem expulsão: jogador sumido ou ausente bloqueia início e revanche | Socket pausado continua "conectado" após 45 s; não há `kick` | Parcial (batimento cardíaco ping/pong feito; expulsar e iniciar com bots no lugar propostos) |
 | Média | Compressão por socket domina a CPU do servidor | Mesmo quadro de 8,4 KB comprimido separadamente para cada socket | Proposto (P5: quadros binários com delta) |
 | Média | Banda de 20 KB/s por cliente em 6v6: snapshot completo de todas as naves a 10 Hz | 26,5 KB de `battle_start`; ~5 MB por batalha no celular | Proposto (P5) |
 | Média | Resultados pulam para o lobby quando o socket do adversário pisca depois do voto de revanche | Fase vai de resultados a lobby em 200 ms sem o voto do outro | Corrigido nesta rodada |
 | Baixa | Latência no lobby nunca atualiza ("0 ms" preso) | Só renderiza em pushes da sala; primeiro ping aos 5 s | Corrigido nesta rodada |
-| Baixa | Promessas de pedido resolvem em qualquer push da sala ("Frota enviada" antes da rejeição) | Corrida realista em lobbies de 12 | Corrigido nesta rodada (ack por `rid`) |
+| Baixa | Promessas de pedido resolvem em qualquer push da sala ("Frota enviada" antes da rejeição) | Corrida realista em lobbies de 12 | Proposto |
 | Baixa | Limite de 4 salas por endereço vira "A sala está cheia." ao criar | Detalhe `address` não mapeado | Corrigido nesta rodada (mensagem própria; limites 64/8) |
 | Baixa | Nomes aceitam caracteres bidi/zero-width e duplicados | '‮evil' aceito; "Alice / Alice" | Corrigido nesta rodada |
 | Baixa | Deploy ou reinício mata todas as batalhas na hora | `closeAll` no SIGTERM com `autoDeploy: true` | Corrigido nesta rodada (drenagem com espera limitada) |
@@ -365,12 +365,12 @@ duas); uma habilidade toca 4 arquivos; uma facção toca ~14 arquivos sem teste 
 
 | Grav. | Problema | Evidência | Status |
 |---|---|---|---|
-| Média | SPEC e ARCHITECTURE descrevem coisas que o código já não faz | Stagger por id vs por slot; `teamThink` no mesmo tick; limite de 10 ms vs teste de 25 ms; árvore de arquivos incompleta; contrato do renderer sem `onEnd`/`viewport` | Corrigido nesta rodada (+ teste de sincronia de docs) |
+| Média | SPEC e ARCHITECTURE descrevem coisas que o código já não faz | Stagger por id vs por slot; `teamThink` no mesmo tick; limite de 10 ms vs teste de 25 ms; árvore de arquivos incompleta; contrato do renderer sem `onEnd`/`viewport` | Parcial (textos sincronizados; teste de sincronia proposto) |
 | Média | `BattleStartInfo` montado em três cópias independentes (servidor, runner local, worker) | Já divergem no `ai` padrão | Corrigido nesta rodada (`makeStartInfo` compartilhado) |
 | Média | Sem fixture dourada da simulação: uma mudança de resultado passa em silêncio | `hashState` só é usado em testes de reprodutibilidade | Corrigido nesta rodada (`test/sim/golden.test.js` com `--update`) |
-| Média | Telas, HUD, câmera e pipeline de render sem testes; e2e cobre só 4 fluxos | ~2.500 linhas sem importação em teste | Parcial (casos e2e de multiplayer; HUD/câmera propostos) |
+| Média | Telas, HUD, câmera e pipeline de render sem testes; e2e cobre só 4 fluxos | ~2.500 linhas sem importação em teste | Proposto |
 | Baixa | Requisito de Node inconsistente (≥ 22 no package, ≥ 18 nos lançadores); tabela de variáveis do README incompleta | — | Corrigido nesta rodada |
-| Baixa | Helpers copiados (4 `loadPlaywright`, 2 servidores estáticos com tabelas MIME próprias, 3 relógios padrão, 4 `clamp`) | — | Corrigido nesta rodada (`tools/_lib.js`); resto proposto |
+| Baixa | Helpers copiados (4 `loadPlaywright`, 2 servidores estáticos com tabelas MIME próprias, 3 relógios padrão, 4 `clamp`) | — | Proposto |
 | Baixa | Validadores S2C mortos: o cliente nunca valida quadros recebidos | `parseMessage` só em testes | Corrigido nesta rodada |
 | Baixa | Reconectar durante a contagem regressiva deixa o cliente sem o overlay | `COUNTDOWN` só é enviado uma vez | Corrigido nesta rodada |
 | Baixa | Perfil de IA desconhecido vira silenciosamente a IA mais forte | `getAiProfile` cai em "especialista" | Corrigido nesta rodada (`validateConfig` rejeita) |
@@ -385,13 +385,13 @@ duas); uma habilidade toca 4 arquivos; uma facção toca ~14 arquivos sem teste 
 | Alto | P | **Teste de completude de conteúdo** (naves, habilidades, facções: sprite, efeito de cast, receita de áudio, paleta, motivo musical, presets e níveis referenciando ids existentes). Feito nesta rodada. |
 | Alto | M | **Replays compartilháveis** sobre a simulação determinística (`?replay=`, botão "Compartilhar batalha"; mesmo formato da fixture dourada). |
 | Médio | M | **Critérios de balanceamento da SPEC §8 como gate executável** (`npm run balance`, feito nesta rodada) no CI noturno. |
-| Médio | P | **`docs/ADDING_CONTENT.md`** com receitas passo a passo (feito nesta rodada). |
+| Médio | P | **`docs/ADDING_CONTENT.md`** com receitas passo a passo para nave, habilidade e facção. |
 | Médio | M | **e2e dos fluxos de multiplayer** (queda e retomada, revanche, espectador, migração de anfitrião, "Próximo nível", viewport de celular). Parte feita nesta rodada. |
 | Médio | P | **Lint + CI** com regra mecânica de determinismo (`no-restricted-globals` em `shared/sim`) e build Docker de fumaça. CI feito nesta rodada; lint pendente. |
-| Médio | P | **Unificar os bootstraps de Playwright/servidor estático** em `tools/_lib.js` (feito nesta rodada). |
+| Médio | P | **Unificar os bootstraps de Playwright/servidor estático** em `tools/_lib.js`. |
 | Médio | P | **Galeria mostra quando cada habilidade dispara** a partir de um campo `when` único no catálogo, gerando também a tabela da SPEC. |
 | Baixo | M | **Dividir os três módulos maiores** (`room.js` 882 linhas, `sprites.js` 914, `effects.js` 852) pelas costuras naturais. |
-| Baixo | P | **Testes de sincronia de docs** (feito nesta rodada). |
+| Baixo | P | **Testes de sincronia de docs** (todo arquivo de `shared/` e `server/` citado na ARCHITECTURE; toda variável de ambiente no README). |
 | Baixo | P | **`FE_SUDDEN_DEATH_TICK`** exposto e todos os knobs `FE_*` documentados num só lugar. |
 | Baixo | P | **`npm run dev:mp`**: servidor + dois clientes já na mesma sala para desenvolver lobby/batalha/resultados. |
 
