@@ -82,8 +82,8 @@ export function mount(root, props, ctx) {
     } else add(allyWrap, h('div.small.muted', { text: T.sp.noAllies }));
   }
 
-  const diffSeg = segmented(DIFFICULTIES.map((d) => ({ value: d, label: difficultyName(d), test: `difficulty-${d}` })), { value: setup.difficulty, onChange: (v) => { setup.difficulty = v; renderLevels(); renderInfo(); } });
-  const sizeSeg = segmented(TEAM_SIZES.map((n) => ({ value: n, label: `${n}v${n}`, test: `teamsize-${n}` })), { value: setup.teamSize, onChange: (v) => { setup.teamSize = v; renderAllies(); } });
+  const diffSeg = segmented(DIFFICULTIES.map((d) => ({ value: d, label: difficultyName(d), test: `difficulty-${d}` })), { label: T.sp.difficulty, value: setup.difficulty, onChange: (v) => { setup.difficulty = v; renderLevels(); renderInfo(); } });
+  const sizeSeg = segmented(TEAM_SIZES.map((n) => ({ value: n, label: `${n}v${n}`, test: `teamsize-${n}` })), { label: T.sp.teamSize, value: setup.teamSize, onChange: (v) => { setup.teamSize = v; renderAllies(); } });
 
   const lastOk = state.lastFleet && validateFleet(state.lastFleet, DEFAULT_BUDGET).ok;
   const el = h('div.screen',

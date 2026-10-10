@@ -34,6 +34,7 @@ export function mount(root, props, ctx) {
   const el = h('div.screen',
     h('div.screen-head', h('div.titles', h('h1', { text: T.howto.title })), h('div.actions', button(T.app.back, { test: 'back', onClick: () => ctx.go('menu') }))),
     h('div.howto-steps', steps),
+    h('div.panel', { test: 'howto-controls' }, h('h3', { text: T.howto.controlsTitle }), h('dl.kv', T.howto.controls.map(([k, v]) => [h('dt', h('kbd', { text: k })), h('dd', { text: v })]).flat())),
     h('div.panel', { style: { marginTop: '12px' } }, h('h3', { text: T.howto.damageTitle }), h('div.tiny.muted', { style: { marginBottom: '8px' }, text: T.howto.damageHint }), h('div.table-wrap', matrix)),
     h('div.panel', h('h3', { text: T.howto.hullTypes }), h('dl.kv', FACTION_IDS.map((f) => [h('dt', { class: `f-${f}`, text: FACTIONS[f].short }), h('dd', `${HULL_TYPES[FACTIONS[f].hull].name}: ${HULL_TYPES[FACTIONS[f].hull].desc}`)]).flat())),
     h('div.panel', h('h3', { text: T.howto.sizesTitle }), h('div.table-wrap', sizes), h('div.tiny.muted', { style: { marginTop: '6px' }, text: `Máximo de ${FLEET_LIMITS.maxShips} naves por frota.` })),

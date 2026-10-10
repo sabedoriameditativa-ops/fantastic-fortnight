@@ -138,6 +138,7 @@ function defaultStorage() {
  * @param {Storage|null} [deps.storage]
  * @param {(fn:Function, ms:number)=>any} [deps.setInterval]
  * @param {(h:any)=>void} [deps.clearInterval]
+ * @param {(fn:Function, ms:number)=>any} [deps.setTimeout]
  * @param {Document|null} [deps.document]
  * @param {number|string} [deps.seed]   seed for the noise bank / music rng
  */
@@ -147,6 +148,7 @@ export function createAudioEngine(deps = {}) {
     storage: deps.storage !== undefined ? deps.storage : defaultStorage(),
     setInterval: deps.setInterval || ((fn, ms) => setInterval(fn, ms)),
     clearInterval: deps.clearInterval || ((h) => clearInterval(h)),
+    setTimeout: deps.setTimeout || ((fn, ms) => setTimeout(fn, ms)),
     document: deps.document !== undefined ? deps.document : (typeof document !== 'undefined' ? document : null),
     seed: deps.seed !== undefined ? deps.seed : (typeof Date !== 'undefined' ? Date.now() : 1),
   };
@@ -270,6 +272,8 @@ export function createAudioEngine(deps = {}) {
       buses.music.gain.setTargetAtTime(0, now, 0.1);
       music.pause();
       for (const b of beds) if (b) b.gain.gain.setTargetAtTime(0, now, 0.1);
+      // background tab: after the fade, suspend the context so no audio is rendered at all
+      D.setTimeout(() => { if (hidden) suspend(); }, 400);
     } else {
       music.resume();
       applySettings();
@@ -742,6 +746,9 @@ export function createAudioEngine(deps = {}) {
     settings.muted = !!b;
     saveSettings();
     applySettings();
+    // muted: once the fade is done, stop rendering the graph (battery on phones); unmute resumes
+    if (settings.muted) D.setTimeout(() => { if (settings.muted && !hidden) suspend(); }, 250);
+    else resume();
   }
 
   /** @returns {{ master:number, music:number, sfx:number, ui:number, muted:boolean }} */

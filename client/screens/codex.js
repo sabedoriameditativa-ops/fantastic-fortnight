@@ -92,7 +92,7 @@ export function mount(root, props, ctx) {
   const el = h('div.screen.wide',
     h('div.screen-head',
       h('div.titles', h('h1', { text: T.codex.title }), h('div.subtitle', { text: T.codex.subtitle })),
-      h('div.actions', segmented([{ value: 'all', label: T.codex.all, test: 'codex-all' }, ...FACTION_IDS.map((f) => ({ value: f, label: FACTIONS[f].short, test: `codex-faction-${f}` }))], { value: filter, onChange: (v) => { filter = v; renderGrid(); } }),
+      h('div.actions', segmented([{ value: 'all', label: T.codex.all, test: 'codex-all' }, ...FACTION_IDS.map((f) => ({ value: f, label: FACTIONS[f].short, test: `codex-faction-${f}` }))], { label: T.codex.faction, value: filter, onChange: (v) => { filter = v; renderGrid(); } }),
         button(T.app.back, { test: 'back', onClick: () => ctx.go('menu') })),
     ),
     body,

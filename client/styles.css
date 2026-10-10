@@ -203,6 +203,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .table tr.me td { background: rgba(53, 200, 255, 0.07); }
 .table tr.dead td { opacity: 0.55; }
 .table-wrap { overflow-x: auto; }
+@media (max-width: 640px) { .table-wrap { -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); mask-image: linear-gradient(90deg, #000 88%, transparent); } }
+kbd { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px; background: rgba(5, 7, 12, 0.6); }
 
 /* ---- menu ---- */
 .menu-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100%; gap: 22px; text-align: center; padding-top: 48px; }

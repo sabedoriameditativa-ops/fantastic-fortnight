@@ -346,6 +346,17 @@ export const T = {
 
   howto: {
     title: 'Como jogar',
+    controlsTitle: 'Controles na batalha',
+    controls: [
+      ['Espaço', 'começar / pausar e continuar (um jogador)'],
+      ['1 · 2 · 4', 'velocidade ×1, ×2, ×4 (um jogador; no multijogador o tempo é do servidor)'],
+      ['N', 'mostrar ou ocultar os nomes das naves'],
+      ['G', 'grade da arena'],
+      ['C', 'voltar à câmera automática'],
+      ['Esc', 'sair da batalha'],
+      ['Roda · arrastar · pinça', 'zoom e deslocamento da câmera (ela fica livre até você voltar à automática)'],
+      ['Clique ou toque numa nave', 'seguir a nave; duplo clique ou duplo toque volta à câmera automática'],
+    ],
     steps: [
       { title: '1. Escolha uma facção', text: 'Cada facção tem 8 naves, um tipo de casco e uma passiva. Terranos são blindados e disciplinados; Vorrax regeneram e vêm em número; Lúmen têm escudos enormes e cascos frágeis; Ferrix se reconstroem e atravessam blindagens.' },
       { title: '2. Monte a frota dentro do orçamento', text: 'Cada nave custa pontos. O orçamento padrão é 1500. Há limites por classe de tamanho (1 nave-mãe, 2 capitais, 4 grandes, 12 médias, 24 pequenas, 24 minúsculas — 32 para Vorrax) e no máximo 40 naves. Use as predefinições como ponto de partida.' },
