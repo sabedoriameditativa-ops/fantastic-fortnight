@@ -1,15 +1,11 @@
-# Separação dos repositórios
+# Repositórios separados — concluído em 19/10/2026
 
-A integração atual permanece em `fantastic-fortnight/portfolio`, sem remoção dos arquivos existentes.
+Criados como públicos após autorização do titular:
 
-Destinos propostos na conta `sabedoriameditativa-ops`:
+- [Portfólio Pedro Tiago](https://github.com/sabedoriameditativa-ops/pedro-tiago-portfolio): página principal, três demonstrações e documentação.
+- [Casa Âmbar](https://github.com/sabedoriameditativa-ops/casa-ambar-demo): código estático e instruções próprias.
+- [Corrida Neon](https://github.com/sabedoriameditativa-ops/corrida-neon): código jogável e instruções próprias.
 
-| Repositório | Conteúdo de origem |
-| --- | --- |
-| `pedro-tiago-portfolio` | Portfólio, estilos, interações e demonstrações integradas |
-| `casa-ambar-demo` | `portfolio/demo/casa-ambar/index.html` |
-| `corrida-neon` | `portfolio/projetos/corrida-neon/index.html` |
+A cópia histórica nesta pasta foi preservada. Para consultar a apresentação atual, use o repositório do portfólio acima. A publicação no ChatGPT Sites e os repositórios continuam sem sincronização automática.
 
-A conexão disponível permite escrever nos repositórios existentes, mas não oferece criação de repositório. A página de criação no navegador exige uma sessão GitHub própria, ainda não autenticada.
-
-Status: arquivos de cada projeto preparados; repositórios independentes ainda não criados. Após o login seguro, verificar disponibilidade dos nomes, criar os repositórios e transferir os arquivos. A publicação do site e o código já integrado continuam disponíveis no catálogo atual.
+Capturas de tela e revisão visual dos sites permanecem pendentes. Os quatro projetos locais não localizados na conta Sites atual continuam fora desta publicação.
