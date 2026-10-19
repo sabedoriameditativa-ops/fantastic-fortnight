@@ -291,3 +291,13 @@ o projeto não contém nem baixa nenhum arquivo de mídia. A única dependência
 runtime é o pacote `ws`. Textos da interface em português do Brasil.
 
 Licença: MIT.
+
+
+## Portfólio de Pedro Tiago
+
+Além do Frota Estelar, conheça os sites e jogos criados com apoio de IA:
+
+- [Catálogo, códigos e instruções](portfolio/README.md)
+- [Portfólio publicado e demonstrações](https://pedro-tiago-sites.sabedoriameditativa.chatgpt.site)
+
+A pasta `portfolio/` é independente do código do jogo nesta raiz.
